@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health
+from app.api import health, jobs, libraries
 from app.config import get_settings
 from app.db import create_pool, migrate
 
@@ -29,4 +29,5 @@ app = FastAPI(
     redoc_url=None,
     openapi_url="/api/openapi.json",
 )
-app.include_router(health.router, prefix="/api")
+for r in (health.router, libraries.router, jobs.router):
+    app.include_router(r, prefix="/api")

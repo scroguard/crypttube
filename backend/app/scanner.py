@@ -1,0 +1,410 @@
+"""Filesystem scanner: walks a library (or a subtree of one) and reconciles it with the DB.
+
+Guarantees:
+- Original media is only ever read (and is mounted read-only anyway).
+- Unchanged files (same path, size, mtime) cost zero DB round-trips and zero probes.
+- Files that vanish are soft-marked missing, never deleted, so user metadata survives
+  an unmounted drive or a file that is being moved.
+- Moved/renamed files are matched by (oshash, size) and keep their scene/image rows.
+- Files modified within `settle_seconds` are skipped (likely still being copied) and
+  reported back so the caller can schedule a delayed re-scan.
+"""
+
+import asyncio
+import fnmatch
+import logging
+import os
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import asyncpg
+
+from app import media
+from app.jobs import JobContext
+
+log = logging.getLogger(__name__)
+
+EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+BATCH = 64
+
+
+class ScanError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Entry:
+    path: str
+    size: int
+    mod_time: datetime
+    kind: str
+
+
+@dataclass
+class ScanStats:
+    new: int = 0
+    updated: int = 0
+    moved: int = 0
+    missing: int = 0
+    reappeared: int = 0
+    failed: int = 0
+    unsettled: int = 0
+    errors: list[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        parts = [f"{v} {k}" for k, v in vars(self).items() if k != "errors" and v]
+        return ", ".join(parts) or "no changes"
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    return path == root or path.is_relative_to(root)
+
+
+def walk(root: Path, library_root: Path, excludes: list[str], skip_dir: Path) -> list[Entry]:
+    """Collect media files under root. Runs in a worker thread."""
+    entries = []
+
+    def excluded(p: str) -> bool:
+        rel = os.path.relpath(p, library_root)
+        return any(fnmatch.fnmatch(rel, pat) for pat in excludes)
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith(".")
+            and not _is_within(Path(dirpath, d), skip_dir)
+            and not excluded(os.path.join(dirpath, d))
+        ]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            kind = media.classify(name)
+            if kind is None:
+                continue
+            path = os.path.join(dirpath, name)
+            if excluded(path):
+                continue
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue  # vanished between listdir and stat
+            mod_time = EPOCH + timedelta(microseconds=st.st_mtime_ns // 1000)
+            entries.append(Entry(path, st.st_size, mod_time, kind))
+    return entries
+
+
+class Scanner:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        generated_dir: Path,
+        *,
+        ctx: JobContext | None = None,
+        settle_seconds: float = 10,
+        probe_concurrency: int = 4,
+    ):
+        self.pool = pool
+        self.generated_dir = generated_dir
+        self.ctx = ctx
+        self.settle_seconds = settle_seconds
+        self.sem = asyncio.Semaphore(probe_concurrency)
+        self.stats = ScanStats()
+        self._folder_galleries: dict[str, int] = {}
+        self._folder_locks: dict[str, asyncio.Lock] = {}
+        self._affected_galleries: set[int] = set()
+
+    async def scan(self, library_id: int, subpath: str | None = None) -> ScanStats:
+        lib = await self.pool.fetchrow("SELECT * FROM library_paths WHERE id = $1", library_id)
+        if lib is None:
+            raise ScanError(f"library {library_id} does not exist")
+        lib_root = Path(lib["path"])
+        # Refuse to reconcile against an absent root: an unmounted drive would
+        # otherwise look like every file was deleted.
+        if not lib_root.is_dir():
+            raise ScanError(f"library path {lib_root} is not available")
+
+        root = Path(subpath) if subpath else lib_root
+        if not _is_within(root, lib_root):
+            raise ScanError(f"{root} is outside library {lib_root}")
+
+        entries = await asyncio.to_thread(
+            walk, root, lib_root, list(lib["exclude_patterns"]), self.generated_dir
+        )
+        existing = {
+            r["path"]: r
+            for r in await self.pool.fetch(
+                """SELECT id, path, size, mod_time, missing_since FROM files
+                   WHERE library_id = $1 AND zip_file_id IS NULL
+                     AND (path = $2 OR starts_with(path, $3))""",
+                library_id, str(root), str(root).rstrip("/") + "/",
+            )
+        }
+
+        settle_cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.settle_seconds)
+        seen = {e.path for e in entries}
+        vanished = [r for p, r in existing.items() if p not in seen]
+        new, changed, reappeared = [], [], []
+        for e in entries:
+            if e.mod_time > settle_cutoff:
+                self.stats.unsettled += 1
+                continue
+            row = existing.get(e.path)
+            if row is None:
+                new.append(e)
+            elif row["size"] != e.size or row["mod_time"] != e.mod_time:
+                changed.append((e, row["id"]))
+            elif row["missing_since"] is not None:
+                reappeared.append(row["id"])
+
+        if reappeared:
+            await self.pool.execute(
+                "UPDATE files SET missing_since = NULL WHERE id = ANY($1)", reappeared
+            )
+            self.stats.reappeared = len(reappeared)
+
+        new_hashed = await self._hash_all(new)
+        moved = await self._match_moves(new_hashed, vanished, library_id)
+        new_hashed = [(e, h) for e, h in new_hashed if e.path not in moved]
+
+        still_vanished = [
+            r["id"] for r in vanished
+            if r["missing_since"] is None and r["id"] not in moved.values()
+        ]
+        if still_vanished:
+            await self.pool.execute(
+                "UPDATE files SET missing_since = now() WHERE id = ANY($1)", still_vanished
+            )
+            self.stats.missing = len(still_vanished)
+
+        by_path = {e.path: e for e in entries}
+        work = (
+            [(e, None, "new") for e, _ in new_hashed]
+            + [(e, fid, "updated") for e, fid in changed]
+            + [(by_path[p], fid, "moved") for p, fid in moved.items()]
+        )
+        hashes = {e.path: h for e, h in new_hashed}
+        total = len(work)
+        for i in range(0, total, BATCH):
+            if self.ctx and await self.ctx.cancelled():
+                break
+            await asyncio.gather(*(
+                self._process(e, fid, library_id, lib["create_folder_galleries"], hashes.get(e.path), how)
+                for e, fid, how in work[i:i + BATCH]
+            ))
+            if self.ctx:
+                await self.ctx.progress(min(1.0, (i + BATCH) / total), f"processed {min(total, i + BATCH)}/{total}")
+
+        await self._finalize_galleries()
+        return self.stats
+
+    async def _hash_all(self, entries: list[Entry]) -> list[tuple[Entry, str | None]]:
+        async def one(e: Entry):
+            try:
+                return e, await asyncio.to_thread(media.oshash, e.path)
+            except OSError:
+                return e, None
+        return list(await asyncio.gather(*(one(e) for e in entries)))
+
+    async def _match_moves(self, new_hashed, vanished, library_id) -> dict[str, int]:
+        """Pair new paths with vanished/missing files that have the same content hash."""
+        hashes = [h for _, h in new_hashed if h]
+        if not hashes:
+            return {}
+        candidates = await self.pool.fetch(
+            """SELECT id, size, oshash FROM files
+               WHERE zip_file_id IS NULL AND oshash = ANY($1)
+                 AND (missing_since IS NOT NULL OR id = ANY($2))""",
+            hashes, [r["id"] for r in vanished],
+        )
+        pool: dict[tuple[str, int], list[int]] = {}
+        for c in candidates:
+            pool.setdefault((c["oshash"], c["size"]), []).append(c["id"])
+        moved = {}
+        for e, h in new_hashed:
+            ids = pool.get((h, e.size))
+            if ids:
+                fid = ids.pop()
+                await self.pool.execute(
+                    """UPDATE files SET path = $2, library_id = $3, mod_time = $4, missing_since = NULL
+                       WHERE id = $1""",
+                    fid, e.path, library_id, e.mod_time,
+                )
+                moved[e.path] = fid
+        return moved
+
+    async def _process(self, e: Entry, file_id, library_id, folder_galleries, oshash, how):
+        try:
+            async with self.sem:
+                if how == "updated":
+                    oshash = await asyncio.to_thread(media.oshash, e.path)
+                if e.kind == "video":
+                    probe = media.parse_video_probe(await media.ffprobe(e.path))
+                elif e.kind == "image":
+                    probe = await asyncio.to_thread(media.probe_image, e.path)
+                else:
+                    probe = await asyncio.to_thread(media.read_archive, e.path)
+            async with self.pool.acquire() as conn, conn.transaction():
+                if file_id is None:
+                    file_id = await conn.fetchval(
+                        """INSERT INTO files (library_id, path, size, mod_time, oshash)
+                           VALUES ($1, $2, $3, $4, $5) RETURNING id""",
+                        library_id, e.path, e.size, e.mod_time, oshash,
+                    )
+                elif how == "updated":
+                    await conn.execute(
+                        """UPDATE files SET size = $2, mod_time = $3, oshash = $4, missing_since = NULL
+                           WHERE id = $1""",
+                        file_id, e.size, e.mod_time, oshash,
+                    )
+                if e.kind == "video":
+                    await self._upsert_scene(conn, file_id, probe)
+                elif e.kind == "image":
+                    await self._upsert_image(conn, file_id, e.path, probe, folder_galleries)
+                else:
+                    await self._upsert_archive(conn, file_id, library_id, e, probe)
+            setattr(self.stats, how, getattr(self.stats, how) + 1)
+        except (media.ProbeError, OSError, ValueError, asyncpg.PostgresError) as exc:
+            self._record_failure(e, exc)
+
+    def _record_failure(self, e: Entry, exc: Exception) -> None:
+        log.warning("failed to index %s: %s", e.path, exc)
+        self.stats.failed += 1
+        if len(self.stats.errors) < 20:
+            self.stats.errors.append(f"{e.path}: {exc}")
+
+    async def _upsert_scene(self, conn, file_id: int, p: dict) -> None:
+        await conn.execute(
+            """INSERT INTO scenes (file_id, duration, width, height, framerate, bitrate,
+                                   video_codec, audio_codec, container)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+               ON CONFLICT (file_id) DO UPDATE SET
+                   duration = EXCLUDED.duration, width = EXCLUDED.width, height = EXCLUDED.height,
+                   framerate = EXCLUDED.framerate, bitrate = EXCLUDED.bitrate,
+                   video_codec = EXCLUDED.video_codec, audio_codec = EXCLUDED.audio_codec,
+                   container = EXCLUDED.container""",
+            file_id, p["duration"], p["width"], p["height"], p["framerate"], p["bitrate"],
+            p["video_codec"], p["audio_codec"], p["container"],
+        )
+
+    async def _upsert_image(self, conn, file_id, path, info: media.ImageInfo, folder_galleries) -> None:
+        image_id = await conn.fetchval(
+            """INSERT INTO images (file_id, width, height, format) VALUES ($1, $2, $3, $4)
+               ON CONFLICT (file_id) DO UPDATE SET
+                   width = EXCLUDED.width, height = EXCLUDED.height, format = EXCLUDED.format
+               RETURNING id""",
+            file_id, info.width, info.height, info.format,
+        )
+        if not folder_galleries:
+            return
+        gallery_id = await self._folder_gallery(os.path.dirname(path))
+        # A moved image leaves its old folder gallery.
+        old = await conn.fetch(
+            """DELETE FROM gallery_images gi USING galleries g
+               WHERE gi.image_id = $1 AND gi.gallery_id = g.id
+                 AND g.folder_path IS NOT NULL AND g.id <> $2
+               RETURNING gi.gallery_id""",
+            image_id, gallery_id,
+        )
+        await conn.execute(
+            "INSERT INTO gallery_images (gallery_id, image_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            gallery_id, image_id,
+        )
+        self._affected_galleries.update([gallery_id, *(r["gallery_id"] for r in old)])
+
+    async def _folder_gallery(self, folder: str) -> int:
+        """Get or create the gallery for a folder. Runs in its own autocommit statement
+        under a per-folder lock: concurrent image transactions would otherwise race on
+        the insert, and the loser's snapshot can't see the winner's row."""
+        if folder in self._folder_galleries:
+            return self._folder_galleries[folder]
+        async with self._folder_locks.setdefault(folder, asyncio.Lock()):
+            if folder not in self._folder_galleries:
+                gallery_id = await self.pool.fetchval(
+                    """INSERT INTO galleries (folder_path, title) VALUES ($1, $2)
+                       ON CONFLICT (folder_path) DO NOTHING RETURNING id""",
+                    folder, os.path.basename(folder),
+                ) or await self.pool.fetchval("SELECT id FROM galleries WHERE folder_path = $1", folder)
+                self._folder_galleries[folder] = gallery_id
+        return self._folder_galleries[folder]
+
+    async def _upsert_archive(self, conn, zip_file_id, library_id, e: Entry, probe) -> None:
+        members, bad = probe
+        self.stats.failed += bad
+        gallery_id = await conn.fetchval(
+            """WITH ins AS (
+                   INSERT INTO galleries (zip_file_id, title) VALUES ($1, $2)
+                   ON CONFLICT (zip_file_id) DO NOTHING RETURNING id)
+               SELECT id FROM ins UNION ALL SELECT id FROM galleries WHERE zip_file_id = $1
+               LIMIT 1""",
+            zip_file_id, Path(e.path).stem,
+        )
+        existing = {
+            r["path"]: r["id"]
+            for r in await conn.fetch("SELECT id, path FROM files WHERE zip_file_id = $1", zip_file_id)
+        }
+        current = {m.path for m in members}
+        gone = [fid for p, fid in existing.items() if p not in current]
+        if gone:
+            await conn.execute("DELETE FROM files WHERE id = ANY($1)", gone)
+        for m in members:
+            member_file_id = existing.get(m.path)
+            if member_file_id is None:
+                member_file_id = await conn.fetchval(
+                    """INSERT INTO files (library_id, zip_file_id, path, size, mod_time)
+                       VALUES ($1, $2, $3, $4, $5) RETURNING id""",
+                    library_id, zip_file_id, m.path, m.size, e.mod_time,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE files SET size = $2, mod_time = $3 WHERE id = $1",
+                    member_file_id, m.size, e.mod_time,
+                )
+            image_id = await conn.fetchval(
+                """INSERT INTO images (file_id, width, height, format) VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (file_id) DO UPDATE SET
+                       width = EXCLUDED.width, height = EXCLUDED.height, format = EXCLUDED.format
+                   RETURNING id""",
+                member_file_id, m.info.width, m.info.height, m.info.format,
+            )
+            await conn.execute(
+                "INSERT INTO gallery_images (gallery_id, image_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                gallery_id, image_id,
+            )
+        self._affected_galleries.add(gallery_id)
+
+    async def _finalize_galleries(self) -> None:
+        """Order filesystem-backed galleries by natural filename, pick a cover, drop empties."""
+        ids = list(self._affected_galleries)
+        if not ids:
+            return
+        async with self.pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                """UPDATE gallery_images gi SET position = o.rn
+                   FROM (SELECT gi2.gallery_id, gi2.image_id,
+                                row_number() OVER (PARTITION BY gi2.gallery_id
+                                                   ORDER BY f.path COLLATE natural_sort) AS rn
+                         FROM gallery_images gi2
+                         JOIN images i ON i.id = gi2.image_id
+                         JOIN files f ON f.id = i.file_id
+                         WHERE gi2.gallery_id = ANY($1)) o
+                   WHERE gi.gallery_id = o.gallery_id AND gi.image_id = o.image_id
+                     AND gi.position IS DISTINCT FROM o.rn""",
+                ids,
+            )
+            await conn.execute(
+                """DELETE FROM galleries
+                   WHERE id = ANY($1) AND image_count = 0
+                     AND (folder_path IS NOT NULL OR zip_file_id IS NOT NULL)""",
+                ids,
+            )
+            await conn.execute(
+                """UPDATE galleries g SET cover_image_id = (
+                       SELECT image_id FROM gallery_images
+                       WHERE gallery_id = g.id ORDER BY position, image_id LIMIT 1)
+                   WHERE g.id = ANY($1)
+                     AND (g.cover_image_id IS NULL OR NOT EXISTS (
+                         SELECT 1 FROM gallery_images
+                         WHERE gallery_id = g.id AND image_id = g.cover_image_id))""",
+                ids,
+            )

@@ -54,7 +54,7 @@ async def test_gallery_image_count_maintained(conn):
         img = await conn.fetchval("INSERT INTO images (file_id) VALUES ($1) RETURNING id", f)
         await conn.execute("INSERT INTO gallery_images VALUES ($1, $2, $3)", gallery, img, i)
     assert await conn.fetchval("SELECT image_count FROM galleries WHERE id = $1", gallery) == 3
-    await conn.execute("DELETE FROM images WHERE id = (SELECT min(id) FROM images)")
+    await conn.execute("DELETE FROM images WHERE id = $1", img)
     assert await conn.fetchval("SELECT image_count FROM galleries WHERE id = $1", gallery) == 2
 
 

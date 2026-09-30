@@ -1,5 +1,22 @@
 name: goon-streamer
 
+x-backend: &backend
+  build:
+    context: ./backend
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+  environment:
+    DATABASE_URL: postgresql://${POSTGRES_USER:-goon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-goon}
+    GENERATED_DIR: /data/generated
+    MEDIA_DIR: /media
+    WATCHER_POLLING: ${WATCHER_POLLING:-false}
+  volumes:
+    - ${MEDIA_ROOT:-./media}:/media:ro
+    - ${GENERATED_ROOT:-./data/generated}:/data/generated
+  networks: [backend]
+
 services:
   db:
     image: postgres:17-alpine
@@ -33,22 +50,16 @@ services:
     # No published ports: the database is reachable only from the backend network.
 
   api:
-    build:
-      context: ./backend
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-goon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-goon}
-      GENERATED_DIR: /data/generated
-      MEDIA_DIR: /media
-    volumes:
-      - ${MEDIA_ROOT:-./media}:/media:ro
-      - ${GENERATED_ROOT:-./data/generated}:/data/generated
-    networks: [backend]
+    <<: *backend
     ports:
       - "127.0.0.1:${API_PORT:-8420}:8000"
+
+  # Scans, file watching and (later) ffmpeg generation. Single instance: the
+  # watcher and stale-job recovery assume one worker.
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    stop_grace_period: 30s
 
 networks:
   backend:
