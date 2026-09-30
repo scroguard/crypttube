@@ -59,6 +59,10 @@ class ScanStats:
         return ", ".join(parts) or "no changes"
 
 
+def _stem(path: str) -> str:
+    return os.path.splitext(os.path.basename(path))[0]
+
+
 def _is_within(path: Path, root: Path) -> bool:
     return path == root or path.is_relative_to(root)
 
@@ -260,7 +264,7 @@ class Scanner:
                         file_id, e.size, e.mod_time, oshash,
                     )
                 if e.kind == "video":
-                    scene_id = await self._upsert_scene(conn, file_id, probe)
+                    scene_id = await self._upsert_scene(conn, file_id, e.path, probe)
                     if how != "moved":
                         self.stats.scene_ids.append(scene_id)
                 elif e.kind == "image":
@@ -277,11 +281,12 @@ class Scanner:
         if len(self.stats.errors) < 20:
             self.stats.errors.append(f"{e.path}: {exc}")
 
-    async def _upsert_scene(self, conn, file_id: int, p: dict) -> int:
+    async def _upsert_scene(self, conn, file_id: int, path: str, p: dict) -> int:
+        # Title defaults to the filename on first index only; later scans never touch it.
         return await conn.fetchval(
             """INSERT INTO scenes (file_id, duration, width, height, framerate, bitrate,
-                                   video_codec, audio_codec, container)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                                   video_codec, audio_codec, container, title)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                ON CONFLICT (file_id) DO UPDATE SET
                    duration = EXCLUDED.duration, width = EXCLUDED.width, height = EXCLUDED.height,
                    framerate = EXCLUDED.framerate, bitrate = EXCLUDED.bitrate,
@@ -289,16 +294,16 @@ class Scanner:
                    container = EXCLUDED.container
                RETURNING id""",
             file_id, p["duration"], p["width"], p["height"], p["framerate"], p["bitrate"],
-            p["video_codec"], p["audio_codec"], p["container"],
+            p["video_codec"], p["audio_codec"], p["container"], _stem(path),
         )
 
     async def _upsert_image(self, conn, file_id, path, info: media.ImageInfo, folder_galleries) -> None:
         image_id = await conn.fetchval(
-            """INSERT INTO images (file_id, width, height, format) VALUES ($1, $2, $3, $4)
+            """INSERT INTO images (file_id, width, height, format, title) VALUES ($1, $2, $3, $4, $5)
                ON CONFLICT (file_id) DO UPDATE SET
                    width = EXCLUDED.width, height = EXCLUDED.height, format = EXCLUDED.format
                RETURNING id""",
-            file_id, info.width, info.height, info.format,
+            file_id, info.width, info.height, info.format, _stem(path),
         )
         if not folder_galleries:
             return
@@ -366,11 +371,11 @@ class Scanner:
                     member_file_id, m.size, e.mod_time,
                 )
             image_id = await conn.fetchval(
-                """INSERT INTO images (file_id, width, height, format) VALUES ($1, $2, $3, $4)
+                """INSERT INTO images (file_id, width, height, format, title) VALUES ($1, $2, $3, $4, $5)
                    ON CONFLICT (file_id) DO UPDATE SET
                        width = EXCLUDED.width, height = EXCLUDED.height, format = EXCLUDED.format
                    RETURNING id""",
-                member_file_id, m.info.width, m.info.height, m.info.format,
+                member_file_id, m.info.width, m.info.height, m.info.format, _stem(m.path),
             )
             await conn.execute(
                 "INSERT INTO gallery_images (gallery_id, image_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",

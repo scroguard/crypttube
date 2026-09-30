@@ -11,7 +11,7 @@ import traceback
 
 import asyncpg
 
-from app import generated, jobs
+from app import counts, generated, jobs
 from app.config import Settings, get_settings
 from app.db import create_pool, migrate
 from app.media import ProbeError
@@ -56,10 +56,12 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
         for err in stats.errors:
             log.warning("scan error: %s", err)
 
-    # Scan -> generate is the only direction: generation never enqueues scans.
+    # Scan -> generate / refresh_counts only; neither of those enqueues anything.
     scene_ids = [i for s in results for i in s.scene_ids]
     if scene_ids:
         await jobs.enqueue(pool, "generate", {"scene_ids": scene_ids})
+    if any(s.summary() != "no changes" for s in results):
+        await counts.request_refresh(pool)
 
     total = ScanStats()
     for s in results:
@@ -119,7 +121,12 @@ async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobC
     return f"{made} generated" + (f", {failed} failed" if failed else "")
 
 
-HANDLERS = {"scan": handle_scan, "generate": handle_generate}
+async def handle_refresh_counts(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+    viewers = await counts.refresh(pool)
+    return f"refreshed counts for {viewers} viewer(s)"
+
+
+HANDLERS = {"scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts}
 
 
 async def run_one(pool: asyncpg.Pool, settings: Settings) -> bool:
@@ -170,6 +177,7 @@ async def main() -> None:
     await migrate(pool)
     await jobs.recover_stale(pool)
     await jobs.prune(pool)
+    await counts.request_refresh(pool)  # cheap; guarantees the cache exists after upgrades
 
     stop, wake = asyncio.Event(), asyncio.Event()
     loop = asyncio.get_running_loop()

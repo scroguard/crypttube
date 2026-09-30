@@ -63,6 +63,35 @@ keeps shared proxies from caching anything.
 
 Scans queue asset generation for new/changed videos in the worker.
 
+## Browse API
+
+`GET /api/{scenes,galleries,images,performers,studios,tags}` and `/{id}` for details;
+`GET /api/galleries/{id}/images` in gallery order. Lists take `limit` (≤200), `sort`,
+`desc`, `cursor` (from `next_cursor`), `with_total`, `thumb_w`, plus filters (`q`,
+`tag_ids` + `tag_mode=all|any` + `include_sub_tags`, `exclude_tag_ids`, `performer_ids`,
+`studio_ids` + `include_sub_studios`, `rating_min`, `organized`, scene-only
+`duration_min/max`, `height_min`, `date_from/to`, `played`, `file_status`).
+Unknown parameters are rejected (422).
+
+How it stays fast (`python -m scripts.bench_browse` measures it on 200k scenes):
+
+- **Keyset pagination** with an index on exactly `(sort expression, id)` for every
+  sort; page 1,000 costs the same as page 1. A test fails if a sort loses its index.
+- **One round-trip per list**: the page is selected first, then studio/performers/tags
+  are aggregated with `jsonb_agg` for just those rows via LATERAL joins.
+- **Denormalized `tag_ids`/`performer_ids` arrays** (trigger-maintained from the link
+  tables) make ACL checks and tag filters per-row operations.
+- **Tag/studio trees are expanded before the query** and plans are always made for the
+  actual parameter values, so the planner knows how selective a filter is.
+- **Entity counts are cached** (`entity_counts`, per viewer) and refreshed by a debounced
+  worker job after scans/edits, instead of counting thousands of rows per page.
+
+## Access control
+
+Per-user deny rules (`user_hidden_tags/studios/performers`) are expanded once per
+request (sub-tags, child studios, performers carrying a hidden tag) and enforced inside
+every list/detail query; hidden items 404 and don't appear in counts.
+
 ## Design invariants: no feedback loops
 
 Automated components must never be able to trigger each other indefinitely.
@@ -77,8 +106,9 @@ Every new automated behaviour must preserve these rules:
    is enqueued; at most one scan per key is queued, and the same key never runs twice
    concurrently.
 3. **Jobs don't spawn unbounded jobs.** A scan may enqueue generation jobs; generation
-   jobs never enqueue scans. The only self-re-enqueue is a delayed re-scan while files
-   are still being written, which stops once they settle.
+   jobs never enqueue scans, and `refresh_counts` enqueues nothing. The only
+   self-re-enqueue is a delayed re-scan while files are still being written, which
+   stops once they settle.
 4. **Database triggers are non-recursive.** Triggers only update denormalized columns
    on *other* tables that carry no triggers back (e.g. `gallery_images` -> `galleries.image_count`).
 5. **Plugins/hooks (later) run with a depth guard.** Actions caused by a hook carry

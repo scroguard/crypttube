@@ -65,3 +65,29 @@ async def test_updated_at_trigger(conn):
     await conn.execute("UPDATE tags SET name = 't2', updated_at = '2000-01-01' WHERE id = $1", tid)
     after = await conn.fetchval("SELECT updated_at FROM tags WHERE id = $1", tid)
     assert after == before  # trigger overrode the explicit old timestamp with now()
+
+
+async def test_link_arrays_follow_link_tables(conn):
+    lib = await conn.fetchval("INSERT INTO library_paths (path) VALUES ('/media/arr') RETURNING id")
+    scenes = []
+    for i in range(2):
+        f = await conn.fetchval(
+            "INSERT INTO files (library_id, path, size, mod_time) VALUES ($1, $2, 1, now()) RETURNING id",
+            lib, f"/media/arr/{i}.mp4")
+        scenes.append(await conn.fetchval("INSERT INTO scenes (file_id) VALUES ($1) RETURNING id", f))
+    a, b, c = [await _tag(conn, n) for n in ("ta", "tb", "tc")]
+
+    async def arrays():
+        return [list(r["tag_ids"]) for r in await conn.fetch(
+            "SELECT tag_ids FROM scenes WHERE id = ANY($1) ORDER BY id", scenes)]
+
+    # bulk insert across two parents in one statement
+    await conn.execute("INSERT INTO scene_tags SELECT s, t FROM unnest($1::bigint[]) s, unnest($2::bigint[]) t",
+                       scenes, [c, a])
+    assert await arrays() == [sorted([a, c])] * 2
+    await conn.execute("DELETE FROM scene_tags WHERE scene_id = $1 AND tag_id = $2", scenes[0], a)
+    assert await arrays() == [[c], sorted([a, c])]
+    await conn.execute("DELETE FROM tags WHERE id = $1", c)  # cascades through scene_tags
+    assert await arrays() == [[], [a]]
+    with pytest.raises(asyncpg.FeatureNotSupportedError):
+        await conn.execute("UPDATE scene_tags SET tag_id = $1", b)

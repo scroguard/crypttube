@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health, jobs, libraries, media
+from app.api import browse, entities, health, jobs, libraries, media
 from app.config import get_settings
 from app.db import create_pool, migrate
 from app.streaming import TranscodeLimiter
@@ -31,5 +31,5 @@ app = FastAPI(
     redoc_url=None,
     openapi_url="/api/openapi.json",
 )
-for r in (health.router, libraries.router, jobs.router, media.router):
+for r in (health.router, libraries.router, jobs.router, media.router, browse.router, entities.router):
     app.include_router(r, prefix="/api")
