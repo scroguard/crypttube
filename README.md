@@ -14,6 +14,15 @@ docker compose run --rm api pytest
 
 Production-style (no dev override): `docker compose -f compose.yaml up -d --build`.
 
+First run: create the admin account (only possible while no users exist):
+
+```sh
+curl -X POST localhost:8420/api/auth/setup -H 'X-Requested-With: cli' \
+     -H 'Content-Type: application/json' -d '{"username": "admin", "password": "<8+ chars>"}'
+```
+
+Behind HTTPS (reverse proxy with TLS), set `COOKIE_SECURE=true`.
+
 Media is mounted **read-only** at `/media`; generated content lives in `GENERATED_ROOT`
 (mounted at `/data/generated`). The database has no published port, and the API
 listens only on `127.0.0.1`.
@@ -97,6 +106,26 @@ How it stays fast (`python -m scripts.bench_browse` measures it on 200k scenes):
 - `POST /api/scenes/{id}/play`, `PUT /api/scenes/{id}/resume {"time": s}`.
 
 Writes queue a debounced `refresh_counts` job; list counts catch up within seconds.
+
+## Authentication & roles
+
+- Server-side sessions in an HttpOnly, SameSite=Lax cookie (needed so `<video>`/`<img>`
+  requests are authenticated). Only SHA-256(token) is stored; 30-day sliding expiry;
+  password change or deactivation revokes sessions immediately. No IPs are stored.
+- Passwords: argon2id. Login throttled per (IP, username) with exponential backoff;
+  unknown usernames take the same time as wrong passwords.
+- CSRF: state-changing requests must send an `X-Requested-With` header.
+- Roles: `viewer` (browse/stream, own resume positions), `editor` (+ metadata edits),
+  `admin` (+ users, libraries, jobs; never restricted). At least one active admin
+  always remains.
+- Every router is mounted with its minimum role; a test asserts every route except
+  health/status/setup/login returns 401 without a session.
+- Responses carry `nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+  and `Cache-Control: no-store` unless a media route sets its own caching.
+
+Admin API: `GET/POST /api/users`, `GET/PATCH/DELETE /api/users/{id}`,
+`PUT /api/users/{id}/restrictions {"tag_ids", "studio_ids", "performer_ids"}`.
+Self: `/api/auth/{status,login,logout,me,password,sessions}`.
 
 ## Access control
 

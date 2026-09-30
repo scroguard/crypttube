@@ -1,4 +1,3 @@
-# TODO(phase 5): restrict to admins once auth lands.
 from pathlib import Path
 
 import asyncpg

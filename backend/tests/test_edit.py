@@ -4,7 +4,8 @@ import pytest
 from PIL import Image
 
 from app import counts
-from app.acl import get_acl, load_acl
+from app.acl import load_acl
+from app.auth import get_acl
 from tests.test_browse import seed  # noqa: F401  (fixture)
 
 

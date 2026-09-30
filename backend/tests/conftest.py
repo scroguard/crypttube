@@ -45,10 +45,46 @@ async def app(test_database):
         yield app
 
 
+TEST_ADMIN = "test-admin"
+
+
+async def session_client(app, username: str, role: str = "viewer", password: str = "password123"):
+    """An AsyncClient signed in as `username` (created if needed) via a real session cookie."""
+    from app import auth
+    pool = app.state.pool
+    user_id = await pool.fetchval(
+        """INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)
+           ON CONFLICT ((lower(username))) DO UPDATE SET role = EXCLUDED.role RETURNING id""",
+        username, auth.hash_password(password), role)
+    token = await auth.create_session(pool, user_id, "pytest")
+    c = AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                    cookies={auth.COOKIE_NAME: token}, headers={"X-Requested-With": "test"})
+    c.user_id = user_id
+    return c
+
+
 @pytest.fixture
 async def client(app):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    """Signed in as an admin (admins bypass content restrictions)."""
+    c = await session_client(app, TEST_ADMIN, "admin")
+    async with c:
         yield c
+
+
+@pytest.fixture
+async def anon(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                           headers={"X-Requested-With": "test"}) as c:
+        yield c
+
+
+@pytest.fixture
+def login_as(app):
+    """Factory: await login_as("bob", "viewer") -> signed-in client."""
+    async def make(username: str, role: str = "viewer"):
+        return await session_client(app, username, role)  # in-process: nothing to close
+
+    return make
 
 
 @pytest.fixture
@@ -66,8 +102,10 @@ async def clean(app):
     """Empty all data tables (for tests that write through the pool, not a rolled-back tx)."""
     await app.state.pool.execute(
         """TRUNCATE library_paths, files, scenes, images, galleries, studios, performers,
-                    tags, jobs, users RESTART IDENTITY CASCADE"""
+                    tags, jobs, entity_counts RESTART IDENTITY CASCADE"""
     )
+    # Keep the signed-in test admin (and its session) alive across cleans.
+    await app.state.pool.execute("DELETE FROM users WHERE username <> $1", TEST_ADMIN)
 
 
 def _ffmpeg(*args: str) -> None:

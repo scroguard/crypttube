@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import generated
-from app.acl import Acl, get_acl, visible
+from app.acl import Acl, visible
+from app.auth import get_acl
 from app.sql import ListQuery, Q, Sort, paginate
 
 router = APIRouter(tags=["browse"])
@@ -207,6 +208,14 @@ def scene_where(q: Q, f: SceneFilter, acl: Acl) -> list[str]:
     return w
 
 
+def _scene_enrich(q: Q, acl: Acl) -> tuple[str, str]:
+    joins, cols = related("scene")
+    joins += f"""
+        LEFT JOIN user_scene_state r_us ON r_us.user_id = {q.p(acl.user_id, 'viewer_id')}::bigint
+                                        AND r_us.scene_id = p.id"""
+    return joins, cols + ", r_us.resume_time"
+
+
 @router.get("/scenes")
 async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
                       acl: Acl = Depends(get_acl)) -> dict:
@@ -216,11 +225,11 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
         alias="s",
         from_="scenes s JOIN files f ON f.id = s.file_id",
         select="""s.id, s.title, s.duration, s.width, s.height, s.release_date, s.rating,
-                  s.organized, s.play_count, s.resume_time, s.studio_id, s.created_at,
+                  s.organized, s.play_count, s.studio_id, s.created_at,
                   f.id AS file_id, f.oshash, f.missing_since IS NOT NULL AS missing""",
         sorts=SCENE_SORTS,
         where=lambda q: scene_where(q, f, acl),
-        enrich=lambda q: related("scene"),
+        enrich=lambda q: _scene_enrich(q, acl),
     )
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
                           cursor=f.cursor, limit=f.limit, with_total=f.with_total)
@@ -238,6 +247,8 @@ async def get_scene(scene_id: int, request: Request, acl: Acl = Depends(get_acl)
     cond = " AND ".join(["s.id = $1", *visible(acl, "scene", "s", q)])
     row = await request.app.state.pool.fetchrow(f"""
         SELECT s.*, f.oshash,
+               (SELECT resume_time FROM user_scene_state
+                WHERE user_id = {q.p(acl.user_id)}::bigint AND scene_id = s.id) AS resume_time,
                jsonb_build_object('path', f.path, 'size', f.size, 'mod_time', f.mod_time,
                                   'oshash', f.oshash, 'missing_since', f.missing_since) AS file,
                (SELECT jsonb_build_object('id', x.id, 'name', x.name, 'parent_id', x.parent_id)

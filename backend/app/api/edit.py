@@ -1,7 +1,5 @@
 """Write API: metadata editing, bulk edits, playback state, entity images.
 
-TODO(phase 5): restrict to users with edit permission.
-
 PATCH bodies are partial: only fields present in the JSON are changed, and an explicit
 null clears a field. Association fields (tag_ids, performer_ids, aliases, parent_ids)
 replace the whole set.
@@ -19,12 +17,14 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import counts
-from app.acl import Acl, get_acl
+from app.acl import Acl
+from app.auth import get_acl
 from app.api import browse, entities
 from app.config import get_settings
 from app.generated import _atomic_write
 
-router = APIRouter(tags=["edit"])
+router = APIRouter(tags=["edit"])          # mounted for editors
+read_router = APIRouter(tags=["edit"])     # mounted for any signed-in user
 
 Rating = Field(None, ge=0, le=100)
 MAX_IMAGE_UPLOAD = 20 * 1024 * 1024
@@ -233,7 +233,7 @@ class Resume(Body):
     time: float | None = Field(ge=0)
 
 
-@router.post("/scenes/{scene_id}/play", status_code=204)
+@read_router.post("/scenes/{scene_id}/play", status_code=204)
 async def record_play(scene_id: int, request: Request, acl: Acl = Depends(get_acl)) -> Response:
     await browse.get_scene(scene_id, request, acl)
     await request.app.state.pool.execute(
@@ -241,10 +241,19 @@ async def record_play(scene_id: int, request: Request, acl: Acl = Depends(get_ac
     return Response(status_code=204)
 
 
-@router.put("/scenes/{scene_id}/resume", status_code=204)
+@read_router.put("/scenes/{scene_id}/resume", status_code=204)
 async def set_resume(scene_id: int, body: Resume, request: Request, acl: Acl = Depends(get_acl)) -> Response:
+    """Per-user resume position; null clears it (e.g. when playback finished)."""
     await browse.get_scene(scene_id, request, acl)
-    await request.app.state.pool.execute("UPDATE scenes SET resume_time = $2 WHERE id = $1", scene_id, body.time)
+    pool = request.app.state.pool
+    if body.time is None:
+        await pool.execute("DELETE FROM user_scene_state WHERE user_id = $1 AND scene_id = $2",
+                           acl.user_id, scene_id)
+    else:
+        await pool.execute(
+            """INSERT INTO user_scene_state (user_id, scene_id, resume_time) VALUES ($1, $2, $3)
+               ON CONFLICT (user_id, scene_id) DO UPDATE SET resume_time = $3, updated_at = now()""",
+            acl.user_id, scene_id, body.time)
     return Response(status_code=204)
 
 
@@ -523,7 +532,8 @@ def _entity_routes(kind: str) -> None:
     for fn, method, path, code in ((delete, "DELETE", "", 204), (put_image, "PUT", "/image", 204),
                                    (delete_image, "DELETE", "/image", 204), (get_image, "GET", "/image", None)):
         fn.__name__ = f"{fn.__name__}_{kind}"
-        router.add_api_route(f"/{kind}/{{entity_id}}{path}", fn, methods=[method],
+        target = read_router if method == "GET" else router
+        target.add_api_route(f"/{kind}/{{entity_id}}{path}", fn, methods=[method],
                              **({"status_code": code} if code else {}))
 
 

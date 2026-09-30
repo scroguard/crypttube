@@ -1,6 +1,7 @@
 """Media delivery: video streams, screenshots, scrub sprites, image thumbnails.
 
-TODO(phase 5): enforce authentication and per-user ACLs on every route here.
+Every route resolves its item through the viewer's ACL, so hidden content 404s here
+exactly as it does in the browse API.
 """
 
 import asyncio
@@ -9,12 +10,15 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app import generated, jobs, streaming
+from app.acl import Acl, visible
+from app.auth import get_acl
 from app.config import get_settings
 from app.media import ProbeError
+from app.sql import Q
 
 router = APIRouter(tags=["media"])
 
@@ -75,12 +79,14 @@ def _check_width(w: int) -> int:
 # Scenes
 # ---------------------------------------------------------------------------
 
-async def _scene(request: Request, scene_id: int):
+async def _scene(request: Request, scene_id: int, acl: Acl):
+    q = Q()
+    cond = " AND ".join([f"s.id = {q.p(scene_id)}", *visible(acl, "scene", "s", q)])
     row = await request.app.state.pool.fetchrow(
-        """SELECT s.id, s.duration, s.height, s.video_codec, s.audio_codec,
-                  f.id AS file_id, f.path, f.oshash, f.missing_since
-           FROM scenes s JOIN files f ON f.id = s.file_id WHERE s.id = $1""",
-        scene_id,
+        f"""SELECT s.id, s.duration, s.height, s.video_codec, s.audio_codec,
+                   f.id AS file_id, f.path, f.oshash, f.missing_since
+            FROM scenes s JOIN files f ON f.id = s.file_id WHERE {cond}""",
+        *q.args,
     )
     if row is None:
         raise HTTPException(404, "scene not found")
@@ -89,10 +95,11 @@ async def _scene(request: Request, scene_id: int):
     return row
 
 
-@router.api_route("/scenes/{scene_id}/stream", methods=["GET", "HEAD"])
-async def stream_direct(scene_id: int, request: Request):
+@router.get("/scenes/{scene_id}/stream")
+@router.head("/scenes/{scene_id}/stream", include_in_schema=False)
+async def stream_direct(scene_id: int, request: Request, acl: Acl = Depends(get_acl)):
     """The original file, with HTTP Range support (206 Partial Content) for instant seeking."""
-    s = await _scene(request, scene_id)
+    s = await _scene(request, scene_id, acl)
     return VideoFileResponse(
         s["path"], media_type=streaming.mime_type(s["path"]),
         headers={"Cache-Control": "private, no-transform"},
@@ -105,9 +112,10 @@ async def stream_converted(
     mode: str = Query("transcode", pattern="^(remux|transcode)$"),
     start: float = Query(0, ge=0),
     height: int | None = Query(None),
+    acl: Acl = Depends(get_acl),
 ):
     """Live fragmented MP4 for browsers that can't play the original. Seek with `start`."""
-    s = await _scene(request, scene_id)
+    s = await _scene(request, scene_id, acl)
     if height is not None and height not in streaming.TRANSCODE_HEIGHTS:
         raise HTTPException(422, f"height must be one of {streaming.TRANSCODE_HEIGHTS}")
     if mode == "remux" and s["video_codec"] not in streaming.REMUXABLE_VIDEO:
@@ -125,9 +133,9 @@ async def stream_converted(
 
 
 @router.get("/scenes/{scene_id}/playback")
-async def playback(scene_id: int, request: Request) -> dict:
+async def playback(scene_id: int, request: Request, acl: Acl = Depends(get_acl)) -> dict:
     """Everything the player needs to pick a delivery mode."""
-    s = await _scene(request, scene_id)
+    s = await _scene(request, scene_id, acl)
     base = f"/api/scenes/{scene_id}"
     version = generated.scene_version(s["oshash"], s["file_id"])
     sprite_img, sprite_vtt = generated.sprite_paths(get_settings().generated_dir, version)
@@ -146,9 +154,10 @@ async def playback(scene_id: int, request: Request) -> dict:
 
 
 @router.get("/scenes/{scene_id}/screenshot")
-async def screenshot(scene_id: int, request: Request, w: int = 1280, v: str | None = None):
+async def screenshot(scene_id: int, request: Request, w: int = 1280, v: str | None = None,
+                     acl: Acl = Depends(get_acl)):
     _check_width(w)
-    s = await _scene(request, scene_id)
+    s = await _scene(request, scene_id, acl)
     root = get_settings().generated_dir
     version = generated.scene_version(s["oshash"], s["file_id"])
     master = generated.screenshot_path(root, version)
@@ -160,8 +169,8 @@ async def screenshot(scene_id: int, request: Request, w: int = 1280, v: str | No
     return FileResponse(out, media_type="image/webp", headers=_cache_for(v, version))
 
 
-async def _sprite_file(scene_id: int, request: Request, v: str | None, which: int, media_type: str):
-    s = await _scene(request, scene_id)
+async def _sprite_file(scene_id: int, request: Request, v: str | None, which: int, media_type: str, acl: Acl):
+    s = await _scene(request, scene_id, acl)
     version = generated.scene_version(s["oshash"], s["file_id"])
     path = generated.sprite_paths(get_settings().generated_dir, version)[which]
     if not path.exists():
@@ -173,27 +182,29 @@ async def _sprite_file(scene_id: int, request: Request, v: str | None, which: in
 
 
 @router.get("/scenes/{scene_id}/sprite.webp")
-async def sprite_image(scene_id: int, request: Request, v: str | None = None):
-    return await _sprite_file(scene_id, request, v, 0, "image/webp")
+async def sprite_image(scene_id: int, request: Request, v: str | None = None, acl: Acl = Depends(get_acl)):
+    return await _sprite_file(scene_id, request, v, 0, "image/webp", acl)
 
 
 @router.get("/scenes/{scene_id}/sprite.vtt")
-async def sprite_vtt(scene_id: int, request: Request, v: str | None = None):
-    return await _sprite_file(scene_id, request, v, 1, "text/vtt")
+async def sprite_vtt(scene_id: int, request: Request, v: str | None = None, acl: Acl = Depends(get_acl)):
+    return await _sprite_file(scene_id, request, v, 1, "text/vtt", acl)
 
 
 # ---------------------------------------------------------------------------
 # Images
 # ---------------------------------------------------------------------------
 
-async def _image(request: Request, image_id: int):
+async def _image(request: Request, image_id: int, acl: Acl):
+    q = Q()
+    cond = " AND ".join([f"i.id = {q.p(image_id)}", *visible(acl, "image", "i", q)])
     row = await request.app.state.pool.fetchrow(
-        """SELECT i.id, i.format, f.id AS file_id, f.path, f.mod_time,
-                  coalesce(z.missing_since, f.missing_since) AS missing_since, z.path AS zip_path
-           FROM images i JOIN files f ON f.id = i.file_id
-           LEFT JOIN files z ON z.id = f.zip_file_id
-           WHERE i.id = $1""",
-        image_id,
+        f"""SELECT i.id, i.format, f.id AS file_id, f.path, f.mod_time,
+                   coalesce(z.missing_since, f.missing_since) AS missing_since, z.path AS zip_path
+            FROM images i JOIN files f ON f.id = i.file_id
+            LEFT JOIN files z ON z.id = f.zip_file_id
+            WHERE {cond}""",
+        *q.args,
     )
     if row is None:
         raise HTTPException(404, "image not found")
@@ -204,9 +215,10 @@ async def _image(request: Request, image_id: int):
 
 
 @router.get("/images/{image_id}/thumbnail")
-async def image_thumbnail(image_id: int, request: Request, w: int = 320, v: str | None = None):
+async def image_thumbnail(image_id: int, request: Request, w: int = 320, v: str | None = None,
+                          acl: Acl = Depends(get_acl)):
     _check_width(w)
-    img = await _image(request, image_id)
+    img = await _image(request, image_id, acl)
     version = generated.image_version(img["file_id"], img["mod_time"])
     out = generated.thumbnail_path(get_settings().generated_dir, "images", version, w)
 
@@ -219,9 +231,9 @@ async def image_thumbnail(image_id: int, request: Request, w: int = 320, v: str 
 
 
 @router.get("/images/{image_id}/file")
-async def image_file(image_id: int, request: Request, v: str | None = None):
+async def image_file(image_id: int, request: Request, v: str | None = None, acl: Acl = Depends(get_acl)):
     """The original image, for the full-size lightbox view."""
-    img = await _image(request, image_id)
+    img = await _image(request, image_id, acl)
     version = generated.image_version(img["file_id"], img["mod_time"])
     media_type = mimetypes.guess_type(img["path"])[0] or "application/octet-stream"
     headers = _cache_for(v, version)
@@ -233,15 +245,3 @@ async def image_file(image_id: int, request: Request, v: str | None = None):
             return f.read()
 
     return Response(await asyncio.to_thread(read), media_type=media_type, headers=headers)
-
-
-# ---------------------------------------------------------------------------
-# Batch generation
-# ---------------------------------------------------------------------------
-
-@router.post("/generate", status_code=202)
-async def generate_missing(request: Request) -> dict:
-    """Queue screenshot/sprite generation for every scene that lacks them."""
-    job_id = await jobs.enqueue(request.app.state.pool, "generate", {"missing": True},
-                                dedupe_key="generate:missing")
-    return {"job_id": job_id}

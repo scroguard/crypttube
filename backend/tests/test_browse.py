@@ -3,7 +3,8 @@ from datetime import date, timedelta
 import pytest
 
 from app import counts
-from app.acl import UNRESTRICTED, get_acl, load_acl
+from app.acl import UNRESTRICTED, load_acl
+from app.auth import get_acl
 from app.api.browse import GALLERY_SORTS, IMAGE_SORTS, SCENE_SORTS
 from app.api.entities import PERFORMER_SORTS, STUDIO_SORTS, TAG_SORTS
 
@@ -79,7 +80,7 @@ async def seed(app, clean):
             images.append(img)
         await c.execute("UPDATE galleries SET cover_image_id = $2 WHERE id = $1", gallery, images[4])
         await c.execute("INSERT INTO image_tags VALUES ($1, $2)", images[0], tags["Outdoor"])
-        user = await c.fetchval("INSERT INTO users (username, password_hash) VALUES ('viewer', 'x') RETURNING id")
+        user = await c.fetchval("INSERT INTO users (username, password_hash) VALUES ('seed-viewer', 'x') RETURNING id")
     await counts.refresh(pool)
     return {"scenes": scenes, "studios": {"net": net, "sub": sub, "other": other}, "tags": tags,
             "performers": perf, "gallery": gallery, "images": images, "user": user}
@@ -172,11 +173,13 @@ async def test_lists_are_one_round_trip(app, client, seed, url):
     real = app.state.pool
     app.state.pool = counting = CountingPool(real)
     try:
+        await client.get("/api/auth/me")
+        auth_calls, counting.calls = counting.calls, 0  # session lookup, same for every route
         assert (await client.get(url, params={"limit": 50})).status_code == 200
-        assert counting.calls == 1
+        assert counting.calls == auth_calls + 1
         counting.calls = 0
         await client.get(url, params={"limit": 50, "with_total": True})
-        assert counting.calls == 2
+        assert counting.calls == auth_calls + 2
     finally:
         app.state.pool = real
 

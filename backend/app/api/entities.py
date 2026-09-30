@@ -10,7 +10,8 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import Field
 
-from app.acl import Acl, get_acl, visible
+from app.acl import Acl, visible
+from app.auth import get_acl
 from app.api.browse import ListParams, like, page_response, tag_set
 from app.sql import ListQuery, Q, Sort, paginate
 

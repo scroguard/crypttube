@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     watcher_polling: bool = False
     watcher_quiet_seconds: float = 5
     watcher_max_wait_seconds: float = 60
+    # auth: set true when served over HTTPS (reverse proxy with TLS)
+    cookie_secure: bool = False
     # media delivery
     max_transcodes: int = 2
     generate_concurrency: int = 2

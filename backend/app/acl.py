@@ -12,7 +12,6 @@ Hidden things behave as if they don't exist (404 on detail routes, absent from l
 from dataclasses import dataclass, field
 
 import asyncpg
-from fastapi import Request
 
 from app.sql import Q
 
@@ -57,12 +56,6 @@ async def load_acl(db: asyncpg.Pool | asyncpg.Connection, user_id: int) -> Acl:
         user_id,
     )
     return Acl(list(row["tags"]), list(row["studios"]), list(row["performers"]), user_id)
-
-
-async def get_acl(request: Request) -> Acl:
-    """FastAPI dependency. Until authentication exists (phase 5) every request is
-    unrestricted; phase 5 replaces this with the logged-in user's rules."""
-    return UNRESTRICTED
 
 
 def _content_clauses(acl: Acl, alias: str, q: Q) -> list[str]:
