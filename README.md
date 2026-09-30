@@ -86,6 +86,18 @@ How it stays fast (`python -m scripts.bench_browse` measures it on 200k scenes):
 - **Entity counts are cached** (`entity_counts`, per viewer) and refreshed by a debounced
   worker job after scans/edits, instead of counting thousands of rows per page.
 
+## Edit API
+
+- `PATCH /api/{scenes,galleries,images}/{id}`: partial update; `tag_ids`/`performer_ids` replace the set.
+- `POST /api/{scenes,galleries,images}/bulk`: `{"ids": [...], "set": {studio_id, rating, organized},
+  "tags": {"mode": "add|remove|set", "ids": [...]}, "performers": {...}}`, set-based SQL.
+- `POST/PATCH/DELETE /api/{performers,studios,tags}`: hierarchy cycles return 409;
+  `POST /api/tags/{id}/merge {"source_ids": [...]}` folds tags together.
+- `PUT/GET/DELETE /api/{performers,studios,tags}/{id}/image`: raw image body, stored as WebP (≤1024px).
+- `POST /api/scenes/{id}/play`, `PUT /api/scenes/{id}/resume {"time": s}`.
+
+Writes queue a debounced `refresh_counts` job; list counts catch up within seconds.
+
 ## Access control
 
 Per-user deny rules (`user_hidden_tags/studios/performers`) are expanded once per
