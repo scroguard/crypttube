@@ -1,0 +1,57 @@
+name: goon-streamer
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-goon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-goon}
+    # Tuned for an OLTP-ish workload of many small indexed reads on SSD.
+    # JIT is disabled: it adds planning latency to the short list queries we run.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - jit=off
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No published ports: the database is reachable only from the backend network.
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-goon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-goon}
+      GENERATED_DIR: /data/generated
+      MEDIA_DIR: /media
+    volumes:
+      - ${MEDIA_ROOT:-./media}:/media:ro
+      - ${GENERATED_ROOT:-./data/generated}:/data/generated
+    networks: [backend]
+    ports:
+      - "127.0.0.1:${API_PORT:-8420}:8000"
+
+networks:
+  backend:
+
+volumes:
+  pgdata:
