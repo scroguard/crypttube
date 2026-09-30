@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health, jobs, libraries
+from app.api import health, jobs, libraries, media
 from app.config import get_settings
 from app.db import create_pool, migrate
+from app.streaming import TranscodeLimiter
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     if settings.run_migrations:
         await migrate(pool)
     app.state.pool = pool
+    app.state.transcodes = TranscodeLimiter(settings.max_transcodes)
     yield
     await pool.close()
 
@@ -29,5 +31,5 @@ app = FastAPI(
     redoc_url=None,
     openapi_url="/api/openapi.json",
 )
-for r in (health.router, libraries.router, jobs.router):
+for r in (health.router, libraries.router, jobs.router, media.router):
     app.include_router(r, prefix="/api")

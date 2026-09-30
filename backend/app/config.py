@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     watcher_polling: bool = False
     watcher_quiet_seconds: float = 5
     watcher_max_wait_seconds: float = 60
+    # media delivery
+    max_transcodes: int = 2
+    generate_concurrency: int = 2
 
 
 @lru_cache

@@ -6,7 +6,7 @@ React frontend (coming). Everything runs via Docker Compose; no telemetry, no ou
 ## Running
 
 ```sh
-cp .env.example .env          # set POSTGRES_PASSWORD, MEDIA_ROOT
+cp .env.example .env          # set POSTGRES_PASSWORD, MEDIA_ROOT, PUID/PGID (`id -u`/`id -g`)
 docker compose up -d --build  # dev mode (source mounted, auto-reload)
 curl localhost:8420/api/health
 docker compose run --rm api pytest
@@ -41,6 +41,27 @@ delayed re-scan. Folders of images become galleries, as do `.zip`/`.cbz` archive
 
 The watcher uses inotify. For network mounts, or libraries with more directories than
 `fs.inotify.max_user_watches`, set `WATCHER_POLLING=true`.
+
+## Media delivery
+
+| endpoint | notes |
+|----------|-------|
+| `GET/HEAD /api/scenes/{id}/stream` | original file, HTTP Range / 206, `If-Range` |
+| `GET /api/scenes/{id}/stream.mp4?mode=remux\|transcode&start=&height=` | live fragmented MP4 via ffmpeg; seek with `start`; max `MAX_TRANSCODES` concurrent (503 beyond); ffmpeg is killed on disconnect |
+| `GET /api/scenes/{id}/playback` | preferred modes (`direct` → `remux` → `transcode`), URLs, sprite VTT |
+| `GET /api/scenes/{id}/screenshot?w=&v=` | WebP, generated on demand if missing |
+| `GET /api/scenes/{id}/sprite.vtt`, `sprite.webp` | scrub previews (9×9 keyframe grid + WebVTT `#xywh`) |
+| `GET /api/images/{id}/thumbnail?w=&v=` | WebP, on demand, EXIF-rotated, never upscaled; works for zip members |
+| `GET /api/images/{id}/file` | original image |
+| `POST /api/generate` | queue screenshots/sprites for all scenes lacking them |
+
+Thumbnail widths are fixed (160/320/640/1280) so the cache can't be blown up by
+arbitrary sizes. Generated assets are keyed by content version (scene oshash, image
+file id + mtime); requests that carry the current `v=` get
+`Cache-Control: private, max-age=31536000, immutable`, others revalidate. `private`
+keeps shared proxies from caching anything.
+
+Scans queue asset generation for new/changed videos in the worker.
 
 ## Design invariants: no feedback loops
 

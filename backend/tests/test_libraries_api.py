@@ -39,7 +39,8 @@ async def test_scan_via_api_and_worker(app, client, clean, library_dir):
     assert "7 new" in job["message"]
 
     listing = (await client.get("/api/jobs", params={"limit": 1})).json()
-    assert listing["items"][0]["id"] == first
+    assert listing["items"][0]["kind"] == "generate"  # the scan queued asset generation
+    assert listing["next"] is not None
     assert (await client.get("/api/jobs", params={"status": "bogus"})).status_code == 422
 
 

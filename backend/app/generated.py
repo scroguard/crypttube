@@ -1,0 +1,218 @@
+"""Generated content: screenshots, scrub sprites and WebP thumbnails.
+
+Everything lives under settings.generated_dir, keyed by content version (a scene's
+oshash, an image's file id + mtime), so URLs carrying that version can be cached
+by the browser forever. Files are written to a temp name and atomically renamed,
+so a reader never sees a half-written file and concurrent generators can't collide.
+"""
+
+import asyncio
+import hashlib
+import io
+import math
+import os
+import tempfile
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from PIL import Image, ImageOps
+
+from app.media import ProbeError
+
+THUMB_WIDTHS = (160, 320, 640, 1280)
+SCREENSHOT_WIDTH = 1280
+SPRITE_COLUMNS = 9
+SPRITE_MAX_FRAMES = 81
+SPRITE_FRAME_WIDTH = 160
+WEBP_QUALITY = 75
+
+
+def _shard(root: Path, kind: str, key: str, suffix: str) -> Path:
+    digest = hashlib.sha1(key.encode()).hexdigest()
+    return root / kind / digest[:2] / f"{key}{suffix}"
+
+
+def scene_version(oshash: str | None, file_id: int) -> str:
+    return oshash or f"f{file_id}"
+
+
+def image_version(file_id: int, mod_time) -> str:
+    return f"{file_id}-{int(mod_time.timestamp() * 1_000_000):x}"
+
+
+def screenshot_path(root: Path, version: str) -> Path:
+    return _shard(root, "screenshots", version, ".webp")
+
+
+def sprite_paths(root: Path, version: str) -> tuple[Path, Path]:
+    return _shard(root, "sprites", version, ".webp"), _shard(root, "sprites", version, ".vtt")
+
+
+def thumbnail_path(root: Path, kind: str, version: str, width: int) -> Path:
+    return _shard(root, f"thumbs/{kind}", f"{version}-w{width}", ".webp")
+
+
+def _atomic_write(dest: Path, write) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            write(f)
+        os.replace(tmp, dest)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Images
+# ---------------------------------------------------------------------------
+
+def open_image_source(path: str, zip_path: str | None = None):
+    """A readable binary file object for a plain file or a zip member."""
+    if zip_path is None:
+        return open(path, "rb")
+    zf = zipfile.ZipFile(zip_path)
+    try:
+        return io.BytesIO(zf.read(path))
+    finally:
+        zf.close()
+
+
+def make_thumbnail(src, width: int, dest: Path) -> None:
+    """Downscale (never upscale) to `width`, honouring EXIF orientation, save as WebP."""
+    try:
+        with Image.open(src) as im:
+            # For JPEGs, decode at reduced scale: much faster than full decode + resize.
+            im.draft("RGB", (width, width))
+            im = ImageOps.exif_transpose(im)
+            if im.width > width:
+                im.thumbnail((width, im.height * width // im.width + 1), Image.Resampling.LANCZOS)
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGBA" if "A" in im.getbands() or "transparency" in im.info else "RGB")
+            _atomic_write(dest, lambda f: im.save(f, "WEBP", quality=WEBP_QUALITY, method=4))
+    except (OSError, ValueError, Image.DecompressionBombError) as e:
+        raise ProbeError(f"cannot thumbnail: {e}") from e
+
+
+# ---------------------------------------------------------------------------
+# Video
+# ---------------------------------------------------------------------------
+
+async def _run_ffmpeg(args: list[str], timeout: float = 120) -> bytes:
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *args,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout)
+    except (TimeoutError, asyncio.CancelledError):
+        proc.kill()
+        await proc.wait()
+        raise
+    if proc.returncode != 0:
+        raise ProbeError(err.decode(errors="replace").strip()[-500:] or "ffmpeg failed")
+    return out
+
+
+async def _frame_at(path: str, seconds: float, width: int, *, fast: bool) -> Image.Image | None:
+    """Decode a single frame as a PIL image. `fast` snaps to the nearest keyframe."""
+    # -noaccurate_seek emits the keyframe at or before the seek point: one decoded
+    # frame instead of decoding forward to the exact timestamp.
+    seek = ["-noaccurate_seek"] if fast else []
+    out = await _run_ffmpeg([
+        *seek, "-ss", f"{seconds:.3f}", "-i", path, "-frames:v", "1", "-an", "-sn",
+        "-vf", f"scale='min({width},iw)':-2", "-f", "image2pipe", "-c:v", "png", "-",
+    ])
+    if not out:
+        return None
+    im = Image.open(io.BytesIO(out))
+    im.load()
+    return im.convert("RGB")
+
+
+async def make_screenshot(path: str, duration: float | None, dest: Path) -> None:
+    t = (duration or 0) * 0.2
+    frame = await _frame_at(path, t, SCREENSHOT_WIDTH, fast=False)
+    if frame is None and t:
+        frame = await _frame_at(path, 0, SCREENSHOT_WIDTH, fast=False)
+    if frame is None:
+        raise ProbeError("no frame decoded")
+    await asyncio.to_thread(
+        _atomic_write, dest, lambda f: frame.save(f, "WEBP", quality=80, method=4)
+    )
+
+
+def _vtt_time(seconds: float) -> str:
+    ms = int(round(seconds * 1000))
+    h, ms = divmod(ms, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+
+@dataclass(frozen=True)
+class SpriteLayout:
+    frames: int
+    columns: int
+    rows: int
+
+
+def sprite_layout(duration: float) -> SpriteLayout:
+    frames = max(1, min(SPRITE_MAX_FRAMES, int(duration)))
+    columns = min(SPRITE_COLUMNS, frames)
+    return SpriteLayout(frames, columns, math.ceil(frames / columns))
+
+
+async def make_sprite(path: str, duration: float, version: str, dest_img: Path, dest_vtt: Path,
+                      concurrency: int = 4) -> None:
+    """A grid of evenly spaced keyframes plus a WebVTT file mapping time ranges to tiles
+    (the `#xywh=` media-fragment convention understood by most web players)."""
+    if not duration or duration <= 0:
+        raise ProbeError("unknown duration")
+    layout = sprite_layout(duration)
+    step = duration / layout.frames
+    sem = asyncio.Semaphore(concurrency)
+
+    async def grab(i: int):
+        async with sem:
+            try:
+                return await _frame_at(path, (i + 0.5) * step, SPRITE_FRAME_WIDTH, fast=True)
+            except ProbeError:
+                return None
+
+    frames = await asyncio.gather(*(grab(i) for i in range(layout.frames)))
+    first = next((f for f in frames if f is not None), None)
+    if first is None:
+        raise ProbeError("no frames decoded for sprite")
+    w, h = first.size
+
+    def build() -> str:
+        sheet = Image.new("RGB", (w * layout.columns, h * layout.rows))
+        cues = ["WEBVTT", ""]
+        for i, frame in enumerate(frames):
+            x, y = (i % layout.columns) * w, (i // layout.columns) * h
+            if frame is not None:
+                sheet.paste(frame.resize((w, h)) if frame.size != (w, h) else frame, (x, y))
+            cues += [f"{_vtt_time(i * step)} --> {_vtt_time((i + 1) * step)}",
+                     f"sprite.webp?v={version}#xywh={x},{y},{w},{h}", ""]
+        _atomic_write(dest_img, lambda f: sheet.save(f, "WEBP", quality=70, method=4))
+        return "\n".join(cues)
+
+    vtt = await asyncio.to_thread(build)
+    await asyncio.to_thread(_atomic_write, dest_vtt, lambda f: f.write(vtt.encode()))
+
+
+async def generate_scene_assets(root: Path, path: str, duration: float | None, version: str) -> list[str]:
+    """Create whatever is missing for one scene. Returns the names of what was made."""
+    made = []
+    shot = screenshot_path(root, version)
+    if not shot.exists():
+        await make_screenshot(path, duration, shot)
+        made.append("screenshot")
+    sprite_img, sprite_vtt = sprite_paths(root, version)
+    if duration and not (sprite_img.exists() and sprite_vtt.exists()):
+        await make_sprite(path, duration, version, sprite_img, sprite_vtt)
+        made.append("sprite")
+    return made

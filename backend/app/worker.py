@@ -11,9 +11,10 @@ import traceback
 
 import asyncpg
 
-from app import jobs
+from app import generated, jobs
 from app.config import Settings, get_settings
 from app.db import create_pool, migrate
+from app.media import ProbeError
 from app.scanner import ScanError, Scanner, ScanStats
 from app.watcher import LibraryWatcher, scan_dedupe_key
 
@@ -55,10 +56,15 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
         for err in stats.errors:
             log.warning("scan error: %s", err)
 
+    # Scan -> generate is the only direction: generation never enqueues scans.
+    scene_ids = [i for s in results for i in s.scene_ids]
+    if scene_ids:
+        await jobs.enqueue(pool, "generate", {"scene_ids": scene_ids})
+
     total = ScanStats()
     for s in results:
         for k, v in vars(s).items():
-            if k != "errors":
+            if isinstance(v, int):
                 setattr(total, k, getattr(total, k) + v)
     message = total.summary()
     if unavailable:
@@ -66,7 +72,54 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
     return message
 
 
-HANDLERS = {"scan": handle_scan}
+GENERATE_BATCH = 200
+
+
+async def _generate_candidates(pool: asyncpg.Pool, payload: dict):
+    """Yield batches of scenes to generate for: explicit ids, or every scene (paged by id)."""
+    query = """SELECT s.id, s.duration, f.id AS file_id, f.path, f.oshash
+               FROM scenes s JOIN files f ON f.id = s.file_id
+               WHERE f.missing_since IS NULL AND {cond} ORDER BY s.id LIMIT $2"""
+    if payload.get("scene_ids"):
+        ids = payload["scene_ids"]
+        for i in range(0, len(ids), GENERATE_BATCH):
+            yield await pool.fetch(query.format(cond="s.id = ANY($1)"), ids[i:i + GENERATE_BATCH], GENERATE_BATCH)
+        return
+    after = 0
+    while rows := await pool.fetch(query.format(cond="s.id > $1"), after, GENERATE_BATCH):
+        yield rows
+        after = rows[-1]["id"]
+
+
+async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+    """Screenshots and scrub sprites. Existing assets are skipped, so this is idempotent."""
+    total = len(payload["scene_ids"]) if payload.get("scene_ids") else await pool.fetchval(
+        "SELECT count(*) FROM scenes")
+    sem = asyncio.Semaphore(settings.generate_concurrency)
+    made = failed = done = 0
+
+    async def one(row):
+        nonlocal made, failed
+        version = generated.scene_version(row["oshash"], row["file_id"])
+        async with sem:
+            try:
+                if await generated.generate_scene_assets(settings.generated_dir, row["path"],
+                                                         row["duration"], version):
+                    made += 1
+            except (ProbeError, OSError) as e:
+                failed += 1
+                log.warning("generate failed for scene %s: %s", row["id"], e)
+
+    async for rows in _generate_candidates(pool, payload):
+        if await ctx.cancelled():
+            break
+        await asyncio.gather(*(one(r) for r in rows))
+        done += len(rows)
+        await ctx.progress(min(1.0, done / max(total, 1)), f"{done}/{total} scenes")
+    return f"{made} generated" + (f", {failed} failed" if failed else "")
+
+
+HANDLERS = {"scan": handle_scan, "generate": handle_generate}
 
 
 async def run_one(pool: asyncpg.Pool, settings: Settings) -> bool:

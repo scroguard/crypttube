@@ -3,6 +3,8 @@ name: goon-streamer
 x-backend: &backend
   build:
     context: ./backend
+  # Run as the host user that owns GENERATED_ROOT (and can read MEDIA_ROOT).
+  user: "${PUID:-1000}:${PGID:-1000}"
   restart: unless-stopped
   depends_on:
     db:

@@ -51,9 +51,11 @@ class ScanStats:
     failed: int = 0
     unsettled: int = 0
     errors: list[str] = field(default_factory=list)
+    # scenes whose content is new or changed, i.e. that need generated assets
+    scene_ids: list[int] = field(default_factory=list)
 
     def summary(self) -> str:
-        parts = [f"{v} {k}" for k, v in vars(self).items() if k != "errors" and v]
+        parts = [f"{v} {k}" for k, v in vars(self).items() if isinstance(v, int) and v]
         return ", ".join(parts) or "no changes"
 
 
@@ -258,7 +260,9 @@ class Scanner:
                         file_id, e.size, e.mod_time, oshash,
                     )
                 if e.kind == "video":
-                    await self._upsert_scene(conn, file_id, probe)
+                    scene_id = await self._upsert_scene(conn, file_id, probe)
+                    if how != "moved":
+                        self.stats.scene_ids.append(scene_id)
                 elif e.kind == "image":
                     await self._upsert_image(conn, file_id, e.path, probe, folder_galleries)
                 else:
@@ -273,8 +277,8 @@ class Scanner:
         if len(self.stats.errors) < 20:
             self.stats.errors.append(f"{e.path}: {exc}")
 
-    async def _upsert_scene(self, conn, file_id: int, p: dict) -> None:
-        await conn.execute(
+    async def _upsert_scene(self, conn, file_id: int, p: dict) -> int:
+        return await conn.fetchval(
             """INSERT INTO scenes (file_id, duration, width, height, framerate, bitrate,
                                    video_codec, audio_codec, container)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -282,7 +286,8 @@ class Scanner:
                    duration = EXCLUDED.duration, width = EXCLUDED.width, height = EXCLUDED.height,
                    framerate = EXCLUDED.framerate, bitrate = EXCLUDED.bitrate,
                    video_codec = EXCLUDED.video_codec, audio_codec = EXCLUDED.audio_codec,
-                   container = EXCLUDED.container""",
+                   container = EXCLUDED.container
+               RETURNING id""",
             file_id, p["duration"], p["width"], p["height"], p["framerate"], p["bitrate"],
             p["video_codec"], p["audio_codec"], p["container"],
         )
