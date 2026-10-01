@@ -83,7 +83,11 @@ and keeps access logs off (URLs identify content).
 
 - `POST /api/libraries {"path": "/media/...", "watch": true}`: paths must be inside `/media`,
   must not overlap each other or the generated dir.
-- `POST /api/libraries/{id}/scan` (optionally `{"path": subdir}`), `POST /api/libraries/scan` for all.
+- `POST /api/libraries/{id}/scan` (optionally `{"path": subdir}` to rescan just one folder,
+  e.g. a single artist), `POST /api/libraries/scan` for all.
+- `GET /api/libraries/browse?path=…`: subfolders of a folder under `/media` (admin; never
+  leaves the media root; skips hidden and symlinked folders like the scanner does). The UI's
+  **Browse…** and **Scan folder…** pickers use it.
 - `GET /api/jobs`, `GET /api/jobs/{id}`, `POST /api/jobs/{id}/cancel`.
 
 Scan behaviour: unchanged files are skipped without DB or probe work; moved files are

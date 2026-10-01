@@ -45,7 +45,15 @@ test("first run: create the admin account", async () => {
 
 test("admin adds a library and it gets indexed", async () => {
   await nav("Admin").click();
-  await page.getByLabel("Library path").fill("/media/lib");
+  // pick the folder with the browser rather than typing it
+  await page.getByRole("button", { name: "Browse…" }).click();
+  const picker = page.getByRole("dialog", { name: "Choose a library folder" });
+  await picker.getByRole("button", { name: "Open lib" }).click();
+  await expect(picker.getByTestId("picker-path")).toHaveText("/media/lib");
+  await expect(picker.getByRole("button", { name: "Open videos" })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/02a-folder-picker.png` });
+  await picker.getByRole("button", { name: "Use this folder" }).click();
+  await expect(page.getByLabel("Library path")).toHaveValue("/media/lib");
   await page.getByRole("button", { name: "Add library" }).click();
   await expect(page.getByTestId("library")).toContainText("/media/lib");
   await expect(page.getByText(/Queued job #\d+/)).toBeVisible();
@@ -60,6 +68,31 @@ test("admin adds a library and it gets indexed", async () => {
   }).toPass({ timeout: 90_000 });
   await expect(page.getByTestId("job-row").filter({ hasText: "failed" })).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}/03-jobs.png` });
+});
+
+test("scan just one folder of a library", async () => {
+  await adminNav("Libraries").click();
+  await page.getByRole("button", { name: "Scan folder…" }).click();
+  const picker = page.getByRole("dialog", { name: "Scan a single folder" });
+  await expect(picker.getByTestId("picker-path")).toHaveText("/media/lib");
+  await expect(picker.getByRole("button", { name: "Up one level" })).toHaveCount(0); // can't leave the library
+  await picker.getByRole("button", { name: "Open pics" }).click();
+  await picker.getByRole("button", { name: "Scan this folder" }).click();
+  await expect(page.getByText(/Queued job #\d+/)).toBeVisible();
+
+  // the existing library is offered as "library" and can't be added again
+  await page.getByRole("button", { name: "Browse…" }).click();
+  const add = page.getByRole("dialog", { name: "Choose a library folder" });
+  await expect(add.getByRole("button", { name: "Open lib" })).toContainText("library");
+  await add.getByRole("button", { name: "Open lib" }).click();
+  await expect(add.getByText("Already part of the library /media/lib")).toBeVisible();
+  await expect(add.getByRole("button", { name: "Use this folder" })).toBeDisabled();
+  await add.getByRole("button", { name: "Cancel" }).click();
+
+  await adminNav("Jobs").click();
+  const row = page.getByTestId("job-row").filter({ hasText: "/media/lib/pics" });
+  await expect(row).toContainText("done");
+  await expect(row).toContainText("no changes");
 });
 
 test("scene grid shows indexed videos", async () => {

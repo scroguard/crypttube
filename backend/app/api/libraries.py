@@ -1,3 +1,6 @@
+import asyncio
+import os
+import re
 from pathlib import Path
 
 import asyncpg
@@ -57,6 +60,66 @@ async def _validate_path(pool: asyncpg.Pool, raw: str) -> Path:
 
 def _row(r) -> dict:
     return dict(r)
+
+
+BROWSE_LIMIT = 5000
+
+
+def _natural(name: str) -> list:
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
+
+
+def _list_subdirs(path: Path, skip: Path) -> list[str]:
+    """Visible subdirectories, mirroring what the scanner walks: hidden directories and
+    symlinked directories are skipped (os.walk doesn't follow links)."""
+    names = []
+    with os.scandir(path) as it:
+        for entry in it:
+            if entry.name.startswith("."):
+                continue
+            try:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            if Path(entry.path) == skip:
+                continue
+            names.append(entry.name)
+    return sorted(names, key=_natural)
+
+
+@router.get("/browse")
+async def browse(request: Request, path: str | None = None) -> dict:
+    """List the subdirectories of a folder under the media root, for picking a library
+    path or a subfolder to scan. Never lists anything outside the media root."""
+    settings = get_settings()
+    media = settings.media_dir.resolve()
+    if path is not None and not path.startswith("/"):
+        raise HTTPException(422, "path must be absolute")
+    target = Path(path).resolve() if path else media
+    if not target.is_relative_to(media):
+        raise HTTPException(422, f"path must be inside {media}")
+    if not target.is_dir():
+        raise HTTPException(404, "folder not found")
+    try:
+        names = await asyncio.to_thread(_list_subdirs, target, settings.generated_dir.resolve())
+    except PermissionError:
+        raise HTTPException(403, "folder is not readable by the server") from None
+
+    libraries = {r["path"]: r["id"] for r in await request.app.state.pool.fetch(
+        "SELECT id, path FROM library_paths")}
+    containing = next(({"id": lid, "path": lp} for lp, lid in libraries.items()
+                       if target == Path(lp) or target.is_relative_to(lp)), None)
+    entries = [{"name": n, "path": str(target / n), "library_id": libraries.get(str(target / n))}
+               for n in names[:BROWSE_LIMIT]]
+    return {
+        "path": str(target),
+        "root": str(media),
+        "parent": str(target.parent) if target != media else None,
+        "library": containing,
+        "entries": entries,
+        "truncated": len(names) > BROWSE_LIMIT,
+    }
 
 
 @router.get("")
@@ -124,6 +187,9 @@ async def scan_library(library_id: int, request: Request, body: ScanRequest | No
         sub_path = Path(body.path).resolve()
         if not sub_path.is_relative_to(lib_path):
             raise HTTPException(422, "path is outside the library")
+        if not sub_path.is_dir():
+            # A manual scan of a mistyped path would mark everything "under" it missing.
+            raise HTTPException(422, "folder does not exist")
         sub = None if str(sub_path) == lib_path else str(sub_path)
     job_id = await jobs.enqueue(pool, "scan", {"library_id": library_id, "path": sub},
                                 dedupe_key=scan_dedupe_key(library_id, sub))
