@@ -269,6 +269,24 @@ API: `/api/my/libraries` (list/create), `/api/my/libraries/{id}` (PATCH/DELETE),
 `/api/my/libraries/{id}/files` (GET list, `PUT ?path=` upload raw body, `DELETE ?path=`),
 `/api/my/share-targets`; admin overview at `/api/libraries/user`.
 
+## Importing from Stash
+
+Admin → Import reads a [Stash](https://github.com/stashapp/stash) database (`stash-go.sqlite`,
+any schema version) and stages its tags, performers and studios for review. Nothing is
+created until an admin approves it: per kind, either everything or a ticked selection.
+Rejecting the import discards the staged data.
+
+- Upload the file, or put a copy in the media store and give its path. Use a Stash backup
+  (or stop Stash before copying). The file is opened read-only and not kept.
+- Items whose name already exists here are matched and left untouched.
+- Carried over: tag descriptions, aliases (appended to the description) and hierarchy;
+  performer details, aliases, tags and favourites (they become the importing admin's);
+  studio parents, URL, details and rating.
+- Pictures are not taken from Stash. "Pictures from a folder" on the same page assigns
+  images from a folder in the media store by file name (`Some Studio.png` → "Some Studio").
+  Keep that folder outside your libraries, e.g. `/media/_studio-images`.
+- Scene/image assignments, markers and play history are not imported.
+
 ## Access control
 
 Three layers, all applied inside SQL by one clause builder (`app/acl.py`): library

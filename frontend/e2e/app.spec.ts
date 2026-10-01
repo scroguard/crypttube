@@ -716,3 +716,78 @@ test("owner shares the library with one user", async () => {
   await login(ADMIN.username, ADMIN.password); // still not shared with the admin
   await expect(page.getByTestId("total")).toHaveText("3 scenes");
 });
+
+test("import from Stash: review, approve selectively, reject, studio pictures by name", async () => {
+  await page.goto("/admin/libraries");
+  await adminNav("Import").click();
+  await expect(page.getByRole("heading", { name: "Import from Stash" })).toBeVisible();
+
+  // something that isn't a Stash database is refused and changes nothing
+  await page.getByLabel("Stash database file").setInputFiles("package.json");
+  await expect(page.getByRole("alert")).toContainText("not an SQLite database");
+
+  const read = async () => {
+    await page.getByLabel("Path on the server").fill("/media/stash/stash-go.sqlite");
+    await page.getByRole("button", { name: "Read", exact: true }).click();
+    await expect(page.getByTestId("stash-review")).toContainText("schema 85");
+  };
+
+  // rejecting an import adds nothing
+  await read();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Reject import" }).click();
+  await expect(page.getByLabel("Path on the server")).toBeVisible();
+  await page.goto("/tags");
+  await expect(page.getByText("Stash Setting")).toHaveCount(0);
+
+  // tags: approve two of the three
+  await page.goto("/admin/import");
+  await read();
+  const review = page.getByTestId("stash-review");
+  await expect(review.getByRole("tab", { name: "Tags (3 to review)" })).toBeVisible();
+  await expect(page.getByTestId("stash-item")).toHaveCount(3);
+  await expect(page.getByTestId("stash-item").filter({ hasText: "Stash Rooftop" })).toContainText("under Stash Setting");
+  await page.getByLabel("Stash Setting", { exact: true }).check();
+  await page.getByLabel("Stash Rooftop", { exact: true }).check();
+  await page.screenshot({ path: `${SHOTS}/16-stash-review.png` });
+  await page.getByRole("button", { name: "Import selected (2)" }).click();
+  await expect(page.getByRole("status")).toContainText("Imported 2 tags");
+  await expect(page.getByTestId("stash-counts")).toContainText("2 imported · 0 already here · 1 to review");
+  await expect(page.getByTestId("stash-item").filter({ hasText: "Stash Rooftop" })).toContainText("Imported");
+  await expect(page.getByLabel("Stash Unused", { exact: true })).toBeEnabled();
+
+  // performers: everything
+  await review.getByRole("tab", { name: /Performers/ }).click();
+  await expect(page.getByTestId("stash-item")).toHaveCount(2);
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Import all 2" }).click();
+  await expect(page.getByRole("status")).toContainText("Imported 2 performers");
+
+  // studios: everything, then finish (one tag was deliberately left out)
+  await review.getByRole("tab", { name: /Studios/ }).click();
+  await expect(page.getByTestId("stash-item").filter({ hasText: "Velvet Shorts" })).toContainText("part of Velvet Works");
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Import all 2" }).click();
+  await expect(page.getByRole("status")).toContainText("Imported 2 studios");
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Finish" }).click();
+  await expect(page.getByLabel("Path on the server")).toBeVisible();
+
+  // studio pictures, matched by file name ("velvet works.jpg" -> Velvet Works)
+  await page.getByLabel("Picture folder").fill("/media/_studio-images");
+  await page.getByRole("button", { name: "Assign pictures" }).click();
+  await expect(page.getByTestId("images-result")).toContainText("Assigned 1 of 1 pictures");
+  await page.screenshot({ path: `${SHOTS}/17-stash-done.png` });
+
+  // the result is ordinary metadata
+  await page.goto("/tags");
+  await expect(page.getByText("Stash Rooftop").first()).toBeVisible();
+  await expect(page.getByText("Stash Unused")).toHaveCount(0);
+  await page.goto("/studios");
+  await expect(page.getByText("Velvet Shorts").first()).toBeVisible();
+  await expect(page.locator('img[src*="/studios/"]')).toHaveCount(1);
+  await page.goto("/performers");
+  await page.getByText("Imported Ivy").last().click();
+  await expect(page.getByRole("heading", { name: "Imported Ivy" })).toBeVisible();
+  await expect(page.getByText("Stash Rooftop").first()).toBeVisible();   // her tag came along
+});

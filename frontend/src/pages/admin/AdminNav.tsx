@@ -8,6 +8,7 @@ export default function AdminNav() {
       <NavLink to="/admin/libraries" className={cls}>Libraries</NavLink>
       <NavLink to="/admin/jobs" className={cls}>Jobs</NavLink>
       <NavLink to="/admin/users" className={cls}>Users</NavLink>
+      <NavLink to="/admin/import" className={cls}>Import</NavLink>
     </nav>
   );
 }

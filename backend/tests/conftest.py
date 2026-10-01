@@ -99,7 +99,7 @@ async def clean(app):
     """Empty all data tables (for tests that write through the pool, not a rolled-back tx)."""
     await app.state.pool.execute(
         """TRUNCATE library_paths, files, scenes, images, galleries, studios, performers,
-                    tags, jobs, entity_counts RESTART IDENTITY CASCADE"""
+                    tags, jobs, entity_counts, stash_imports RESTART IDENTITY CASCADE"""
     )
     # Generated assets are keyed by content hash, so leftovers from one test would look
     # like "already generated" to the next.
