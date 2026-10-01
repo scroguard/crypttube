@@ -288,3 +288,15 @@ export interface UserLibrarySummary {
   file_count: number;
   bytes: number;
 }
+
+export interface HomeSection {
+  type: string;
+  limit: number;
+  title: string | null;
+}
+
+export interface HomeConfig {
+  sections: HomeSection[];
+  available: { type: string; label: string; description: string }[];
+  customized: boolean;
+}

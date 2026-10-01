@@ -1,10 +1,12 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../api/client";
 import type { Page, Ref } from "../api/types";
 
 export type EntityKind = "tags" | "performers" | "studios";
+
+const LIST_HEIGHT = 256; // max-h-64
 
 /** Resolve display names for ids (shares the cache with detail pages). */
 export function useNames(kind: EntityKind, ids: number[]): Map<number, string> {
@@ -40,6 +42,15 @@ export default function EntityPicker({ kind, value, onChange, single = false, pl
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const names = useNames(kind, value);
+  // Open the list upward when there's no room below (e.g. in the bulk bar pinned to the
+  // bottom of the window), so suggestions are never off-screen.
+  const [dropUp, setDropUp] = useState(false);
+  useLayoutEffect(() => {
+    if (!open || !root.current) return;
+    const r = root.current.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom;
+    setDropUp(below < LIST_HEIGHT + 16 && r.top > below);
+  }, [open]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(text.trim()), 150);
@@ -101,7 +112,8 @@ export default function EntityPicker({ kind, value, onChange, single = false, pl
                onFocus={() => setOpen(true)} onKeyDown={onKey} aria-label={placeholder ?? `Add ${kind}…`} />
       </div>
       {open && (options.length > 0 || canCreate) && (
-        <ul role="listbox" className="card absolute z-30 mt-1 max-h-64 w-full overflow-y-auto bg-zinc-900 py-1 shadow-xl">
+        <ul role="listbox" data-drop={dropUp ? "up" : "down"}
+            className={`card absolute z-30 max-h-64 w-full overflow-y-auto bg-zinc-900 py-1 shadow-xl ${dropUp ? "bottom-full mb-1" : "mt-1"}`}>
           {options.map((o, i) => (
             <li key={o.id} role="option" aria-selected={i === active}
                 className={`cursor-pointer px-3 py-1.5 text-sm ${i === active ? "bg-zinc-800" : ""}`}

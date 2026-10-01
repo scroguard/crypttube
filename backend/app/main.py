@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 
-from app.api import (browse, edit, entities, groups, health, jobs, libraries, media, my_libraries,
-                     session, users)
+from app.api import (browse, edit, entities, groups, health, home, jobs, libraries, media,
+                     my_libraries, session, users)
 from app.auth import require_admin, require_user
 from app.config import get_settings
 from app.db import create_pool, migrate
@@ -38,7 +38,7 @@ app = FastAPI(
 ROUTES = [
     ((health.router, session.router), []),
     ((browse.router, entities.router, groups.router, media.router, edit.read_router, edit.router,
-      my_libraries.router),
+      my_libraries.router, home.router),
      [Depends(require_user)]),
     ((libraries.router, jobs.router, users.router), [Depends(require_admin)]),
 ]

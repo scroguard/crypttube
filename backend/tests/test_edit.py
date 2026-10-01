@@ -114,8 +114,9 @@ async def test_performer_crud(app, client, seed):
     assert (await client.post("/api/performers", json={"name": "Dana", "disambiguation": "2"})).status_code == 201
     assert (await client.post("/api/performers", json={"name": "X", "gender": "robot"})).status_code == 422
 
-    d = (await client.patch(f"/api/performers/{d['id']}", json={"aliases": ["Dee"], "favorite": True})).json()
-    assert d["aliases"] == ["Dee"] and d["favorite"] is True and d["gender"] == "female"
+    d = (await client.patch(f"/api/performers/{d['id']}", json={"aliases": ["Dee"]})).json()
+    assert d["aliases"] == ["Dee"] and d["favorite"] is False and d["gender"] == "female"
+    assert (await client.patch(f"/api/performers/{d['id']}", json={"favorite": True})).status_code == 422  # personal now
     assert (await client.patch(f"/api/performers/{d['id']}", json={"name": None})).status_code == 422
 
     alice = seed["performers"]["Alice"]

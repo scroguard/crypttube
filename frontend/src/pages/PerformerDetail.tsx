@@ -8,7 +8,7 @@ import { EntityImageControls, FormButtons } from "../components/EditForms";
 import EntityContent from "../components/EntityContent";
 import { DeleteEntityButton } from "../components/EntityDialogs";
 import EntityPicker, { creator } from "../components/EntityPicker";
-import { ErrorBox, Field, Initials, Modal, Rating, Spinner, Toggle } from "../components/ui";
+import { ErrorBox, Field, Initials, Modal, Rating, Spinner } from "../components/ui";
 import { age, formatDate, GENDERS } from "../lib/format";
 import { Row } from "./SceneDetail";
 
@@ -17,6 +17,7 @@ export default function PerformerDetail() {
   const q = useDetail<Performer>(`/performers/${id}`);
   const [editing, setEditing] = useState(false);
   const patch = useWrite((body: object) => api(`/performers/${id}`, { method: "PATCH", json: body }));
+  const favorite = useWrite((on: boolean) => api(`/performers/${id}/favorite`, { method: "PUT", json: { favorite: on } }));
 
   if (q.isPending) return <Spinner className="mt-24" />;
   if (q.isError) return <ErrorBox error={q.error} />;
@@ -45,8 +46,10 @@ export default function PerformerDetail() {
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-semibold">{p.name}</h1>
             {p.disambiguation && <span className="text-zinc-500">({p.disambiguation})</span>}
-            <button className={`text-2xl ${p.favorite ? "text-accent" : "text-zinc-600"} ${canEdit ? "hover:text-accent-hover" : ""}`}
-                    disabled={!canEdit} onClick={() => patch.mutate({ favorite: !p.favorite })} aria-label="Favorite">♥</button>
+            <button className={`text-2xl hover:text-accent-hover ${p.favorite ? "text-accent" : "text-zinc-600"}`}
+                    onClick={() => favorite.mutate(!p.favorite)} aria-pressed={p.favorite}
+                    aria-label={p.favorite ? "Remove from my favourites" : "Add to my favourites"}
+                    title={p.favorite ? "One of your favourites" : "Add to your favourites"}>♥</button>
             <Rating value={p.rating} onChange={canEdit ? (rating) => patch.mutate({ rating }) : undefined} />
             {canEdit && <div className="ml-auto flex gap-2"><button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button><DeleteEntityButton kind="performers" id={id} name={p.name} /></div>}
           </div>
@@ -78,13 +81,12 @@ function PerformerEditModal({ performer, onClose }: { performer: Performer; onCl
   const [gender, setGender] = useState(performer.gender ?? "");
   const [aliases, setAliases] = useState(performer.aliases.join(", "));
   const [details, setDetails] = useState(performer.details ?? "");
-  const [favorite, setFavorite] = useState(performer.favorite);
   const [tags, setTags] = useState(performer.tags.map((t) => t.id));
   const save = useWrite((body: object) => api(`/performers/${performer.id}`, { method: "PATCH", json: body }));
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    const body: Record<string, unknown> = { gender: gender || null, details: details.trim() || null, favorite, tag_ids: tags,
+    const body: Record<string, unknown> = { gender: gender || null, details: details.trim() || null, tag_ids: tags,
       aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean) };
     for (const [k, , type] of TEXT_FIELDS) {
       const v = form[k as string].trim();
@@ -111,7 +113,7 @@ function PerformerEditModal({ performer, onClose }: { performer: Performer; onCl
         <div className="sm:col-span-2"><Field label="Aliases (comma separated)"><input className="input" value={aliases} onChange={(e) => setAliases(e.target.value)} /></Field></div>
         <div className="sm:col-span-2"><Field label="Tags"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} /></Field></div>
         <div className="sm:col-span-2"><Field label="Details"><textarea className="input min-h-24" value={details} onChange={(e) => setDetails(e.target.value)} /></Field></div>
-        <Toggle checked={favorite} onChange={setFavorite} label="Favorite" />
+        <span />
         <FormButtons busy={save.isPending} error={save.error} onCancel={onClose} />
       </form>
     </Modal>

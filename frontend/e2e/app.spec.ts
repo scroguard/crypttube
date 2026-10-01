@@ -25,6 +25,9 @@ async function login(username: string, password: string) {
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();   // signed-in users land on Home
+  await nav("Scenes").click();
+  await expect(page).toHaveURL(/\/scenes/);
 }
 
 test.beforeAll(async ({ browser }) => {
@@ -40,6 +43,9 @@ test("first run: create the admin account", async () => {
   await page.getByLabel("Password (8+ characters)").fill(ADMIN.password);
   await page.getByLabel("Confirm password").fill(ADMIN.password);
   await page.getByRole("button", { name: "Create account" }).click();
+  // a brand-new install lands on an empty home page that points the admin at Libraries
+  await expect(page.getByTestId("home-empty")).toContainText("Add a library under Admin → Libraries");
+  await nav("Scenes").click();
   await expect(page.getByText("No scenes match.")).toBeVisible();
 });
 
@@ -171,6 +177,7 @@ test("editor workflow: rate and tag a scene", async () => {
   await page.getByRole("button", { name: "Edit" }).click();
   const dialog = page.getByRole("dialog", { name: "Edit scene" });
   await dialog.getByLabel("tags").fill("Outdoor");
+  await expect(dialog.getByRole("listbox")).toHaveAttribute("data-drop", "down");   // room below: opens downward
   await dialog.getByRole("option", { name: "Create “Outdoor”" }).click();
   await dialog.getByLabel("performers").fill("Alice");
   await dialog.getByRole("option", { name: "Create “Alice”" }).click();
@@ -268,8 +275,26 @@ test("assign performers to images (bulk + lightbox) and to a scene (inline)", as
   await page.getByTestId("image-tile").nth(1).click();
   const bulk = page.getByTestId("bulk-bar");
   await expect(bulk).toContainText("2 selected");
+  // Regression: in the bar pinned to the bottom of the window the suggestion list opened
+  // downward, off-screen. Check at a common laptop size that it opens upward and is visible.
+  await page.setViewportSize({ width: 1366, height: 768 });
   await bulk.getByLabel("Performers…").fill("Ali");
-  await page.getByRole("option", { name: "Alice" }).click();
+  const suggestion = page.getByRole("option", { name: "Alice" });
+  await expect(suggestion).toBeInViewport({ ratio: 1 });
+  await expect(bulk.getByRole("listbox")).toHaveAttribute("data-drop", "up");
+  // Geometry, independent of how many suggestions there are: the whole list sits above the
+  // input (with one suggestion a downward list would still happen to fit on screen).
+  const listBox = (await bulk.getByRole("listbox").boundingBox())!;
+  const inputBox = (await bulk.getByLabel("Performers…").boundingBox())!;
+  expect(listBox.y + listBox.height).toBeLessThanOrEqual(inputBox.y);
+  expect(listBox.y).toBeGreaterThanOrEqual(0);
+  await page.screenshot({ path: `${SHOTS}/09b0-bulk-picker-open.png` });
+  await suggestion.click();
+  await bulk.getByLabel("Tags…").fill("Out");
+  await expect(page.getByRole("option", { name: "Outdoor" })).toBeInViewport({ ratio: 1 });
+  await bulk.getByLabel("Tags…").fill("");
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1440, height: 900 });
   await bulk.getByRole("button", { name: "Add performers" }).click();
   await expect(bulk.getByRole("button", { name: "Add performers" })).toBeDisabled(); // applied, picker reset
   await page.screenshot({ path: `${SHOTS}/09b-bulk-images.png` });
@@ -463,6 +488,47 @@ test("edit dialog keeps focus while typing", async () => {
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(page.getByTestId("scene-title")).toHaveText("Beach Day Typed");
   await expect(page.getByText("Some notes")).toBeVisible();
+});
+
+test("home page: sections, per-user favourites, customize and reorder", async () => {
+  await nav("Home").click();
+  const section = (name: string) => page.getByRole("region", { name });
+  const headings = () => page.getByTestId("home-section").locator("h2").allTextContents();
+  await expect(section("Recently added scenes").getByTestId("scene-card")).toHaveCount(3);
+  await expect(section("Continue watching").getByTestId("scene-card")).toHaveCount(1);   // City Lights was paused midway
+  await expect(section("Recently added galleries").getByTestId("gallery-card")).toHaveCount(2);
+  await expect(section("Favourite performers")).toHaveCount(0);                          // empty sections are hidden
+  expect(await headings()).toEqual(["Continue watching", "Recently added scenes", "Recently added galleries"]);
+
+  // favourites are personal: mark Alice, and she appears on my home page
+  await nav("Performers").click();
+  await page.getByTestId("performer-card").filter({ hasText: "Alice" }).click();
+  await page.getByRole("button", { name: "Add to my favourites" }).click();
+  await expect(page.getByRole("button", { name: "Remove from my favourites" })).toBeVisible();
+  await nav("Home").click();
+  await expect(section("Favourite performers").getByTestId("performer-card")).toContainText("Alice");
+  await page.screenshot({ path: `${SHOTS}/10a-home.png`, fullPage: true });
+
+  // customize: add Studios, move it to the top, drop the galleries, rename a heading
+  await page.getByRole("button", { name: "Customize" }).click();
+  const editor = page.getByTestId("home-editor");
+  await editor.getByLabel("Section to add").selectOption("studios");
+  await editor.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(editor.getByTestId("home-row")).toHaveCount(5);
+  for (let i = 0; i < 4; i++) await editor.getByRole("button", { name: "Move Studios up" }).click();
+  await editor.getByRole("button", { name: "Remove Recently added galleries" }).click();
+  await editor.getByTestId("home-row").filter({ hasText: "Recently added scenes" }).getByLabel("Custom heading").fill("Fresh");
+  await page.screenshot({ path: `${SHOTS}/10b-home-customize.png` });
+  await editor.getByRole("button", { name: "Save" }).click();
+  await expect(editor).toBeHidden();
+  await expect.poll(headings).toEqual(["Studios", "Continue watching", "Fresh", "Favourite performers"]);
+
+  await page.reload();                                                                    // stored on the server
+  await expect.poll(headings).toEqual(["Studios", "Continue watching", "Fresh", "Favourite performers"]);
+
+  await page.getByRole("button", { name: "Customize" }).click();
+  await editor.getByRole("button", { name: "Reset to default" }).click();
+  await expect.poll(headings).toEqual(["Continue watching", "Recently added scenes", "Favourite performers", "Recently added galleries"]);
 });
 
 test("admin restricts a viewer, who then can't see the content", async () => {

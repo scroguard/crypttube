@@ -3,6 +3,7 @@ import { Link, NavLink } from "react-router";
 import { useLogout, useMe } from "../api/hooks";
 
 const NAV = [
+  ["/", "Home"],
   ["/scenes", "Scenes"],
   ["/galleries", "Galleries"],
   ["/images", "Images"],
@@ -23,12 +24,12 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1920px] items-center gap-4 px-4">
-          <Link to="/scenes" className="flex items-center gap-2 font-bold tracking-tight">
+          <Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
             <img src="/favicon.svg" alt="" className="h-6 w-6" /> goon
           </Link>
           <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="Main">
             {NAV.map(([to, label]) => (
-              <NavLink key={to} to={to} className={link}>{label}</NavLink>
+              <NavLink key={to} to={to} end={to === "/"} className={link}>{label}</NavLink>
             ))}
             {canUpload && <NavLink to="/uploads" className={link}>My uploads</NavLink>}
             {isAdmin && <NavLink to="/admin" className={link}>Admin</NavLink>}

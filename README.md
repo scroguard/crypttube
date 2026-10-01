@@ -85,6 +85,13 @@ scroll position), filters kept in the URL. Highlights:
   decode, falls back automatically on error, manual quality menu (Original, 1080p…360p),
   seek-bar sprite previews, keyboard shortcuts (space/k, j/l, ←/→, ↑/↓, m, f), per-user
   resume, play counts.
+- **Home page per user**: an ordered list of sections each user picks, sizes, renames and
+  reorders under **Customize** (continue watching, recently added scenes/galleries/images,
+  top rated, favourite performers, recently added performers, studios, my uploads). The
+  layout is stored per account (`GET/PUT/DELETE /api/me/home`); section content comes from
+  the normal list endpoints, so restrictions and ownership apply. Empty sections are hidden.
+- **Favourites are personal**: the heart on a performer marks *your* favourite
+  (`PUT /api/performers/{id}/favorite`), for any performer you can see.
 - **Grouped by performer**: Scenes and Images open grouped (a section per performer with
   their first dozen items and a link to all of them, then "Unassigned"); a toggle switches
   to the flat grid, remembered per browser. `GET /api/groups/{scenes,images}` backs it:

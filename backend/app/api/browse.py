@@ -54,6 +54,7 @@ class ContentFilter(ListParams):
     organized: bool | None = None
     library_ids: list[int] = []
     no_performers: bool | None = Field(None, description="true: only items with no performer assigned")
+    mine: bool | None = Field(None, description="true: only items in my own libraries")
     # internal: tag_ids resolved into groups by expand_hierarchies()
     tag_groups: list[list[int]] | None = Field(None, exclude=True)
 
@@ -144,6 +145,9 @@ def content_where(q: Q, f: ContentFilter, kind: str, alias: str, acl: Acl) -> li
         w.append(f"{alias}.library_id = ANY({q.p(f.library_ids)}::bigint[])")
     if f.no_performers is not None:
         w.append(f"cardinality({alias}.performer_ids) {'=' if f.no_performers else '>'} 0")
+    if f.mine:
+        w.append(f"{alias}.library_id IN (SELECT id FROM library_paths "
+                 f"WHERE owner_id = {q.p(acl.user_id, 'acl_me')}::bigint)")
     return w
 
 

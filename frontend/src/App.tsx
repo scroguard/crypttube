@@ -6,6 +6,7 @@ import { ErrorBox, Spinner } from "./components/ui";
 import Login from "./pages/Login";
 import Setup from "./pages/Setup";
 
+const Home = lazy(() => import("./pages/Home"));
 const Scenes = lazy(() => import("./pages/Scenes"));
 const SceneDetail = lazy(() => import("./pages/SceneDetail"));
 const Galleries = lazy(() => import("./pages/Galleries"));
@@ -35,7 +36,7 @@ export default function App() {
     <Layout>
       <Suspense fallback={<Spinner className="mt-24" />}>
         <Routes>
-          <Route path="/" element={<Navigate to="/scenes" replace />} />
+          <Route path="/" element={<Home />} />
           <Route path="/scenes" element={<Scenes />} />
           <Route path="/scenes/:id" element={<SceneDetail />} />
           <Route path="/galleries" element={<Galleries />} />

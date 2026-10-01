@@ -313,7 +313,6 @@ class PerformerBody(Body):
     career_end: int | None = None
     details: str | None = None
     rating: int | None = Rating
-    favorite: bool = False
     custom_fields: dict = {}
     aliases: list[str] = []
     tag_ids: list[int] = []
@@ -321,7 +320,6 @@ class PerformerBody(Body):
 
 class PerformerPatch(PerformerBody):
     name: str | None = Field(None, min_length=1, max_length=200)
-    favorite: bool | None = None
     custom_fields: dict | None = None
     aliases: list[str] | None = None
     tag_ids: list[int] | None = None
@@ -360,7 +358,7 @@ async def patch_performer(performer_id: int, body: PerformerPatch, request: Requ
     await require_entity_edit(request.app.state.pool, acl, "performer", [performer_id])
     data, links = _split(body, "aliases", "tag_ids")
     await require_visible(request.app.state.pool, acl, "tag", links.get("tag_ids", []))
-    for k in ("name", "favorite", "custom_fields"):
+    for k in ("name", "custom_fields"):
         if k in data and data[k] is None:
             raise HTTPException(422, f"{k} cannot be null")
     await _write(request, lambda conn: _save_performer(conn, performer_id, data, links))

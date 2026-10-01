@@ -7,8 +7,8 @@ reveal hidden content.
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import Field
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.acl import Acl, visible
 from app.auth import get_acl
@@ -49,6 +49,12 @@ def _visible_or_404(row, what: str, acl: Acl):
 # Performers
 # ---------------------------------------------------------------------------
 
+def _is_favorite(q: Q, acl: Acl, alias: str) -> str:
+    """Favourites are personal: is this performer one of the viewer's?"""
+    return (f"EXISTS (SELECT 1 FROM user_favorite_performers uf WHERE uf.user_id = "
+            f"{q.p(acl.user_id, 'acl_me')}::bigint AND uf.performer_id = {alias}.id)")
+
+
 PERFORMER_SORTS = {
     "name": Sort("p.name", "text", collate="natural_sort"),
     "created_at": Sort("p.created_at", "timestamptz"),
@@ -81,7 +87,7 @@ async def list_performers(request: Request, f: Annotated[PerformerFilter, Query(
         if f.gender:
             w.append(f"p.gender = {q.p(f.gender)}::gender")
         if f.favorite is not None:
-            w.append(f"p.favorite = {q.p(f.favorite)}")
+            w.append(("" if f.favorite else "NOT ") + _is_favorite(q, acl, "p"))
         for t in f.tag_ids:
             w.append(f"EXISTS (SELECT 1 FROM performer_tags x WHERE x.performer_id = p.id "
                      f"AND x.tag_id = ANY({tag_set(q, [t], f.include_sub_tags)}))")  # few rows; no array needed
@@ -90,11 +96,12 @@ async def list_performers(request: Request, f: Annotated[PerformerFilter, Query(
         return w
 
     def enrich(q: Q):
-        return counts(q, acl, "performer", "p")
+        join, cols = counts(q, acl, "performer", "p")
+        return join, f"{cols}, {_is_favorite(q, acl, 'p')} AS favorite"
 
     lq = ListQuery(
         alias="p", from_="performers p",
-        select="""p.id, p.name, p.disambiguation, p.gender, p.birthdate, p.favorite, p.rating,
+        select="""p.id, p.name, p.disambiguation, p.gender, p.birthdate, p.rating,
                   p.image_path, p.updated_at""",
         sorts=PERFORMER_SORTS, where=where, enrich=enrich,
     )
@@ -116,12 +123,35 @@ async def get_performer(performer_id: int, request: Request, acl: Acl = Depends(
                ARRAY(SELECT alias FROM performer_aliases WHERE performer_id = p.id ORDER BY alias) AS aliases,
                (SELECT coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name)
                                           ORDER BY x.name COLLATE natural_sort), '[]')
-                FROM performer_tags l JOIN tags x ON x.id = l.tag_id WHERE l.performer_id = p.id) AS tags
+                FROM performer_tags l JOIN tags x ON x.id = l.tag_id WHERE l.performer_id = p.id) AS tags,
+               {_is_favorite(q, acl, "p")} AS favorite
                {cols}
         FROM performers p {join} WHERE {cond}""", *q.args)
     out = _visible_or_404(row, "performer", acl)
     out["image_url"] = entity_image_url("performers", performer_id, out.pop("image_path"), out["updated_at"])
     return out
+
+
+class FavoriteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    favorite: bool
+
+
+@router.put("/performers/{performer_id}/favorite", status_code=204)
+async def set_favorite(performer_id: int, body: FavoriteBody, request: Request,
+                       acl: Acl = Depends(get_acl)) -> Response:
+    """Mark or unmark a performer as one of *my* favourites. Any signed-in user may,
+    for any performer they can see; it changes nothing for anyone else."""
+    await get_performer(performer_id, request, acl)   # 404 unless visible
+    pool = request.app.state.pool
+    if body.favorite:
+        await pool.execute(
+            "INSERT INTO user_favorite_performers (user_id, performer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            acl.user_id, performer_id)
+    else:
+        await pool.execute("DELETE FROM user_favorite_performers WHERE user_id = $1 AND performer_id = $2",
+                           acl.user_id, performer_id)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
