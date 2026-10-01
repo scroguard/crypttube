@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     db_pool_max: int = 20
     # ingestion
     scan_settle_seconds: float = 10
-    scan_probe_concurrency: int = 4
+    scan_probe_concurrency: int = 4   # files read/probed at once during a scan
     watcher_polling: bool = False
     watcher_quiet_seconds: float = 5
     watcher_max_wait_seconds: float = 60

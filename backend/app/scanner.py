@@ -205,12 +205,23 @@ class Scanner:
         return self.stats
 
     async def _hash_all(self, entries: list[Entry]) -> list[tuple[Entry, str | None]]:
+        """Fingerprint new files, a few at a time. (Hashing everything at once put one
+        blocked thread per file on the disk and drove the machine's load through the roof.)"""
         async def one(e: Entry):
-            try:
-                return e, await asyncio.to_thread(media.oshash, e.path)
-            except OSError:
-                return e, None
-        return list(await asyncio.gather(*(one(e) for e in entries)))
+            async with self.sem:
+                try:
+                    return e, await asyncio.to_thread(media.oshash, e.path)
+                except OSError:
+                    return e, None
+
+        out: list[tuple[Entry, str | None]] = []
+        for i in range(0, len(entries), BATCH):
+            if self.ctx and await self.ctx.cancelled():
+                break
+            out += await asyncio.gather(*(one(e) for e in entries[i:i + BATCH]))
+            if self.ctx:
+                await self.ctx.progress(0.0, f"reading {len(out)}/{len(entries)} new files")
+        return out
 
     async def _match_moves(self, new_hashed, vanished, library_id) -> dict[str, int]:
         """Pair new paths with vanished/missing files that have the same content hash."""

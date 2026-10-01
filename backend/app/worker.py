@@ -9,6 +9,7 @@ import logging
 import os
 import signal
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 
 import asyncpg
 
@@ -304,6 +305,14 @@ async def job_loop(pool, settings, wake: asyncio.Event, stop: asyncio.Event) -> 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = get_settings()
+    # Background work yields to everything else on the machine, and never uses more
+    # threads for file access than the configured concurrency allows.
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=settings.scan_probe_concurrency + 4, thread_name_prefix="io"))
     settings.generated_dir.mkdir(parents=True, exist_ok=True)
     pool = await create_pool(settings.db_params(), 2, settings.scan_probe_concurrency + 4)
     await migrate(pool)

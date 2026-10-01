@@ -1,8 +1,10 @@
 """File classification and probing (ffprobe for video, Pillow for images)."""
 
 import asyncio
+import functools
 import json
 import os
+import shutil
 import struct
 import zipfile
 from dataclasses import dataclass
@@ -53,9 +55,26 @@ class ProbeError(Exception):
     pass
 
 
+@functools.cache
+def _background_prefix() -> tuple[str, ...]:
+    prefix: list[str] = []
+    if shutil.which("nice"):
+        prefix += ["nice", "-n", "15"]
+    if shutil.which("ionice"):
+        prefix += ["ionice", "-c", "3"]   # idle I/O class (honoured by BFQ/CFQ; harmless otherwise)
+    return tuple(prefix)
+
+
+def background(cmd: list[str]) -> list[str]:
+    """Run a helper process (ffprobe, ffmpeg for previews) at the lowest CPU and I/O
+    priority, so indexing never competes with playback or anything else on the machine."""
+    return [*_background_prefix(), *cmd]
+
+
 async def ffprobe(path: str, timeout: float = 60) -> dict:
     proc = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path,
+        *background(["ffprobe", "-v", "error", "-threads", "1", "-print_format", "json",
+                     "-show_format", "-show_streams", path]),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:

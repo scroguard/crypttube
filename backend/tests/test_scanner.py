@@ -197,3 +197,41 @@ async def test_many_images_with_a_small_pool_do_not_deadlock(app, clean, library
     finally:
         await small.close()
     assert stats.new == 47 and stats.failed == 0
+
+
+async def test_scan_reads_files_with_bounded_concurrency(app, clean, library_dir, sample_media, monkeypatch):
+    """A first scan of a big folder must not read every file at once."""
+    import shutil
+    import threading
+    import time
+    from app import media
+    for i in range(120):
+        shutil.copy(sample_media / "img0.jpg", library_dir / "pics" / f"bulk{i}.jpg")
+    lock, state = threading.Lock(), {"now": 0, "peak": 0}
+
+    def tracked(fn):
+        def wrapper(*args, **kwargs):
+            with lock:
+                state["now"] += 1
+                state["peak"] = max(state["peak"], state["now"])
+            try:
+                time.sleep(0.002)
+                return fn(*args, **kwargs)
+            finally:
+                with lock:
+                    state["now"] -= 1
+        return wrapper
+
+    monkeypatch.setattr(media, "oshash", tracked(media.oshash))
+    monkeypatch.setattr(media, "probe_image", tracked(media.probe_image))
+    pool = app.state.pool
+    lid = await pool.fetchval("INSERT INTO library_paths (path) VALUES ($1) RETURNING id", str(library_dir))
+    stats = await Scanner(pool, get_settings().generated_dir, settle_seconds=0, probe_concurrency=3).scan(lid)
+    assert stats.new >= 120 and stats.failed == 0
+    assert state["peak"] <= 3
+
+
+def test_helper_processes_run_at_low_priority():
+    from app import media
+    cmd = media.background(["ffprobe", "x"])
+    assert cmd[-2:] == ["ffprobe", "x"] and cmd[:3] == ["nice", "-n", "15"] and "ionice" in cmd

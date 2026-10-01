@@ -19,7 +19,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from app.media import ProbeError
+from app.media import ProbeError, background
 
 THUMB_WIDTHS = (160, 320, 640, 1280)
 SCREENSHOT_WIDTH = 1280
@@ -180,7 +180,7 @@ def make_thumbnail(src, width: int, dest: Path) -> None:
 
 async def _run_ffmpeg(args: list[str], timeout: float = 120) -> bytes:
     proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *args,
+        *background(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *args]),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:
@@ -199,8 +199,10 @@ async def _frame_at(path: str, seconds: float, width: int, *, fast: bool) -> Ima
     # -noaccurate_seek emits the keyframe at or before the seek point: one decoded
     # frame instead of decoding forward to the exact timestamp.
     seek = ["-noaccurate_seek"] if fast else []
+    # One decoder thread: by default ffmpeg starts a thread per core for every process,
+    # and several of these run at once.
     out = await _run_ffmpeg([
-        *seek, "-ss", f"{seconds:.3f}", "-i", path, "-frames:v", "1", "-an", "-sn",
+        "-threads", "1", *seek, "-ss", f"{seconds:.3f}", "-i", path, "-frames:v", "1", "-an", "-sn",
         "-vf", f"scale='min({width},iw)':-2", "-f", "image2pipe", "-c:v", "png", "-",
     ])
     if not out:
@@ -244,7 +246,7 @@ def sprite_layout(duration: float) -> SpriteLayout:
 
 
 async def make_sprite(path: str, duration: float, version: str, dest_img: Path, dest_vtt: Path,
-                      concurrency: int = 4) -> None:
+                      concurrency: int = 2) -> None:
     """A grid of evenly spaced keyframes plus a WebVTT file mapping time ranges to tiles
     (the `#xywh=` media-fragment convention understood by most web players)."""
     if not duration or duration <= 0:

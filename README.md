@@ -287,6 +287,16 @@ Rejecting the import discards the staged data.
   Keep that folder outside your libraries, e.g. `/media/_studio-images`.
 - Scene/image assignments, markers and play history are not imported.
 
+## Resource use
+
+Scans and preview generation run in `goonstreamer-worker`, which is deliberately gentle:
+it runs at low CPU priority, its ffmpeg/ffprobe helpers at the lowest CPU and I/O priority
+with one decoder thread each, and it reads only a few files at a time. The container is
+also capped (`WORKER_CPUS`, default 2; `WORKER_MEMORY`, default 2g). To index faster on a
+strong server raise those together with `SCAN_PROBE_CONCURRENCY` (files read at once,
+default 4) and `GENERATE_CONCURRENCY` (scenes getting previews at once, default 2); on slow
+or network storage, lower the two concurrency values.
+
 ## Maintenance
 
 Admin → Maintenance.
