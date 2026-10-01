@@ -287,6 +287,28 @@ Rejecting the import discards the staged data.
   Keep that folder outside your libraries, e.g. `/media/_studio-images`.
 - Scene/image assignments, markers and play history are not imported.
 
+## Maintenance
+
+Admin → Maintenance.
+
+**Clean up removed media.** Files deleted outside the app stay in the database, marked
+missing, so their metadata survives if they come back. A cleanup rescans the libraries
+(moved or renamed files are followed, not removed), then deletes the entries of files that
+are really gone and the generated files left behind. "Check" is a dry run that only
+reports. Safeguards: a library that is disabled or whose folder isn't there (an unmounted
+drive) is skipped; a file marked missing but present on disk is kept; and nothing is
+removed while files are still being copied. Originals are never touched.
+
+**Routine maintenance** runs once a day (default 04:00, in the time zone given by `TZ`),
+or on demand:
+
+- deletes expired sessions and old job records (finished: 7 days, failed: 30 days);
+- deletes generated files nothing refers to: previews of scenes and thumbnails of images
+  that no longer exist, pictures of deleted performers/studios/tags, stale temp files;
+- optionally forgets files that have been missing for more than N days (off by default);
+- runs `VACUUM (ANALYZE)` on every table, which reclaims dead rows and refreshes the
+  planner statistics. It does not block readers or writers.
+
 ## Access control
 
 Three layers, all applied inside SQL by one clause builder (`app/acl.py`): library

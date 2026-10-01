@@ -12,7 +12,7 @@ import traceback
 
 import asyncpg
 
-from app import counts, generated, jobs
+from app import counts, generated, jobs, maintenance
 from app.config import Settings, get_settings
 from app.db import create_pool, migrate
 from app.media import ProbeError
@@ -24,7 +24,8 @@ log = logging.getLogger("worker")
 LIBRARIES_CHANNEL = "libraries_changed"
 
 
-async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict,
+                      totals: ScanStats | None = None) -> str:
     library_id = payload.get("library_id")
     path = payload.get("path")
     if library_id is None:
@@ -44,7 +45,7 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
         try:
             stats: ScanStats = await scanner.scan(lid, path)
         except ScanError as e:
-            if len(library_ids) == 1:
+            if len(library_ids) == 1 and totals is None:   # (a cleanup carries on without it)
                 raise
             unavailable.append(str(e))
             continue
@@ -65,7 +66,7 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
     if any(s.summary() != "no changes" for s in results):
         await counts.request_refresh(pool)
 
-    total = ScanStats()
+    total = totals if totals is not None else ScanStats()
     for s in results:
         for k, v in vars(s).items():
             if isinstance(v, int):
@@ -197,7 +198,67 @@ async def handle_refresh_counts(pool: asyncpg.Pool, settings: Settings, ctx: job
     return f"refreshed counts for {viewers} viewer(s)"
 
 
-HANDLERS = {"scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts}
+async def handle_cleanup(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+    """Forget media that is no longer on disk and sweep the generated files left behind."""
+    dry_run = bool(payload.get("dry_run", True))
+    scanned = ""
+    if payload.get("scan", True):
+        # Rescan first: it notices files deleted since the last scan, and follows moved
+        # files so that their metadata is kept rather than removed.
+        totals = ScanStats()
+        scan_payload = {"settle": payload["settle"]} if "settle" in payload else {}
+        scanned = await handle_scan(pool, settings, ctx, scan_payload, totals)
+        if totals.unsettled:
+            # A file that is mid-copy can't be recognised as the new home of a moved file
+            # yet, and its old entry (with its metadata) must not be removed meanwhile.
+            raise ScanError(f"{totals.unsettled} files changed in the last few seconds and may still be "
+                            "copying; nothing was removed. Run the cleanup again in a moment.")
+    report = await maintenance.cleanup(pool, settings.generated_dir, ctx, dry_run=dry_run,
+                                       min_missing_days=int(payload.get("min_missing_days", 0)))
+    removed, swept = report["removed"], report["generated"]
+    if not dry_run and (removed["files"] or removed["galleries"]):
+        await counts.request_refresh(pool)
+    lines = [("would remove " if dry_run else "removed ") + maintenance.describe_removed(removed)
+             + " and " + maintenance.describe_swept(swept)]
+    if removed["still_on_disk"]:
+        lines.append(f"{removed['still_on_disk']} files marked missing are on disk and were kept")
+    if removed["libraries_skipped"]:
+        lines.append(f"{removed['libraries_skipped']} disabled or unavailable libraries were left alone")
+    if scanned:
+        lines.append(f"scan: {scanned}")
+    return "\n".join(lines)
+
+
+async def handle_maintenance(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+    report = await maintenance.run_maintenance(pool, settings.generated_dir, ctx)
+    if report.get("removed", {}).get("files") or report.get("removed", {}).get("galleries"):
+        await counts.request_refresh(pool)
+    parts = [f"optimized {report['tables_optimized']} tables",
+             f"swept {maintenance.describe_swept(report['generated'])}",
+             f"removed {report['sessions_removed']} expired sessions and {report['jobs_removed']} old jobs"]
+    if "removed" in report:
+        parts.append("forgot " + maintenance.describe_removed(report["removed"]))
+    return "; ".join(parts)
+
+
+HANDLERS = {"scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
+            maintenance.CLEANUP_KIND: handle_cleanup, maintenance.JOB_KIND: handle_maintenance}
+
+SCHEDULE_CHECK_SECONDS = 60
+
+
+async def schedule_loop(pool: asyncpg.Pool, stop: asyncio.Event) -> None:
+    """Queue the daily maintenance job when it is due. This loop only ever enqueues that
+    one job, at most once per day, and the job itself enqueues nothing but a counts refresh."""
+    while not stop.is_set():
+        try:
+            await maintenance.enqueue_if_due(pool)
+        except (OSError, asyncpg.PostgresError):
+            log.exception("maintenance schedule check failed")
+        try:
+            await asyncio.wait_for(stop.wait(), SCHEDULE_CHECK_SECONDS)
+        except TimeoutError:
+            pass
 
 
 async def run_one(pool: asyncpg.Pool, settings: Settings) -> bool:
@@ -279,7 +340,8 @@ async def main() -> None:
 
     log.info("worker ready")
     try:
-        await asyncio.gather(job_loop(pool, settings, wake, stop), watcher.run(stop), reload_loop())
+        await asyncio.gather(job_loop(pool, settings, wake, stop), watcher.run(stop), reload_loop(),
+                             schedule_loop(pool, stop))
     finally:
         watcher.stop()
         await listener.close()

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import fs from "node:fs";
 
 // One long, ordered journey through the app on a fresh, isolated stack.
 test.describe.configure({ mode: "serial" });
@@ -790,4 +791,56 @@ test("import from Stash: review, approve selectively, reject, studio pictures by
   await page.getByText("Imported Ivy").last().click();
   await expect(page.getByRole("heading", { name: "Imported Ivy" })).toBeVisible();
   await expect(page.getByText("Stash Rooftop").first()).toBeVisible();   // her tag came along
+});
+
+test("maintenance: check, clean up media deleted outside the app, run routine maintenance", async () => {
+  const extra = "e2e/media/lib/pics/zz-cleanup.jpg";
+  fs.copyFileSync("e2e/media/lib/pics/photo1.jpg", extra);
+  try {
+    await page.waitForTimeout(1500);   // let the new file settle before it is scanned
+    await page.goto("/admin/libraries");
+    await adminNav("Maintenance").click();
+    const cleanup = page.getByTestId("cleanup");
+    const report = page.getByTestId("cleanup-report");
+
+    // the check rescans: the new picture is indexed, and it is not something to remove
+    await cleanup.getByRole("button", { name: "Check what would be removed" }).click();
+    await expect(report).toContainText("Check", { timeout: 30_000 });
+    await expect(report).not.toContainText("1 images");
+    await page.goto("/images?q=zz-cleanup");
+    await expect(page.getByTestId("image-tile")).toHaveCount(1);
+
+    // deleted behind the app's back
+    fs.unlinkSync(extra);
+    await page.goto("/admin/maintenance");
+    await cleanup.getByRole("button", { name: "Check what would be removed" }).click();
+    await expect(report).toContainText("Would remove 0 scenes, 1 images and 0 galleries", { timeout: 30_000 });
+    await page.screenshot({ path: `${SHOTS}/18-maintenance-check.png` });
+
+    page.once("dialog", (d) => d.accept());
+    await report.getByRole("button", { name: "Remove these…" }).click();
+    await expect(report).toContainText("Removed 0 scenes, 1 images and 0 galleries", { timeout: 30_000 });
+
+    // a second cleanup has nothing left to do
+    page.once("dialog", (d) => d.accept());
+    await cleanup.getByRole("button", { name: "Clean up now…" }).click();
+    await expect(report).toContainText("Nothing to clean up.", { timeout: 30_000 });
+
+    // routine maintenance: change the schedule, run it now
+    const routine = page.getByTestId("routine");
+    await routine.getByLabel("Hour").selectOption("3");
+    await routine.getByRole("button", { name: "Save" }).click();
+    await expect(routine.getByRole("button", { name: "Save" })).toBeDisabled();
+    await routine.getByRole("button", { name: "Run now" }).click();
+    await expect(page.getByTestId("maintenance-report")).toContainText(/Optimized \d+ tables/, { timeout: 60_000 });
+    await page.reload();
+    await expect(routine.getByLabel("Hour")).toHaveValue("3");
+    await page.screenshot({ path: `${SHOTS}/19-maintenance.png` });
+
+    // the library still works
+    await nav("Scenes").click();
+    await expect(page.getByTestId("total")).toHaveText("3 scenes");
+  } finally {
+    fs.rmSync(extra, { force: true });
+  }
 });

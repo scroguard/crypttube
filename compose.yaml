@@ -18,6 +18,8 @@ x-backend: &backend
     POSTGRES_DB: ${POSTGRES_DB:-goon}
     GENERATED_DIR: /data/generated
     MEDIA_DIR: /media
+    # Time zone for the daily maintenance hour (e.g. America/Chicago).
+    TZ: ${TZ:-UTC}
     WATCHER_POLLING: ${WATCHER_POLLING:-false}
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
     # "Set image from URL" makes the server download a picture when a user asks for it
