@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app import jobs
+from app.api.my_libraries import remove_library
 from app.config import get_settings
 from app.watcher import scan_dedupe_key
 from app.worker import LIBRARIES_CHANNEL
@@ -124,8 +125,24 @@ async def browse(request: Request, path: str | None = None) -> dict:
 
 @router.get("")
 async def list_libraries(request: Request) -> list[dict]:
-    rows = await request.app.state.pool.fetch(f"SELECT {COLUMNS} FROM library_paths ORDER BY path")
+    rows = await request.app.state.pool.fetch(
+        f"SELECT {COLUMNS} FROM library_paths WHERE owner_id IS NULL ORDER BY path")
     return [_row(r) for r in rows]
+
+
+@router.get("/user")
+async def list_user_libraries(request: Request) -> list[dict]:
+    """Storage overview of users' own libraries. Deliberately no content, titles or file
+    names: admins can manage space, not look inside private libraries."""
+    rows = await request.app.state.pool.fetch(
+        """SELECT l.id, l.name, l.visibility, l.created_at,
+                  jsonb_build_object('id', u.id, 'username', u.username) AS owner,
+                  (SELECT count(*) FROM files f WHERE f.library_id = l.id AND f.zip_file_id IS NULL) AS file_count,
+                  (SELECT coalesce(sum(f.size), 0) FROM files f
+                   WHERE f.library_id = l.id AND f.zip_file_id IS NULL)::bigint AS bytes
+           FROM library_paths l JOIN users u ON u.id = l.owner_id
+           ORDER BY lower(u.username), lower(l.name)""")
+    return [dict(r) for r in rows]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -151,7 +168,7 @@ async def update_library(library_id: int, body: LibraryPatch, request: Request) 
     sets = ", ".join(f"{k} = ${i}" for i, k in enumerate(fields, start=2))
     async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
-            f"UPDATE library_paths SET {sets} WHERE id = $1 RETURNING {COLUMNS}",
+            f"UPDATE library_paths SET {sets} WHERE id = $1 AND owner_id IS NULL RETURNING {COLUMNS}",
             library_id, *fields.values(),
         )
         if row is None:
@@ -164,6 +181,10 @@ async def update_library(library_id: int, body: LibraryPatch, request: Request) 
 async def delete_library(library_id: int, request: Request) -> None:
     """Removes the library and everything indexed from it. Media files are untouched."""
     pool = request.app.state.pool
+    owned = await pool.fetchrow("SELECT path FROM library_paths WHERE id = $1 AND owner_id IS NOT NULL", library_id)
+    if owned is not None:  # a user's library: remove its uploaded files too
+        await remove_library(pool, library_id, owned["path"])
+        return
     async with pool.acquire() as conn, conn.transaction():
         path = await conn.fetchval("DELETE FROM library_paths WHERE id = $1 RETURNING path", library_id)
         if path is None:

@@ -12,6 +12,7 @@ from pydantic import Field
 
 from app.acl import Acl, visible
 from app.auth import get_acl
+from app.permissions import may_edit
 from app.api.browse import ListParams, like, page_response, tag_set
 from app.sql import ListQuery, Q, Sort, paginate
 
@@ -34,10 +35,14 @@ def counts(q: Q, acl: Acl, kind: str, alias: str) -> tuple[str, str]:
     return join, cols
 
 
-def _visible_or_404(row, what: str):
+def _visible_or_404(row, what: str, acl: Acl):
     if row is None:
         raise HTTPException(404, f"{what} not found")
-    return dict(row)
+    out = dict(row)
+    owner = out.pop("owner_id")
+    out["can_edit"] = may_edit(acl, owner)
+    out["personal"] = owner is not None and owner == acl.user_id
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +119,7 @@ async def get_performer(performer_id: int, request: Request, acl: Acl = Depends(
                 FROM performer_tags l JOIN tags x ON x.id = l.tag_id WHERE l.performer_id = p.id) AS tags
                {cols}
         FROM performers p {join} WHERE {cond}""", *q.args)
-    out = _visible_or_404(row, "performer")
+    out = _visible_or_404(row, "performer", acl)
     out["image_url"] = entity_image_url("performers", performer_id, out.pop("image_path"), out["updated_at"])
     return out
 
@@ -184,7 +189,7 @@ async def get_studio(studio_id: int, request: Request, acl: Acl = Depends(get_ac
                 FROM studios c WHERE {child_cond}) AS children
                {cols}
         FROM studios st {join} WHERE {cond}""", *q.args)
-    out = _visible_or_404(row, "studio")
+    out = _visible_or_404(row, "studio", acl)
     out["image_url"] = entity_image_url("studios", studio_id, out.pop("image_path"), out["updated_at"])
     del out["parent_id"]
     return out
@@ -258,6 +263,6 @@ async def get_tag(tag_id: int, request: Request, acl: Acl = Depends(get_acl)) ->
                (SELECT count(*) FROM performer_tags x JOIN performers pf ON pf.id = x.performer_id
                 WHERE x.tag_id = t.id AND {" AND ".join(visible(acl, "performer", "pf", q)) or "true"}) AS performer_count
         FROM tags t {join} WHERE {cond}""", *q.args)
-    out = _visible_or_404(row, "tag")
+    out = _visible_or_404(row, "tag", acl)
     out["image_url"] = entity_image_url("tags", tag_id, out.pop("image_path"), out["updated_at"])
     return out

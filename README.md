@@ -41,10 +41,10 @@ production build in a separate compose project (`goon-e2e`) with its own databas
 never touches your data. Screenshots land in `frontend/test-results/screens/`.
 Behind HTTPS (reverse proxy with TLS), set `COOKIE_SECURE=true`.
 
-Media is mounted **read-only** at `/media`. Everything the app writes lives in two
-Docker volumes: `pgdata` (database) and `generated` (thumbnails, sprites, uploaded
-performer/studio/tag images, at `/data/generated`). Back up both; `generated` is
-rebuildable from the media except uploaded images. The database has no published port, and the API
+Media is mounted **read-only** at `/media`. Everything the app writes lives in three
+Docker volumes: `pgdata` (database), `uploads` (users' own libraries) and `generated`
+(thumbnails, sprites, performer/studio/tag images, at `/data/generated`). Back up all
+three; `generated` is rebuildable from the media except uploaded entity images. The database has no published port, and the API
 listens only on `127.0.0.1`.
 
 ## Services
@@ -183,8 +183,40 @@ Admin API: `GET/POST /api/users`, `GET/PATCH/DELETE /api/users/{id}`,
 `PUT /api/users/{id}/restrictions {"tag_ids", "studio_ids", "performer_ids"}`.
 Self: `/api/auth/{status,login,logout,me,password,sessions}`.
 
+## User libraries
+
+Besides the global libraries an admin adds from `/media`, users can have their own:
+
+- An admin enables uploads per user (**Admin → Users**) and may set a storage quota.
+- The user creates libraries under **My uploads** and uploads videos, images, zip
+  archives or whole folders from the browser (streamed to disk, any size, with progress;
+  the quota is enforced while streaming). Files land in the `uploads` volume at
+  `/uploads/<user id>/<random>/…` and go through the normal scan → probe → generate
+  pipeline; generated thumbnails live in the shared `generated` volume and are only ever
+  served through the API's visibility checks.
+- Each library is **private**, **shared with selected users**, or **shared with everyone**;
+  only the owner can change that, at any time.
+- **Private means private from admins too**: an admin sees that a library exists, who owns
+  it and how much space it uses (and can delete it), but can't browse, search or play its
+  content, and scan-job paths inside user libraries are redacted. (Someone with shell
+  access to the Docker host can of course read the volume.)
+- Only the owner can edit or delete what's in their library, whatever their role.
+  People it is shared with can browse and play. An admin's deny rules for a user still
+  apply to content shared with that user.
+- **Personal metadata**: tags, performers and studios created by a regular user belong
+  to that user. Others see them only when attached to content they can see; names are
+  unique per owner, so they neither collide nor leak through "name taken" errors.
+  Editors/admins create the global ones, which anyone may use on their own content.
+- Deleting a user (or a library) removes the uploaded files as well.
+
+API: `/api/my/libraries` (list/create), `/api/my/libraries/{id}` (PATCH/DELETE),
+`/api/my/libraries/{id}/files` (GET list, `PUT ?path=` upload raw body, `DELETE ?path=`),
+`/api/my/share-targets`; admin overview at `/api/libraries/user`.
+
 ## Access control
 
+Three layers, all applied inside SQL by one clause builder (`app/acl.py`): library
+visibility (above), personal metadata (above), and per-user deny rules.
 Per-user deny rules (`user_hidden_tags/studios/performers`) are expanded once per
 request (sub-tags, child studios, performers carrying a hidden tag) and enforced inside
 every list/detail query; hidden items 404 and don't appear in counts.

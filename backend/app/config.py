@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     database_url: str | None = None
     generated_dir: Path = Path("/data/generated")
     media_dir: Path = Path("/media")
+    uploads_dir: Path = Path("/uploads")  # user libraries (a Docker volume), one folder per library
     run_migrations: bool = True
     db_pool_min: int = 2
     db_pool_max: int = 20

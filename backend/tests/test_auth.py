@@ -59,7 +59,7 @@ async def test_first_run_setup(app, anon):
     assert r.status_code == 201 and r.json()["role"] == "admin"
     assert anon.cookies.get(auth.COOKIE_NAME)  # signed in straight away
     status = (await anon.get("/api/auth/status")).json()
-    assert status == {"setup_required": False, "user": {"id": r.json()["id"], "username": "root", "role": "admin"}}
+    assert status == {"setup_required": False, "user": {"id": r.json()["id"], "username": "root", "role": "admin", "can_upload": False}}
     again = await anon.post("/api/auth/setup", json={"username": "evil", "password": "correct horse"})
     assert again.status_code == 409
 

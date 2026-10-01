@@ -15,6 +15,7 @@ export interface SessionUser {
   id: number;
   username: string;
   role: Role;
+  can_upload: boolean;
 }
 
 export interface AuthStatus {
@@ -58,10 +59,12 @@ export interface SceneDetail extends Omit<SceneItem, "performers" | "missing"> {
   last_played_at: string | null;
   custom_fields: Record<string, unknown>;
   updated_at: string;
-  file: { path: string; size: number; mod_time: string; oshash: string | null; missing_since: string | null };
+  file: { path?: string; size: number; mod_time: string; oshash: string | null; missing_since: string | null };
   studio: (Ref & { parent_id: number | null }) | null;
   performers: PerformerRef[];
   playback_url: string;
+  can_edit: boolean;
+  mine: boolean;
 }
 
 export type PlaybackMode = "direct" | "remux" | "transcode";
@@ -99,6 +102,8 @@ export interface GalleryDetail extends GalleryItem {
   folder_path: string | null;
   zip_path: string | null;
   custom_fields: Record<string, unknown>;
+  can_edit: boolean;
+  mine: boolean;
 }
 
 export interface ImageItem {
@@ -151,6 +156,8 @@ export interface PerformerDetail extends PerformerItem {
   career_end: number | null;
   details: string | null;
   custom_fields: Record<string, unknown>;
+  can_edit: boolean;
+  personal: boolean;
 }
 
 export interface StudioItem {
@@ -169,6 +176,8 @@ export interface StudioDetail extends Omit<StudioItem, "child_count"> {
   details: string | null;
   children: Ref[];
   image_count: number;
+  can_edit: boolean;
+  personal: boolean;
 }
 
 export interface TagItem {
@@ -186,6 +195,8 @@ export interface TagDetail extends Omit<TagItem, "child_count"> {
   parents: Ref[];
   children: Ref[];
   performer_count: number;
+  can_edit: boolean;
+  personal: boolean;
 }
 
 export interface Library {
@@ -221,6 +232,8 @@ export interface AdminUser {
   username: string;
   role: Role;
   is_active: boolean;
+  can_upload: boolean;
+  upload_quota_bytes: number | null;
   created_at: string;
   last_login_at: string | null;
   restriction_count?: number;
@@ -233,4 +246,43 @@ export interface SessionInfo {
   created_at: string;
   last_seen_at: string;
   current: boolean;
+}
+
+export type Visibility = "private" | "users" | "everyone";
+
+export interface MyLibrary {
+  id: number;
+  name: string;
+  visibility: Visibility;
+  created_at: string;
+  shared_with: { id: number; username: string }[];
+  file_count: number;
+  bytes: number;
+  scene_count: number;
+  image_count: number;
+}
+
+export interface MyLibraries {
+  can_upload: boolean;
+  quota_bytes: number | null;
+  used_bytes: number;
+  libraries: MyLibrary[];
+}
+
+export interface LibraryFile {
+  path: string;
+  size: number;
+  indexed: boolean;
+  scene_id: number | null;
+  image_id: number | null;
+}
+
+export interface UserLibrarySummary {
+  id: number;
+  name: string;
+  visibility: Visibility;
+  created_at: string;
+  owner: { id: number; username: string };
+  file_count: number;
+  bytes: number;
 }

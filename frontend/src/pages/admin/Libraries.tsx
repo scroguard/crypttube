@@ -3,7 +3,8 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { api } from "../../api/client";
 import { useWrite } from "../../api/hooks";
-import type { Library } from "../../api/types";
+import type { Library, UserLibrarySummary } from "../../api/types";
+import { formatBytes } from "../../lib/format";
 import DirectoryPicker from "../../components/DirectoryPicker";
 import { ErrorBox, Spinner, Toggle } from "../../components/ui";
 import AdminNav from "./AdminNav";
@@ -75,6 +76,8 @@ export default function Libraries() {
       )}
       {(patch.error || del.error || scan.error) && <ErrorBox error={patch.error || del.error || scan.error} className="mt-3" />}
 
+      <UserLibraries onDelete={(id) => del.mutate(id)} />
+
       {picking && (
         <DirectoryPicker
           title="Choose a library folder"
@@ -97,6 +100,31 @@ export default function Libraries() {
         />
       )}
     </div>
+  );
+}
+
+/** Storage overview of users' own libraries. Admins can remove them, not look inside. */
+function UserLibraries({ onDelete }: { onDelete: (id: number) => void }) {
+  const q = useQuery({ queryKey: ["user-libraries"], queryFn: () => api<UserLibrarySummary[]>("/libraries/user") });
+  if (!q.data?.length) return null;
+  return (
+    <section className="mt-10">
+      <h2 className="mb-1 text-lg font-semibold">User libraries</h2>
+      <p className="mb-3 text-sm text-zinc-400">
+        Uploaded by users into their own libraries. Their content is only visible to the people the owner shares it with.
+      </p>
+      <div className="card divide-y divide-zinc-800">
+        {q.data.map((l) => (
+          <div key={l.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm" data-testid="user-library">
+            <span className="font-medium">{l.owner.username}</span>
+            <span className="mr-auto text-zinc-400">{l.name}</span>
+            <span className="chip">{l.visibility === "private" ? "Private" : l.visibility === "everyone" ? "Everyone" : "Selected users"}</span>
+            <span className="w-40 text-right text-zinc-400">{l.file_count} files · {formatBytes(l.bytes)}</span>
+            <button className="btn-danger py-1" onClick={() => confirm(`Delete ${l.owner.username}'s library “${l.name}” and its ${l.file_count} uploaded files?`) && onDelete(l.id)}>Delete</button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 
-from app.api import browse, edit, entities, health, jobs, libraries, media, session, users
-from app.auth import require_admin, require_editor, require_user
+from app.api import browse, edit, entities, health, jobs, libraries, media, my_libraries, session, users
+from app.auth import require_admin, require_user
 from app.config import get_settings
 from app.db import create_pool, migrate
 from app.streaming import TranscodeLimiter
@@ -36,8 +36,8 @@ app = FastAPI(
 # endpoints (which do their own checks) are reachable without a session.
 ROUTES = [
     ((health.router, session.router), []),
-    ((browse.router, entities.router, media.router, edit.read_router), [Depends(require_user)]),
-    ((edit.router,), [Depends(require_editor)]),
+    ((browse.router, entities.router, media.router, edit.read_router, edit.router, my_libraries.router),
+     [Depends(require_user)]),
     ((libraries.router, jobs.router, users.router), [Depends(require_admin)]),
 ]
 for routers, deps in ROUTES:

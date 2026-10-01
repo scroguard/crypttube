@@ -42,19 +42,22 @@ def _counts_sql(acl: Acl, q: Q) -> str:
 
 
 async def refresh(pool: asyncpg.Pool) -> int:
-    """Rebuild counts for the unrestricted view and every user with deny rules."""
-    users = [r["user_id"] for r in await pool.fetch(
-        """SELECT user_id FROM user_hidden_tags UNION SELECT user_id FROM user_hidden_studios
-           UNION SELECT user_id FROM user_hidden_performers""")]
-    viewers = [(0, UNRESTRICTED)] + [(u, await load_acl(pool, u)) for u in users]
+    """Rebuild counts for every active user. Users who see exactly the same content
+    (same deny rules and hidden libraries) share one computation."""
+    users = await pool.fetch("SELECT id, role FROM users WHERE is_active ORDER BY id")
+    groups: dict[tuple, tuple[Acl, list[int]]] = {UNRESTRICTED.signature(): (UNRESTRICTED, [0])}
+    for u in users:
+        acl = await load_acl(pool, u["id"], deny_rules=u["role"] != "admin")
+        groups.setdefault(acl.signature(), (acl, []))[1].append(u["id"])
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("DELETE FROM entity_counts")
-        for viewer, acl in viewers:
+        for acl, viewers in groups.values():
             q = Q()
-            v = q.p(viewer)
+            v = q.p(viewers)
             await conn.execute(
-                f"""INSERT INTO entity_counts (viewer, kind, entity_id, scenes, galleries, images)
-                    SELECT {v}::bigint, c.* FROM ({_counts_sql(acl, q)}) c""",
+                f"""WITH c AS MATERIALIZED ({_counts_sql(acl, q)})
+                    INSERT INTO entity_counts (viewer, kind, entity_id, scenes, galleries, images)
+                    SELECT viewer, c.* FROM c, unnest({v}::bigint[]) AS viewer""",
                 *q.args,
             )
-    return len(viewers)
+    return len(users)

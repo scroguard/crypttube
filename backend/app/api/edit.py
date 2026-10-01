@@ -17,14 +17,18 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import counts
+from app.permissions import (require_can_create, require_content_edit, require_entity_edit,
+                             require_visible)
 from app.acl import Acl
 from app.auth import get_acl
 from app.api import browse, entities
 from app.config import get_settings
 from app.generated import _atomic_write
 
-router = APIRouter(tags=["edit"])          # mounted for editors
-read_router = APIRouter(tags=["edit"])     # mounted for any signed-in user
+# Both are mounted for any signed-in user; each write checks app.permissions
+# (editors for global items, owners for their own).
+router = APIRouter(tags=["edit"])
+read_router = APIRouter(tags=["edit"])
 
 Rating = Field(None, ge=0, le=100)
 MAX_IMAGE_UPLOAD = 20 * 1024 * 1024
@@ -120,8 +124,13 @@ KINDS = {
 
 async def _patch_content(kind_path: str, item_id: int, body: ImagePatch, request: Request, acl: Acl):
     kind, getter = KINDS[kind_path]
+    pool = request.app.state.pool
     await getter(item_id, request, acl)  # 404 if missing or hidden from this user
+    await require_content_edit(pool, acl, kind_path, [item_id])
     data, links = _split(body, "tag_ids", "performer_ids")
+    await require_visible(pool, acl, "tag", links.get("tag_ids", []))
+    await require_visible(pool, acl, "performer", links.get("performer_ids", []))
+    await require_visible(pool, acl, "studio", [data.get("studio_id")])
     if "custom_fields" in data and data["custom_fields"] is None:
         data["custom_fields"] = {}
     if "urls" in data and data["urls"] is None:
@@ -198,6 +207,11 @@ async def bulk_edit(kind_path: str, body: BulkEdit, request: Request, acl: Acl) 
         f"SELECT {alias}.id FROM {kind_path} {alias} WHERE {cond}", *q.args)]
     if len(ids) != len(set(body.ids)):
         raise HTTPException(404, "some items do not exist")
+    pool = request.app.state.pool
+    await require_content_edit(pool, acl, kind_path, ids)
+    await require_visible(pool, acl, "tag", body.tags.ids if body.tags else [])
+    await require_visible(pool, acl, "performer", body.performers.ids if body.performers else [])
+    await require_visible(pool, acl, "studio", [body.set.studio_id if body.set else None])
 
     async def fn(conn):
         fields = body.set.model_dump(exclude_unset=True) if body.set else {}
@@ -316,7 +330,9 @@ async def _save_performer(conn, performer_id: int | None, data: dict, links: dic
 
 @router.post("/performers", status_code=201)
 async def create_performer(body: PerformerBody, request: Request, acl: Acl = Depends(get_acl)):
-    data = body.model_dump(exclude={"aliases", "tag_ids"})
+    owner = require_can_create(acl)
+    await require_visible(request.app.state.pool, acl, "tag", body.tag_ids)
+    data = body.model_dump(exclude={"aliases", "tag_ids"}) | {"owner_id": owner}
     links = {"aliases": body.aliases, "tag_ids": body.tag_ids}
     pid = await _write(request, lambda conn: _save_performer(conn, None, data, links))
     return await entities.get_performer(pid, request, acl)
@@ -325,7 +341,9 @@ async def create_performer(body: PerformerBody, request: Request, acl: Acl = Dep
 @router.patch("/performers/{performer_id}")
 async def patch_performer(performer_id: int, body: PerformerPatch, request: Request, acl: Acl = Depends(get_acl)):
     await entities.get_performer(performer_id, request, acl)
+    await require_entity_edit(request.app.state.pool, acl, "performer", [performer_id])
     data, links = _split(body, "aliases", "tag_ids")
+    await require_visible(request.app.state.pool, acl, "tag", links.get("tag_ids", []))
     for k in ("name", "favorite", "custom_fields"):
         if k in data and data[k] is None:
             raise HTTPException(422, f"{k} cannot be null")
@@ -349,7 +367,9 @@ class StudioPatch(StudioBody):
 
 @router.post("/studios", status_code=201)
 async def create_studio(body: StudioBody, request: Request, acl: Acl = Depends(get_acl)):
-    data = body.model_dump()
+    owner = require_can_create(acl)
+    await require_visible(request.app.state.pool, acl, "studio", [body.parent_id])
+    data = body.model_dump() | {"owner_id": owner}
     cols = list(data)
     sid = await _write(request, lambda conn: conn.fetchval(
         f"INSERT INTO studios ({', '.join(cols)}) VALUES ({', '.join(f'${i}' for i in range(1, len(cols) + 1))}) "
@@ -360,7 +380,9 @@ async def create_studio(body: StudioBody, request: Request, acl: Acl = Depends(g
 @router.patch("/studios/{studio_id}")
 async def patch_studio(studio_id: int, body: StudioPatch, request: Request, acl: Acl = Depends(get_acl)):
     await entities.get_studio(studio_id, request, acl)
+    await require_entity_edit(request.app.state.pool, acl, "studio", [studio_id])
     data = body.model_dump(exclude_unset=True)
+    await require_visible(request.app.state.pool, acl, "studio", [data.get("parent_id")])
     if data.get("name", "x") is None or ("custom_fields" in data and data["custom_fields"] is None):
         raise HTTPException(422, "name/custom_fields cannot be null")
     await _write(request, lambda conn: _update(conn, "studios", studio_id, data))
@@ -380,8 +402,9 @@ class TagPatch(TagBody):
 
 async def _save_tag(conn, tag_id: int | None, data: dict, parents: list[int] | None) -> int:
     if tag_id is None:
-        tag_id = await conn.fetchval("INSERT INTO tags (name, description) VALUES ($1, $2) RETURNING id",
-                                     data["name"], data.get("description"))
+        tag_id = await conn.fetchval(
+            "INSERT INTO tags (name, description, owner_id) VALUES ($1, $2, $3) RETURNING id",
+            data["name"], data.get("description"), data.get("owner_id"))
     elif not await _update(conn, "tags", tag_id, data):
         raise HTTPException(404, "tag not found")
     if parents is not None:
@@ -394,15 +417,19 @@ async def _save_tag(conn, tag_id: int | None, data: dict, parents: list[int] | N
 
 @router.post("/tags", status_code=201)
 async def create_tag(body: TagBody, request: Request, acl: Acl = Depends(get_acl)):
+    owner = require_can_create(acl)
+    await require_visible(request.app.state.pool, acl, "tag", body.parent_ids)
     tid = await _write(request, lambda conn: _save_tag(
-        conn, None, body.model_dump(exclude={"parent_ids"}), body.parent_ids))
+        conn, None, body.model_dump(exclude={"parent_ids"}) | {"owner_id": owner}, body.parent_ids))
     return await entities.get_tag(tid, request, acl)
 
 
 @router.patch("/tags/{tag_id}")
 async def patch_tag(tag_id: int, body: TagPatch, request: Request, acl: Acl = Depends(get_acl)):
     await entities.get_tag(tag_id, request, acl)
+    await require_entity_edit(request.app.state.pool, acl, "tag", [tag_id])
     data, links = _split(body, "parent_ids")
+    await require_visible(request.app.state.pool, acl, "tag", links.get("parent_ids", []))
     if data.get("name", "x") is None:
         raise HTTPException(422, "name cannot be null")
     await _write(request, lambda conn: _save_tag(conn, tag_id, data, links.get("parent_ids")))
@@ -419,6 +446,9 @@ async def merge_tags(tag_id: int, body: TagMerge, request: Request, acl: Acl = D
     rules move here, then the sources are deleted."""
     await entities.get_tag(tag_id, request, acl)
     sources = [s for s in dict.fromkeys(body.source_ids) if s != tag_id]
+    pool = request.app.state.pool
+    await require_visible(pool, acl, "tag", sources)   # unknown or invisible -> 422
+    await require_entity_edit(pool, acl, "tag", [tag_id, *sources])
 
     async def fn(conn):
         found = await conn.fetchval("SELECT count(*) FROM tags WHERE id = ANY($1::bigint[])", sources)
@@ -456,6 +486,7 @@ async def delete_entity(kind: str, entity_id: int, request: Request, acl: Acl) -
     """Delete a performer/studio/tag. Content keeps existing; links to it are removed
     and child studios are detached."""
     await ENTITY_TABLES[kind](entity_id, request, acl)
+    await require_entity_edit(request.app.state.pool, acl, kind[:-1], [entity_id])
     path = await _write(request, lambda conn: conn.fetchval(
         f"DELETE FROM {kind} WHERE id = $1 RETURNING image_path", entity_id))
     if path:
@@ -482,6 +513,7 @@ def _normalize_image(data: bytes, dest) -> None:
 async def upload_entity_image(kind: str, entity_id: int, request: Request, acl: Acl) -> Response:
     """Raw image bytes in the body (any format Pillow reads); stored as WebP."""
     await ENTITY_TABLES[kind](entity_id, request, acl)
+    await require_entity_edit(request.app.state.pool, acl, kind[:-1], [entity_id])
     size = int(request.headers.get("content-length") or 0)
     if size > MAX_IMAGE_UPLOAD:
         raise HTTPException(413, "image too large")
@@ -496,6 +528,7 @@ async def upload_entity_image(kind: str, entity_id: int, request: Request, acl: 
 
 async def delete_entity_image(kind: str, entity_id: int, request: Request, acl: Acl) -> Response:
     await ENTITY_TABLES[kind](entity_id, request, acl)
+    await require_entity_edit(request.app.state.pool, acl, kind[:-1], [entity_id])
     async with request.app.state.pool.acquire() as conn, conn.transaction():
         path = await conn.fetchval(f"SELECT image_path FROM {kind} WHERE id = $1 FOR UPDATE", entity_id)
         await conn.execute(f"UPDATE {kind} SET image_path = NULL WHERE id = $1", entity_id)

@@ -3,8 +3,19 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app import jobs
+from app.config import get_settings
 
 router = APIRouter(tags=["jobs"])
+
+
+def _redact(job: dict) -> dict:
+    """Admins manage the queue but don't get to see inside users' libraries: folder
+    names under the uploads volume are replaced."""
+    uploads = str(get_settings().uploads_dir)
+    path = job["payload"].get("path") if isinstance(job["payload"], dict) else None
+    if isinstance(path, str) and (path == uploads or path.startswith(uploads + "/")):
+        job["payload"] = {**job["payload"], "path": "(user library)"}
+    return job
 
 COLUMNS = """id, kind, payload, status, progress, message, error, attempts,
              created_at, started_at, finished_at"""
@@ -23,7 +34,7 @@ async def list_jobs(
             ORDER BY id DESC LIMIT $3""",
         before_id, status, limit + 1,
     )
-    items = [dict(r) for r in rows[:limit]]
+    items = [_redact(dict(r)) for r in rows[:limit]]
     return {"items": items, "next": items[-1]["id"] if len(rows) > limit else None}
 
 
@@ -32,7 +43,7 @@ async def get_job(job_id: int, request: Request) -> dict:
     row = await request.app.state.pool.fetchrow(f"SELECT {COLUMNS} FROM jobs WHERE id = $1", job_id)
     if row is None:
         raise HTTPException(404, "job not found")
-    return dict(row)
+    return _redact(dict(row))
 
 
 @router.post("/jobs/{job_id}/cancel")

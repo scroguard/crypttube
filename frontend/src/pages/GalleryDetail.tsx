@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api/client";
-import { useDetail, useMe, useWrite } from "../api/hooks";
+import { useDetail, useWrite } from "../api/hooks";
 import type { GalleryDetail as Gallery } from "../api/types";
 import { RefLinks } from "../components/Cards";
 import Chips from "../components/Chips";
@@ -13,13 +13,13 @@ import { formatDate } from "../lib/format";
 export default function GalleryDetail() {
   const id = Number(useParams().id);
   const gallery = useDetail<Gallery>(`/galleries/${id}`);
-  const { canEdit } = useMe();
   const [editing, setEditing] = useState(false);
   const rate = useWrite((rating: number | null) => api(`/galleries/${id}`, { method: "PATCH", json: { rating } }));
 
   if (gallery.isPending) return <Spinner className="mt-24" />;
   if (gallery.isError) return <ErrorBox error={gallery.error} />;
   const g = gallery.data;
+  const canEdit = g.can_edit;
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-start gap-3">

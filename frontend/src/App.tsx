@@ -18,6 +18,8 @@ const StudioDetail = lazy(() => import("./pages/StudioDetail"));
 const Tags = lazy(() => import("./pages/Tags"));
 const TagDetail = lazy(() => import("./pages/TagDetail"));
 const Account = lazy(() => import("./pages/Account"));
+const Uploads = lazy(() => import("./pages/Uploads"));
+const UploadLibrary = lazy(() => import("./pages/UploadLibrary"));
 const AdminLibraries = lazy(() => import("./pages/admin/Libraries"));
 const AdminJobs = lazy(() => import("./pages/admin/Jobs"));
 const AdminUsers = lazy(() => import("./pages/admin/Users"));
@@ -46,6 +48,8 @@ export default function App() {
           <Route path="/tags" element={<Tags />} />
           <Route path="/tags/:id" element={<TagDetail />} />
           <Route path="/account" element={<Account />} />
+          <Route path="/uploads" element={<Uploads />} />
+          <Route path="/uploads/:id" element={<UploadLibrary />} />
           <Route path="/admin/*" element={<AdminRoutes />} />
           <Route path="*" element={<p className="p-8 text-zinc-400">Page not found.</p>} />
         </Routes>

@@ -54,7 +54,11 @@ export default function UserEdit() {
           </div>
           <span className="mt-1 block text-xs text-zinc-500">Signs the user out everywhere.</span>
         </Field>
-        <div className="flex items-end justify-end">
+        <div className="sm:col-span-2 flex flex-wrap items-end gap-4 border-t border-zinc-800 pt-4">
+          <Toggle checked={u.can_upload} onChange={(v) => patch.mutate({ can_upload: v })} label="May create own libraries and upload" />
+          {u.can_upload && <QuotaField bytes={u.upload_quota_bytes} onSave={(bytes) => patch.mutate({ upload_quota_bytes: bytes })} />}
+        </div>
+        <div className="flex items-end justify-end sm:col-span-2">
           {me?.id !== u.id && (
             <button className="btn-danger" onClick={() => confirm(`Delete ${u.username}?`) && del.mutate(undefined, { onSuccess: () => navigate("/admin/users") })}>
               Delete user
@@ -85,5 +89,20 @@ export default function UserEdit() {
       </section>
       {error && <ErrorBox error={error} className="mt-4" />}
     </div>
+  );
+}
+
+function QuotaField({ bytes, onSave }: { bytes: number | null; onSave: (bytes: number | null) => void }) {
+  const GB = 1024 ** 3;
+  const [text, setText] = useState(bytes === null ? "" : String(+(bytes / GB).toFixed(2)));
+  const parsed = text.trim() === "" ? null : Math.round(Number(text) * GB);
+  const valid = parsed === null || (Number.isFinite(parsed) && parsed >= 0);
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      Storage quota
+      <input className="input w-24" inputMode="decimal" placeholder="none" value={text} onChange={(e) => setText(e.target.value)} aria-label="Storage quota in GB" />
+      GB
+      <button type="button" className="btn-ghost py-1" disabled={!valid || parsed === bytes} onClick={() => onSave(parsed)}>Set</button>
+    </label>
   );
 }

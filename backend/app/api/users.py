@@ -1,6 +1,7 @@
 """Admin: user accounts and per-user content restrictions."""
 
 import asyncio
+import shutil
 from typing import Literal
 
 import asyncpg
@@ -8,13 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import auth, counts
+from app.api.my_libraries import user_root
 from app.api.session import Password, Username
 from app.auth import User, require_admin
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 Role = Literal["admin", "editor", "viewer"]
-COLUMNS = "u.id, u.username, u.role, u.is_active, u.created_at, u.last_login_at"
+COLUMNS = "u.id, u.username, u.role, u.is_active, u.can_upload, u.upload_quota_bytes, u.created_at, u.last_login_at"
 
 
 class UserCreate(BaseModel):
@@ -30,6 +32,8 @@ class UserPatch(BaseModel):
     password: str | None = Field(None, min_length=8, max_length=1024)
     role: Role | None = None
     is_active: bool | None = None
+    can_upload: bool | None = None
+    upload_quota_bytes: int | None = Field(None, ge=0)  # send null for "no limit"
 
 
 class Restrictions(BaseModel):
@@ -87,6 +91,7 @@ async def create_user(body: UserCreate, request: Request, _: User = Depends(requ
             body.username, password_hash, body.role)
     except asyncpg.UniqueViolationError:
         raise HTTPException(409, "username already taken") from None
+    await counts.request_refresh(pool)  # counts are cached per viewer
     return await _get(pool, user_id)
 
 
@@ -99,7 +104,7 @@ async def get_user(user_id: int, request: Request, _: User = Depends(require_adm
 async def update_user(user_id: int, body: UserPatch, request: Request, _: User = Depends(require_admin)) -> dict:
     pool = request.app.state.pool
     fields = body.model_dump(exclude_unset=True)
-    if any(v is None for v in fields.values()):
+    if any(v is None for k, v in fields.items() if k != "upload_quota_bytes"):
         raise HTTPException(422, "fields cannot be null")
     password = fields.pop("password", None)
     if password is not None:
@@ -118,7 +123,7 @@ async def update_user(user_id: int, body: UserPatch, request: Request, _: User =
                 await conn.execute("DELETE FROM sessions WHERE user_id = $1", user_id)
     except asyncpg.UniqueViolationError:
         raise HTTPException(409, "username already taken") from None
-    if "role" in fields:
+    if "role" in fields or "is_active" in fields:
         await counts.request_refresh(pool)  # admins ignore restrictions; counts differ
     return await _get(pool, user_id)
 
@@ -131,6 +136,8 @@ async def delete_user(user_id: int, request: Request, admin: User = Depends(requ
         if not await conn.fetchval("DELETE FROM users WHERE id = $1 RETURNING true", user_id):
             raise HTTPException(404, "user not found")
         await _ensure_an_admin_remains(conn)
+    # Their libraries were removed by cascade; remove the uploaded files as well.
+    await asyncio.to_thread(shutil.rmtree, user_root(user_id), True)
     await counts.request_refresh(request.app.state.pool)
     return Response(status_code=204)
 

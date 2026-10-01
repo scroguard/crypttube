@@ -11,7 +11,10 @@ export function useMe() {
   return {
     user,
     isAdmin: user?.role === "admin",
+    // Editors manage global content and metadata; uploaders manage their own.
     canEdit: user?.role === "admin" || user?.role === "editor",
+    canUpload: !!user?.can_upload,
+    canCreate: user?.role === "admin" || user?.role === "editor" || !!user?.can_upload,
   };
 }
 

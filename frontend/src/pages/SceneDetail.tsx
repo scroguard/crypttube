@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api/client";
-import { useDetail, useMe, useWrite } from "../api/hooks";
+import { useDetail, useWrite } from "../api/hooks";
 import type { Playback, SceneDetail as Scene } from "../api/types";
 import Chips from "../components/Chips";
 import { ContentEditModal } from "../components/EditForms";
@@ -13,13 +13,13 @@ export default function SceneDetail() {
   const id = Number(useParams().id);
   const scene = useDetail<Scene>(`/scenes/${id}`);
   const playback = useDetail<Playback>(`/scenes/${id}/playback`);
-  const { canEdit } = useMe();
   const [editing, setEditing] = useState(false);
   const rate = useWrite((rating: number | null) => api(`/scenes/${id}`, { method: "PATCH", json: { rating } }));
 
   if (scene.isPending) return <Spinner className="mt-24" />;
   if (scene.isError) return <ErrorBox error={scene.error} />;
   const s = scene.data;
+  const canEdit = s.can_edit;
   const meta = [
     s.release_date && formatDate(s.release_date),
     formatDuration(s.duration),
@@ -78,7 +78,8 @@ export default function SceneDetail() {
           <Row label="Added">{formatDateTime(s.created_at)}</Row>
           {s.last_played_at && <Row label="Last played">{formatDateTime(s.last_played_at)}</Row>}
           <Row label="Organized">{s.organized ? "Yes" : "No"}</Row>
-          {canEdit && <Row label="File"><span className="break-all font-mono text-xs text-zinc-400">{s.file.path}</span></Row>}
+          {s.mine && <Row label="Library">Your upload</Row>}
+          {s.file.path && <Row label="File"><span className="break-all font-mono text-xs text-zinc-400">{s.file.path}</span></Row>}
         </dl>
       </div>
 

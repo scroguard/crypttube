@@ -12,7 +12,7 @@ const NAV = [
 ] as const;
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { user, isAdmin } = useMe();
+  const { user, isAdmin, canUpload } = useMe();
   const logout = useLogout();
   const [menu, setMenu] = useState(false);
 
@@ -30,6 +30,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             {NAV.map(([to, label]) => (
               <NavLink key={to} to={to} className={link}>{label}</NavLink>
             ))}
+            {canUpload && <NavLink to="/uploads" className={link}>My uploads</NavLink>}
             {isAdmin && <NavLink to="/admin" className={link}>Admin</NavLink>}
           </nav>
           <div className="relative">

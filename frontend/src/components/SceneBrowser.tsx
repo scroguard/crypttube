@@ -27,7 +27,7 @@ const fromTri = (s: string) => (s === "" ? undefined : s === "1");
 
 /** Scene grid with URL-synced filters. `fixed` pins filters (e.g. a performer's page). */
 export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
-  const { canEdit, isAdmin } = useMe();
+  const { canCreate, isAdmin } = useMe();
   const [f, update, reset] = useUrlFilters(SCENE_FILTERS, { sort: "created_at", desc: true });
   const [panel, setPanel] = useState(false);
   const [selected, setSelected] = useState<Set<number> | null>(null);
@@ -51,7 +51,7 @@ export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
           Filters{active ? ` (${active})` : ""}
         </button>
         {active > 0 && <button className="btn-ghost" onClick={reset}>Clear</button>}
-        {canEdit && (
+        {canCreate && (
           <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => setSelected((s) => (s ? null : new Set()))}>
             {selected ? "Done selecting" : "Select"}
           </button>

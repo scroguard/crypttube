@@ -217,11 +217,17 @@ class Scanner:
         hashes = [h for _, h in new_hashed if h]
         if not hashes:
             return {}
+        # Only within libraries of the same owner: an upload identical to someone else's
+        # missing file is a different file, not a move. Otherwise a scene and its
+        # metadata could be pulled across the privacy boundary between owners.
         candidates = await self.pool.fetch(
-            """SELECT id, size, oshash FROM files
-               WHERE zip_file_id IS NULL AND oshash = ANY($1)
-                 AND (missing_since IS NOT NULL OR id = ANY($2))""",
-            hashes, [r["id"] for r in vanished],
+            """SELECT f.id, f.size, f.oshash FROM files f
+               JOIN library_paths l ON l.id = f.library_id
+               WHERE f.zip_file_id IS NULL AND f.oshash = ANY($1)
+                 AND (f.missing_since IS NOT NULL OR f.id = ANY($2))
+                 AND l.owner_id IS NOT DISTINCT FROM
+                     (SELECT owner_id FROM library_paths WHERE id = $3)""",
+            hashes, [r["id"] for r in vanished], library_id,
         )
         pool: dict[tuple[str, int], list[int]] = {}
         for c in candidates:
@@ -255,7 +261,7 @@ class Scanner:
             # deadlocks once every pooled connection is held by a waiting task.
             gallery_id = None
             if e.kind == "image" and folder_galleries:
-                gallery_id = await self._folder_gallery(os.path.dirname(e.path))
+                gallery_id = await self._folder_gallery(os.path.dirname(e.path), library_id)
             async with self.pool.acquire() as conn, conn.transaction():
                 if file_id is None:
                     file_id = await conn.fetchval(
@@ -327,7 +333,7 @@ class Scanner:
         )
         self._affected_galleries.update([gallery_id, *(r["gallery_id"] for r in old)])
 
-    async def _folder_gallery(self, folder: str) -> int:
+    async def _folder_gallery(self, folder: str, library_id: int) -> int:
         """Get or create the gallery for a folder. Runs in its own autocommit statement
         under a per-folder lock: concurrent image transactions would otherwise race on
         the insert, and the loser's snapshot can't see the winner's row."""
@@ -336,9 +342,9 @@ class Scanner:
         async with self._folder_locks.setdefault(folder, asyncio.Lock()):
             if folder not in self._folder_galleries:
                 gallery_id = await self.pool.fetchval(
-                    """INSERT INTO galleries (folder_path, title) VALUES ($1, $2)
+                    """INSERT INTO galleries (folder_path, title, library_id) VALUES ($1, $2, $3)
                        ON CONFLICT (folder_path) DO NOTHING RETURNING id""",
-                    folder, os.path.basename(folder),
+                    folder, os.path.basename(folder), library_id,
                 ) or await self.pool.fetchval("SELECT id FROM galleries WHERE folder_path = $1", folder)
                 self._folder_galleries[folder] = gallery_id
         return self._folder_galleries[folder]

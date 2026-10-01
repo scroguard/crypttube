@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api/client";
-import { useDetail, useMe, useWrite } from "../api/hooks";
+import { useDetail, useWrite } from "../api/hooks";
 import type { StudioDetail as Studio } from "../api/types";
 import Chips from "../components/Chips";
 import { EntityImageControls, FormButtons } from "../components/EditForms";
@@ -13,12 +13,12 @@ import { ErrorBox, Field, Modal, Rating, Spinner } from "../components/ui";
 export default function StudioDetail() {
   const id = Number(useParams().id);
   const q = useDetail<Studio>(`/studios/${id}`);
-  const { canEdit } = useMe();
   const [editing, setEditing] = useState(false);
   const rate = useWrite((rating: number | null) => api(`/studios/${id}`, { method: "PATCH", json: { rating } }));
   if (q.isPending) return <Spinner className="mt-24" />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const s = q.data;
+  const canEdit = s.can_edit;
   return (
     <div>
       <div className="flex flex-wrap items-start gap-6">

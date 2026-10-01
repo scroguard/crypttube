@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app import generated
 from app.acl import Acl, visible
 from app.auth import get_acl
+from app.permissions import may_edit
 from app.sql import ListQuery, Q, Sort, paginate
 
 router = APIRouter(tags=["browse"])
@@ -51,6 +52,7 @@ class ContentFilter(ListParams):
     include_sub_studios: bool = True
     rating_min: int | None = Field(None, ge=0, le=100)
     organized: bool | None = None
+    library_ids: list[int] = []
     # internal: tag_ids resolved into groups by expand_hierarchies()
     tag_groups: list[list[int]] | None = Field(None, exclude=True)
 
@@ -118,6 +120,8 @@ def content_where(q: Q, f: ContentFilter, kind: str, alias: str, acl: Acl) -> li
         w.append(f"coalesce({alias}.rating, -1) >= {q.p(f.rating_min)}")
     if f.organized is not None:
         w.append(f"{alias}.organized = {q.p(f.organized)}")
+    if f.library_ids:
+        w.append(f"{alias}.library_id = ANY({q.p(f.library_ids)}::bigint[])")
     return w
 
 
@@ -152,6 +156,23 @@ def image_urls(image_id: int, file_id: int, mod_time, w: int) -> dict:
     v = generated.image_version(file_id, mod_time)
     return {"thumbnail_url": f"/api/images/{image_id}/thumbnail?w={w}&v={v}",
             "file_url": f"/api/images/{image_id}/file?v={v}"}
+
+
+def _edit_flags(out: dict, acl: Acl) -> None:
+    """Replace the internal library owner with what the client needs: may I edit this,
+    and is it from my own library."""
+    owner = out.pop("library_owner_id")
+    out["can_edit"] = may_edit(acl, owner)
+    out["mine"] = owner is not None and owner == acl.user_id
+    for internal in ("tag_ids", "performer_ids"):
+        out.pop(internal, None)
+    if not out["can_edit"]:
+        # Where a file lives on disk is only the business of whoever manages it.
+        if isinstance(out.get("file"), dict):
+            out["file"] = {k: v for k, v in out["file"].items() if k not in ("path", "zip_path")}
+        for k in ("folder_path", "zip_path"):
+            if k in out:
+                out[k] = None
 
 
 def _check_thumb(w: int) -> None:
@@ -247,6 +268,7 @@ async def get_scene(scene_id: int, request: Request, acl: Acl = Depends(get_acl)
     cond = " AND ".join(["s.id = $1", *visible(acl, "scene", "s", q)])
     row = await request.app.state.pool.fetchrow(f"""
         SELECT s.*, f.oshash,
+               (SELECT l.owner_id FROM library_paths l WHERE l.id = s.library_id) AS library_owner_id,
                (SELECT resume_time FROM user_scene_state
                 WHERE user_id = {q.p(acl.user_id)}::bigint AND scene_id = s.id) AS resume_time,
                jsonb_build_object('path', f.path, 'size', f.size, 'mod_time', f.mod_time,
@@ -268,6 +290,7 @@ async def get_scene(scene_id: int, request: Request, acl: Acl = Depends(get_acl)
     if row is None:
         raise HTTPException(404, "scene not found")
     out = dict(row)
+    _edit_flags(out, acl)
     out["screenshot_url"] = scene_thumb(out, 1280)
     out["playback_url"] = f"/api/scenes/{scene_id}/playback"
     for p in out["performers"]:
@@ -343,6 +366,7 @@ async def get_gallery(gallery_id: int, request: Request, acl: Acl = Depends(get_
     cond = " AND ".join(["g.id = $1", *visible(acl, "gallery", "g", q)])
     row = await request.app.state.pool.fetchrow(f"""
         SELECT g.*, z.path AS zip_path,
+               (SELECT l.owner_id FROM library_paths l WHERE l.id = g.library_id) AS library_owner_id,
                cf.id AS cover_file_id, cf.mod_time AS cover_mod_time,
                (SELECT jsonb_build_object('id', x.id, 'name', x.name) FROM studios x WHERE x.id = g.studio_id) AS studio,
                (SELECT coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name)
@@ -360,6 +384,7 @@ async def get_gallery(gallery_id: int, request: Request, acl: Acl = Depends(get_
     if row is None:
         raise HTTPException(404, "gallery not found")
     out = dict(row)
+    _edit_flags(out, acl)
     fid, mt = out.pop("cover_file_id"), out.pop("cover_mod_time")
     out["cover_url"] = image_urls(out["cover_image_id"], fid, mt, 640)["thumbnail_url"] if fid else None
     out["images_url"] = f"/api/galleries/{gallery_id}/images"
@@ -445,6 +470,7 @@ async def get_image(image_id: int, request: Request, acl: Acl = Depends(get_acl)
     cond = " AND ".join(["i.id = $1", *visible(acl, "image", "i", q)])
     row = await request.app.state.pool.fetchrow(f"""
         SELECT i.*, f.mod_time,
+               (SELECT l.owner_id FROM library_paths l WHERE l.id = i.library_id) AS library_owner_id,
                jsonb_build_object('path', f.path, 'zip_path', z.path, 'size', f.size,
                                   'missing', f.missing_since IS NOT NULL OR z.missing_since IS NOT NULL) AS file,
                (SELECT jsonb_build_object('id', x.id, 'name', x.name) FROM studios x WHERE x.id = i.studio_id) AS studio,
@@ -462,6 +488,7 @@ async def get_image(image_id: int, request: Request, acl: Acl = Depends(get_acl)
     if row is None:
         raise HTTPException(404, "image not found")
     out = dict(row)
+    _edit_flags(out, acl)
     out.update(image_urls(image_id, out.pop("file_id"), out.pop("mod_time"), 1280))
     del out["studio_id"]
     return out

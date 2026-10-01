@@ -283,3 +283,99 @@ test("wrong password is rejected", async () => {
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("alert")).toHaveText("invalid username or password");
 });
+
+// --- user libraries -------------------------------------------------------------------
+
+async function logout(username: string) {
+  await page.getByRole("button", { name: `${username} ▾` }).click();
+  await page.getByRole("menuitem", { name: "Log out" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+}
+
+test("admin enables uploads for a user", async () => {
+  await login(ADMIN.username, ADMIN.password);
+  await expect(nav("My uploads")).toHaveCount(0); // not enabled for the admin's own account
+  await page.goto("/admin/users");
+  await page.getByRole("button", { name: "New user" }).click();
+  const dialog = page.getByRole("dialog", { name: "New user" });
+  await dialog.getByLabel("Username").fill("uma");
+  await dialog.getByLabel("Password (8+ characters)").fill("uma-password");
+  await dialog.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("heading", { name: "uma" })).toBeVisible();
+  // the switch reflects the saved state, so it flips once the server has confirmed
+  await page.getByLabel("May create own libraries and upload").click();
+  await expect(page.getByLabel("May create own libraries and upload")).toBeChecked();
+  await page.getByLabel("Storage quota in GB").fill("1");
+  await page.getByRole("button", { name: "Set", exact: true }).last().click();
+  await expect(page.getByRole("button", { name: "Set", exact: true }).last()).toBeDisabled(); // saved
+  await page.screenshot({ path: `${SHOTS}/12-user-upload-settings.png` });
+  await logout(ADMIN.username);
+});
+
+test("user creates a private library and uploads a video", async () => {
+  await login("uma", "uma-password");
+  await nav("My uploads").click();
+  await expect(page.getByTestId("quota")).toContainText("of 1.0 GB");
+  await page.getByRole("button", { name: "New library" }).click();
+  const dialog = page.getByRole("dialog", { name: "New library" });
+  await dialog.getByLabel("Name").pressSequentially("Uma's clips", { delay: 10 });
+  await expect(dialog.getByText("including administrators")).toBeVisible();
+  await dialog.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("heading", { name: "Uma's clips" })).toBeVisible();
+
+  await page.getByTestId("file-input").setInputFiles(["e2e/media/lib/videos/City Lights.webm", "package.json"]);
+  const items = page.getByTestId("upload-item");
+  await expect(items).toHaveCount(2);
+  await expect(items.filter({ hasText: "City Lights.webm" })).toHaveAttribute("data-status", "done");
+  await expect(items.filter({ hasText: "package.json" })).toHaveAttribute("data-status", "skipped"); // not media
+  // indexed in the background, then shown
+  await expect(page.getByTestId("scene-card")).toHaveCount(1, { timeout: 40_000 });
+  await page.screenshot({ path: `${SHOTS}/13-my-library.png` });
+
+  await page.getByTestId("scene-card").getByRole("link").first().click();
+  await expect(page.getByTestId("scene-title")).toHaveText("City Lights");
+  await expect(page.getByText("Your upload")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible(); // a viewer, but the owner
+  await logout("uma");
+});
+
+test("a private library is invisible to other users and to the admin", async () => {
+  await login("kid", "kid-password");
+  await expect(page.getByTestId("scene-card")).toHaveCount(2);
+  await expect(nav("My uploads")).toHaveCount(0);
+  await logout("kid");
+
+  await login(ADMIN.username, ADMIN.password);
+  await expect(page.getByTestId("total")).toHaveText("3 scenes"); // unchanged: no fourth scene
+  await page.goto("/admin/libraries");
+  const row = page.getByTestId("user-library");
+  await expect(row).toContainText("uma");
+  await expect(row).toContainText("Private");
+  await expect(row).toContainText("1 files");
+  await page.screenshot({ path: `${SHOTS}/14-admin-user-libraries.png` });
+  await logout(ADMIN.username);
+});
+
+test("owner shares the library with one user", async () => {
+  await login("uma", "uma-password");
+  await nav("My uploads").click();
+  await page.getByTestId("my-library").click();
+  await page.getByRole("button", { name: "Sharing & settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Library settings" });
+  await dialog.getByLabel("Who can see it").selectOption("users");
+  await dialog.getByLabel("kid").check();
+  await page.screenshot({ path: `${SHOTS}/15-sharing.png` });
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("Shared with 1")).toBeVisible();
+  await logout("uma");
+
+  await login("kid", "kid-password");
+  await expect(page.getByTestId("scene-card")).toHaveCount(3);
+  await page.getByText("City Lights").click();
+  await expect(page.getByTestId("player")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0); // shared, not editable
+  await logout("kid");
+
+  await login(ADMIN.username, ADMIN.password); // still not shared with the admin
+  await expect(page.getByTestId("total")).toHaveText("3 scenes");
+});

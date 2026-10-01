@@ -15,7 +15,7 @@ import asyncio
 import hashlib
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
@@ -61,6 +61,8 @@ class User:
     role: str
     acl: Acl
     session_id: int
+    can_upload: bool = False
+    upload_quota_bytes: int | None = None
 
     @property
     def is_admin(self) -> bool:
@@ -71,7 +73,7 @@ class User:
         return self.role in ("admin", "editor")
 
     def public(self) -> dict:
-        return {"id": self.id, "username": self.username, "role": self.role}
+        return {"id": self.id, "username": self.username, "role": self.role, "can_upload": self.can_upload}
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +108,8 @@ def clear_session_cookie(response) -> None:
 
 async def user_from_token(pool: asyncpg.Pool, token: str) -> User | None:
     row = await pool.fetchrow(
-        """SELECT s.id AS session_id, s.last_seen_at, u.id, u.username, u.role
+        """SELECT s.id AS session_id, s.last_seen_at, u.id, u.username, u.role,
+                  u.can_upload, u.upload_quota_bytes
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = $1 AND s.expires_at > now() AND u.is_active""",
         _token_hash(token),
@@ -121,8 +124,11 @@ async def user_from_token(pool: asyncpg.Pool, token: str) -> User | None:
             row["session_id"], now, now + SESSION_TTL,
         )
     # Admins manage everything, so deny rules never apply to them.
-    acl = Acl(user_id=row["id"]) if row["role"] == "admin" else await load_acl(pool, row["id"])
-    return User(row["id"], row["username"], row["role"], acl, row["session_id"])
+    # Admins skip the deny rules, but not other users' library privacy.
+    acl = await load_acl(pool, row["id"], deny_rules=row["role"] != "admin")
+    acl = replace(acl, editor=row["role"] in ("admin", "editor"), can_upload=row["can_upload"])
+    return User(row["id"], row["username"], row["role"], acl, row["session_id"],
+                row["can_upload"], row["upload_quota_bytes"])
 
 
 # ---------------------------------------------------------------------------

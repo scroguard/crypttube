@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useParams } from "react-router";
 import { api } from "../api/client";
-import { useDetail, useMe, useWrite } from "../api/hooks";
+import { useDetail, useWrite } from "../api/hooks";
 import type { PerformerDetail as Performer } from "../api/types";
 import Chips from "../components/Chips";
 import { EntityImageControls, FormButtons } from "../components/EditForms";
@@ -15,13 +15,13 @@ import { Row } from "./SceneDetail";
 export default function PerformerDetail() {
   const id = Number(useParams().id);
   const q = useDetail<Performer>(`/performers/${id}`);
-  const { canEdit } = useMe();
   const [editing, setEditing] = useState(false);
   const patch = useWrite((body: object) => api(`/performers/${id}`, { method: "PATCH", json: body }));
 
   if (q.isPending) return <Spinner className="mt-24" />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const p = q.data;
+  const canEdit = p.can_edit;
   const years = age(p.birthdate);
   const facts: [string, React.ReactNode][] = [
     ["Gender", p.gender && GENDERS[p.gender]],

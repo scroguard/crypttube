@@ -25,6 +25,7 @@ async def test_database():
     scratch = Path(tempfile.mkdtemp(prefix="goon-test-"))
     os.environ["MEDIA_DIR"] = str(scratch / "media")
     os.environ["GENERATED_DIR"] = str(scratch / "generated")
+    os.environ["UPLOADS_DIR"] = str(scratch / "uploads")
     (scratch / "media").mkdir()
     get_settings.cache_clear()
     yield

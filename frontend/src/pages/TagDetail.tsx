@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useParams } from "react-router";
 import { api } from "../api/client";
-import { useDetail, useMe, useWrite } from "../api/hooks";
+import { useDetail, useWrite } from "../api/hooks";
 import type { TagDetail as Tag } from "../api/types";
 import Chips from "../components/Chips";
 import { EntityImageControls, FormButtons } from "../components/EditForms";
@@ -13,11 +13,11 @@ import { ErrorBox, Field, Modal, Spinner } from "../components/ui";
 export default function TagDetail() {
   const id = Number(useParams().id);
   const q = useDetail<Tag>(`/tags/${id}`);
-  const { canEdit } = useMe();
   const [dialog, setDialog] = useState<"edit" | "merge" | null>(null);
   if (q.isPending) return <Spinner className="mt-24" />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const t = q.data;
+  const canEdit = t.can_edit;
   return (
     <div>
       <div className="flex flex-wrap items-start gap-6">

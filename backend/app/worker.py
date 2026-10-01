@@ -36,8 +36,9 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
     for lid in library_ids:
         if await ctx.cancelled():
             break
+        # Uploads are complete when the scan is requested, so they skip the settle wait.
         scanner = Scanner(pool, settings.generated_dir, ctx=ctx,
-                          settle_seconds=settings.scan_settle_seconds,
+                          settle_seconds=payload.get("settle", settings.scan_settle_seconds),
                           probe_concurrency=settings.scan_probe_concurrency)
         try:
             stats: ScanStats = await scanner.scan(lid, path)

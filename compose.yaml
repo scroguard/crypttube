@@ -28,6 +28,8 @@ x-backend: &backend
     # Thumbnails, scrub sprites, performer/studio/tag images. Rebuildable from the
     # media except uploaded entity images; back it up together with pgdata.
     - generated:/data/generated
+    # Users' own libraries (uploaded through the UI).
+    - uploads:/uploads
   networks: [goonstreamer]
 
 # Service and container names are prefixed so they can't collide with other stacks
@@ -95,3 +97,4 @@ networks:
 volumes:
   pgdata:
   generated:
+  uploads:

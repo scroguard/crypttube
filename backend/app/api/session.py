@@ -5,7 +5,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import auth
+from app import auth, counts
 from app.auth import User, require_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -69,6 +69,7 @@ async def setup(body: SetupBody, request: Request, response: Response) -> dict:
             raise HTTPException(409, "setup already completed")
         token = await auth.create_session(conn, user_id, request.headers.get("user-agent"))
     auth.set_session_cookie(response, token)
+    await counts.request_refresh(pool)
     return {"id": user_id, "username": body.username, "role": "admin"}
 
 
@@ -105,7 +106,7 @@ async def logout(request: Request, body: LogoutBody | None = None, user: User = 
 
 @router.get("/me")
 async def me(user: User = Depends(require_user)) -> dict:
-    return user.public() | {"can_edit": user.can_edit}
+    return user.public() | {"can_edit": user.can_edit, "upload_quota_bytes": user.upload_quota_bytes}
 
 
 @router.post("/password", status_code=204)
