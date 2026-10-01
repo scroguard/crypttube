@@ -10,7 +10,11 @@ x-backend: &backend
     goonstreamer-db:
       condition: service_healthy
   environment:
-    DATABASE_URL: postgresql://${POSTGRES_USER:-goon}:${POSTGRES_PASSWORD}@goonstreamer-db:5432/${POSTGRES_DB:-goon}
+    # Passed as separate values (never as a URL), so the password may contain any characters.
+    POSTGRES_HOST: goonstreamer-db
+    POSTGRES_USER: ${POSTGRES_USER:-goon}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    POSTGRES_DB: ${POSTGRES_DB:-goon}
     GENERATED_DIR: /data/generated
     MEDIA_DIR: /media
     WATCHER_POLLING: ${WATCHER_POLLING:-false}

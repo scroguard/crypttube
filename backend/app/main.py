@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.generated_dir.mkdir(parents=True, exist_ok=True)
-    pool = await create_pool(settings.database_url, settings.db_pool_min, settings.db_pool_max)
+    pool = await create_pool(settings.db_params(), settings.db_pool_min, settings.db_pool_max)
     if settings.run_migrations:
         await migrate(pool)
     app.state.pool = pool

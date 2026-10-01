@@ -91,3 +91,25 @@ async def test_link_arrays_follow_link_tables(conn):
     assert await arrays() == [[], [a]]
     with pytest.raises(asyncpg.FeatureNotSupportedError):
         await conn.execute("UPDATE scene_tags SET tag_id = $1", b)
+
+
+async def test_password_with_url_special_characters_connects(app):
+    """Regression: the DSN used to be built by string interpolation, so a password
+    containing @ # / ? : broke parsing (asyncpg then fell back to the OS username and
+    failed with "No username set in the environment")."""
+    from app.config import Settings, get_settings
+    password = "p@ss#w/rd?:x%20 'q\"uote"
+    pool = app.state.pool
+    await pool.execute("DROP ROLE IF EXISTS special_pw_test")
+    await pool.execute(f"CREATE ROLE special_pw_test LOGIN PASSWORD '{password.replace(chr(39), chr(39) * 2)}'")
+    try:
+        base = get_settings()
+        s = Settings(postgres_host=base.postgres_host, postgres_port=base.postgres_port,
+                     postgres_user="special_pw_test", postgres_password=password, postgres_db=base.postgres_db)
+        conn = await asyncpg.connect(**s.db_params())
+        try:
+            assert await conn.fetchval("SELECT current_user") == "special_pw_test"
+        finally:
+            await conn.close()
+    finally:
+        await pool.execute("DROP ROLE special_pw_test")

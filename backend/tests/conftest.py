@@ -12,24 +12,20 @@ from httpx import ASGITransport, AsyncClient
 TEST_DB = "goon_test"
 
 
-def _dsn_for(dbname: str) -> str:
-    base, _, _ = os.environ["DATABASE_URL"].rpartition("/")
-    return f"{base}/{dbname}"
-
-
 @pytest.fixture(scope="session", autouse=True)
 async def test_database():
     """Create a fresh database for the test session and point the app at it."""
-    admin = await asyncpg.connect(_dsn_for("postgres"))
+    from app.config import get_settings
+
+    admin = await asyncpg.connect(**get_settings().db_params("postgres"))
     await admin.execute(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)")
     await admin.execute(f"CREATE DATABASE {TEST_DB}")
-    os.environ["DATABASE_URL"] = _dsn_for(TEST_DB)
+    os.environ["POSTGRES_DB"] = TEST_DB
+    os.environ.pop("DATABASE_URL", None)
     scratch = Path(tempfile.mkdtemp(prefix="goon-test-"))
     os.environ["MEDIA_DIR"] = str(scratch / "media")
     os.environ["GENERATED_DIR"] = str(scratch / "generated")
     (scratch / "media").mkdir()
-    from app.config import get_settings
-
     get_settings.cache_clear()
     yield
     await admin.execute(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)")

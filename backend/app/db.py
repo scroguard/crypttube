@@ -16,11 +16,12 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
         await conn.set_type_codec(typ, encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
 
 
-async def create_pool(dsn: str, min_size: int = 2, max_size: int = 20) -> asyncpg.Pool:
+async def create_pool(params: dict, min_size: int = 2, max_size: int = 20) -> asyncpg.Pool:
+    """`params` are asyncpg connect kwargs, e.g. Settings.db_params()."""
     # List queries vary wildly in selectivity (a tag on 0.1% vs 40% of scenes); a cached
     # generic plan can't know which, so always plan with the actual parameter values.
     return await asyncpg.create_pool(
-        dsn, min_size=min_size, max_size=max_size, init=_init_connection,
+        **params, min_size=min_size, max_size=max_size, init=_init_connection,
         server_settings={"plan_cache_mode": "force_custom_plan"},
     )
 

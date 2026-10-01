@@ -45,9 +45,6 @@ ANALYZE;
 """
 
 
-def dsn(db: str) -> str:
-    base, _, _ = os.environ["DATABASE_URL"].rpartition("/")
-    return f"{base}/{db}"
 
 
 async def timed(client, url, params, runs=15):
@@ -63,11 +60,12 @@ async def timed(client, url, params, runs=15):
 
 
 async def main(n: int, keep: bool) -> None:
-    admin = await asyncpg.connect(dsn("postgres"))
+    from app.config import get_settings
+    admin = await asyncpg.connect(**get_settings().db_params("postgres"))
     await admin.execute(f"DROP DATABASE IF EXISTS {BENCH_DB} WITH (FORCE)")
     await admin.execute(f"CREATE DATABASE {BENCH_DB}")
-    os.environ["DATABASE_URL"] = dsn(BENCH_DB)
-    from app.config import get_settings
+    os.environ["POSTGRES_DB"] = BENCH_DB
+    os.environ.pop("DATABASE_URL", None)
     get_settings.cache_clear()
     from app.acl import get_acl, load_acl
     from app.main import app, lifespan

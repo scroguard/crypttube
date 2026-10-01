@@ -173,7 +173,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = get_settings()
     settings.generated_dir.mkdir(parents=True, exist_ok=True)
-    pool = await create_pool(settings.database_url, 2, settings.scan_probe_concurrency + 4)
+    pool = await create_pool(settings.db_params(), 2, settings.scan_probe_concurrency + 4)
     await migrate(pool)
     await jobs.recover_stale(pool)
     await jobs.prune(pool)
@@ -190,7 +190,7 @@ async def main() -> None:
     await watcher.reload()
 
     reload_requested = asyncio.Event()
-    listener = await asyncpg.connect(settings.database_url)
+    listener = await asyncpg.connect(**settings.db_params())
     await listener.add_listener(jobs.NOTIFY_CHANNEL, lambda *_: wake.set())
     await listener.add_listener(LIBRARIES_CHANNEL, lambda *_: reload_requested.set())
 

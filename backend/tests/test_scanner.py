@@ -190,7 +190,7 @@ async def test_many_images_with_a_small_pool_do_not_deadlock(app, clean, library
         shutil.copy(sample_media / "img0.jpg", library_dir / "pics" / f"extra{i}.jpg")
     lid = await app.state.pool.fetchval(
         "INSERT INTO library_paths (path) VALUES ($1) RETURNING id", str(library_dir))
-    small = await create_pool(os.environ["DATABASE_URL"], min_size=1, max_size=2)
+    small = await create_pool(get_settings().db_params(), min_size=1, max_size=2)
     try:
         stats = await asyncio.wait_for(
             Scanner(small, get_settings().generated_dir, settle_seconds=0).scan(lid), timeout=60)
