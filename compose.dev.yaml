@@ -38,5 +38,6 @@ services:
     volumes:
       - ./frontend:/app
     command: ["sh", "-c", "npm install --no-audit --no-fund && npm run dev"]
+    healthcheck: !reset null
     ports: !override
-      - "127.0.0.1:${WEB_PORT:-8420}:5173"
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8420}:5173"

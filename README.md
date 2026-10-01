@@ -18,6 +18,22 @@ Only the `web` service (nginx serving the built app and proxying `/api`) is publ
 the API and database are internal. `compose.yaml` is self-contained, so stack managers
 (Dockhand, Portainer, …) can deploy it directly from the repo.
 
+**Reaching it from elsewhere / reverse proxies.** Nothing needs editing in `compose.yaml`
+(so pulling updates never undoes your setup); use environment variables:
+
+- `WEB_BIND=0.0.0.0` (or a LAN address) publishes the UI beyond localhost, for other
+  machines or a reverse proxy on another host. Target: `http://<host>:${WEB_PORT}`.
+- For a reverse proxy running in Docker on the same host (Nginx Proxy Manager, Traefik,
+  Caddy, cloudflared…), set `PROXY_NETWORK=<the proxy's existing network>` and
+  `COMPOSE_FILE=compose.yaml:compose.proxy.yaml`, then point the proxy at
+  `http://goonstreamer-web:80`. The stack joins that network; redeploying never
+  detaches the proxy.
+- With HTTPS at the proxy set `COOKIE_SECURE=true`. Allow large request bodies and long
+  timeouts on the proxy for uploads and streaming (e.g. nginx `client_max_body_size 0;`
+  — Cloudflare's free plan caps uploads at 100 MB per request).
+- `GET /healthz` on the web container answers without the API, for proxy health checks;
+  `web` and `api` also have Docker health checks.
+
 **Development** is opt-in via `compose.dev.yaml` (Vite with hot reload, API/worker
 auto-reload with source mounted, API also on `127.0.0.1:${API_PORT:-8421}`):
 
