@@ -99,7 +99,9 @@ scroll position), filters kept in the URL. Highlights:
   further pages as you approach the end.
 - **Assigning performers/tags**: directly on the scene page (inline pickers), in the image
   lightbox (Edit), or in bulk on any scene or image grid (Select → add/remove performers
-  and tags).
+  and tags). **Select all matching** selects everything that matches the current search and
+  filters, loaded or not (`GET /api/ids/{scenes,images}`, editable items only, up to
+  20,000), so "search a performer's folder → select all → add performer" is three steps.
 - **Editing** (editors/admins): scenes, galleries, images, performers (incl. images),
   studios, tags (hierarchy, merge); create tags/performers/studios inline from pickers.
 - **Admin**: libraries (watch, exclusions, scan), live job monitor, users and per-user
@@ -170,7 +172,8 @@ Uploaded performer/studio/tag images are never touched.
 
 `GET /api/{scenes,galleries,images,performers,studios,tags}` and `/{id}` for details;
 `GET /api/galleries/{id}/images` in gallery order. Lists take `limit` (≤200), `sort`,
-`desc`, `cursor` (from `next_cursor`), `with_total`, `thumb_w`, plus filters (`q`,
+`desc`, `cursor` (from `next_cursor`), `with_total`, `thumb_w`, plus filters (`q`: title
+**or file path** contains, so a folder name finds everything in it;
 `tag_ids` + `tag_mode=all|any` + `include_sub_tags`, `exclude_tag_ids`, `performer_ids`,
 `studio_ids` + `include_sub_studios`, `rating_min`, `organized`, scene-only
 `duration_min/max`, `height_min`, `date_from/to`, `played`, `file_status`).

@@ -10,7 +10,7 @@ import { SearchBox, SortControl, Toolbar, useUrlFilters, PageSizeSelect } from "
 import GroupedBrowser, { ViewToggle } from "./GroupedBrowser";
 import InfiniteGrid, { LAYOUTS } from "./InfiniteGrid";
 import { useBrowseView } from "../lib/viewPref";
-import BulkBar from "./BulkBar";
+import BulkBar, { fetchMatchingIds } from "./BulkBar";
 import { Field } from "./ui";
 
 const SORTS = {
@@ -41,6 +41,12 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
   const query = { ...toQuery(f, SCENE_FILTERS), ...fixed };
   const list = useInfiniteList<SceneItem>("/scenes", query, { withTotal: true, enabled: !grouped });
 
+  const [note, setNote] = useState<string | null>(null);
+  async function selectAllMatching() {
+    const r = await fetchMatchingIds("scenes", query);
+    setSelected(new Set(r.ids));
+    setNote(r.truncated ? "Selected the first 20,000 matches." : r.ids.length ? null : "Nothing here that you can edit.");
+  }
   const active = ["tags", "xtags", "performers", "unassigned", "studios", "res", "rating", "organized", "played", "missing"]
     .filter((k) => f[k] !== undefined).length;
   const toggle = useCallback((id: number) => setSelected((s) => {
@@ -52,7 +58,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
   return (
     <div>
       <Toolbar>
-        <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search titles…" />
+        <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search titles or folders…" />
         <SortControl sorts={SORTS} sort={f.sort as string} desc={f.desc as boolean}
                      onChange={(sort, desc) => update({ sort, desc })} />
         {groupable && <ViewToggle />}
@@ -61,10 +67,16 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
         </button>
         {active > 0 && <button className="btn-ghost" onClick={reset}>Clear</button>}
         {canCreate && (
-          <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => setSelected((s) => (s ? null : new Set()))}>
+          <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => { setSelected((s) => (s ? null : new Set())); setNote(null); }}>
             {selected ? "Done selecting" : "Select"}
           </button>
         )}
+        {selected && (
+          <button className="btn-ghost" onClick={selectAllMatching} title="Select every scene that matches the current search and filters">
+            Select all matching
+          </button>
+        )}
+        {note && <span className="text-xs text-amber-400">{note}</span>}
         {!grouped && <PageSizeSelect />}
         <span className="ml-auto text-sm text-zinc-500" data-testid="total">
           {!grouped && list.total != null && plural(list.total, "scene")}

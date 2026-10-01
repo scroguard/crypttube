@@ -347,6 +347,37 @@ test("scenes and images grouped by performer", async () => {
   await expect(page.getByTestId("scene-card")).toHaveCount(3);
 });
 
+test("search by folder, select all matching, assign a performer in bulk", async () => {
+  // scenes: the search box matches folder names as well as titles
+  await nav("Scenes").click();
+  await page.getByLabel("Search").fill("lib/videos");
+  await expect(page.getByTestId("scene-card")).toHaveCount(3);
+  await page.getByLabel("Search").fill("no-such-folder");
+  await expect(page.getByText("No scenes match.")).toBeVisible();
+  await page.getByLabel("Search").fill("");
+
+  // images: narrow to one folder, select everything in it, assign a performer
+  await nav("Images").click();
+  await expect(page.getByLabel("Filter by performer…")).toBeVisible();      // the Images page is up
+  await page.getByLabel("Search").fill("lib/pics");
+  await expect(page.getByTestId("image-tile")).toHaveCount(12);           // the zip's 3 images are elsewhere
+  await page.getByRole("button", { name: "Select images" }).click();
+  await page.getByRole("button", { name: "Select all matching" }).click();
+  const bulk = page.getByTestId("bulk-bar");
+  await expect(bulk).toContainText("12 selected");
+  await bulk.getByLabel("Performers…").fill("Brad");
+  await page.getByRole("option", { name: "Create “Brad”" }).click();
+  await bulk.getByRole("button", { name: "Add performers" }).click();
+  await expect(bulk.getByText("Done")).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/09i-select-all.png` });
+  await page.getByRole("button", { name: "Done selecting" }).click();
+
+  await nav("Performers").click();
+  await page.getByTestId("performer-card").filter({ hasText: "Brad" }).click();
+  await page.getByRole("tab", { name: "Images" }).click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(12);
+});
+
 test("performer image: from the library, from server files, by upload; unsafe URLs refused", async () => {
   await nav("Performers").click();
   await page.getByTestId("performer-card").filter({ hasText: "Alice" }).click();

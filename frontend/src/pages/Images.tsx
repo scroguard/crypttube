@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useMe } from "../api/hooks";
 import type { ImageItem } from "../api/types";
 import { ImageTile } from "../components/Cards";
 import EntityPicker from "../components/EntityPicker";
@@ -17,13 +18,16 @@ export default function Images() {
   const view = useBrowseView();
   const [box, setBox] = useState<{ items: ImageItem[]; index: number } | null>(null);
   const query = toQuery(f, IMAGE_FILTERS);
+  const { canCreate } = useMe();
+  const [selecting, setSelecting] = useState(false);
   const narrowed = !!f.performers || f.unassigned !== undefined;
-  const grouped = view === "grouped" && !narrowed;
+  // Selecting for bulk edits needs the flat grid.
+  const grouped = view === "grouped" && !narrowed && !selecting;
 
   return (
     <div>
       <Toolbar>
-        <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search images…" />
+        <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search titles or folders…" />
         <SortControl sorts={SORTS} sort={f.sort as string} desc={f.desc as boolean} onChange={(sort, desc) => update({ sort, desc })} />
         <ViewToggle />
         <div className="w-56"><EntityPicker kind="tags" value={(f.tags as number[]) ?? []} onChange={(tags) => update({ tags })} placeholder="Filter by tag…" /></div>
@@ -31,6 +35,7 @@ export default function Images() {
         {f.unassigned === true && <span className="chip">No performer</span>}
         {narrowed && <button className="btn-ghost" onClick={reset}>Clear</button>}
         {!grouped && <PageSizeSelect />}
+        {grouped && canCreate && <button className="btn-ghost ml-auto" onClick={() => setSelecting(true)}>Select images</button>}
       </Toolbar>
       {grouped ? (
         <GroupedBrowser<ImageItem> kind="images" query={query} layout={LAYOUTS.square} noun="image" empty="No images."
@@ -38,7 +43,8 @@ export default function Images() {
                                      <ImageTile image={img} onOpen={() => setBox({ items: section, index: i })} />
                                    )} />
       ) : (
-        <ImageBrowser path="/images" query={query} />
+        <ImageBrowser key={selecting ? "select" : "browse"} path="/images" query={query}
+                      selecting={selecting} onSelecting={setSelecting} />
       )}
       {box && (
         <Lightbox images={box.items} index={box.index} onIndex={(index) => setBox({ ...box, index })} onClose={() => setBox(null)} />

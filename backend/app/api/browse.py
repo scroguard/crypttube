@@ -41,7 +41,7 @@ class ListParams(BaseModel):
 
 
 class ContentFilter(ListParams):
-    q: str | None = Field(None, max_length=200, description="title contains")
+    q: str | None = Field(None, max_length=200, description="title or file path contains")
     tag_ids: list[int] = []
     tag_mode: Literal["all", "any"] = "all"
     exclude_tag_ids: list[int] = []
@@ -100,11 +100,30 @@ async def expand_hierarchies(pool, f: "ContentFilter") -> "ContentFilter":
     return f.model_copy(update=update)
 
 
+# Ids whose title or file path contains the text. Written as a UNION of single-column
+# searches so each one can use its trigram index (an OR across the joined tables would
+# scan). Paths: a scene's/image's file, an image's zip archive, a gallery's folder or zip.
+_SEARCH_SOURCES = {
+    "scene": """SELECT id FROM scenes WHERE title ILIKE {p}
+                UNION ALL SELECT x.id FROM files pf JOIN scenes x ON x.file_id = pf.id WHERE pf.path ILIKE {p}""",
+    "image": """SELECT id FROM images WHERE title ILIKE {p}
+                UNION ALL SELECT x.id FROM files pf JOIN images x ON x.file_id = pf.id WHERE pf.path ILIKE {p}
+                UNION ALL SELECT x.id FROM files zf JOIN files m ON m.zip_file_id = zf.id
+                          JOIN images x ON x.file_id = m.id WHERE zf.path ILIKE {p}""",
+    "gallery": """SELECT id FROM galleries WHERE title ILIKE {p} OR folder_path ILIKE {p}
+                  UNION ALL SELECT x.id FROM files zf JOIN galleries x ON x.zip_file_id = zf.id WHERE zf.path ILIKE {p}""",
+}
+
+
+def text_search(q: Q, kind: str, alias: str, text: str) -> str:
+    return f"{alias}.id IN ({_SEARCH_SOURCES[kind].format(p=like(q, text))})"
+
+
 def content_where(q: Q, f: ContentFilter, kind: str, alias: str, acl: Acl) -> list[str]:
     """Filters on the trigger-maintained tag_ids / performer_ids arrays (GIN-indexed)."""
     w = visible(acl, kind, alias, q)
     if f.q:
-        w.append(f"{alias}.title ILIKE {like(q, f.q)}")
+        w.append(text_search(q, kind, alias, f.q))
     groups = f.tag_groups if f.tag_groups is not None else (
         [f.tag_ids] if f.tag_mode == "any" else [[t] for t in f.tag_ids])
     w += [f"{alias}.tag_ids && {tag_set(q, g, f.include_sub_tags)}" for g in groups]
@@ -283,6 +302,39 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
     for it in page.items:
         finish_scene(it, f.thumb_w)
     return page_response(page)
+
+
+SELECT_ALL_LIMIT = 20_000
+
+
+def editable_clause(acl: Acl, alias: str, q: Q) -> str:
+    """Rows this viewer may edit: global-library content for editors, their own always."""
+    me = q.p(acl.user_id, "acl_me")
+    owned = f"SELECT id FROM library_paths WHERE owner_id = {me}::bigint"
+    if acl.editor:
+        return (f"({alias}.library_id IS NULL OR {alias}.library_id IN "
+                f"(SELECT id FROM library_paths WHERE owner_id IS NULL OR owner_id = {me}::bigint))")
+    return f"{alias}.library_id IN ({owned})"
+
+
+async def _matching_ids(pool, from_: str, alias: str, where: list[str], args: list) -> dict:
+    rows = await pool.fetch(
+        f"SELECT {alias}.id FROM {from_} WHERE {' AND '.join(where)} ORDER BY {alias}.id LIMIT {SELECT_ALL_LIMIT + 1}",
+        *args)
+    ids = [r["id"] for r in rows[:SELECT_ALL_LIMIT]]
+    return {"ids": ids, "truncated": len(rows) > SELECT_ALL_LIMIT}
+
+
+@router.get("/ids/scenes")
+async def scene_ids_matching(request: Request, f: Annotated[SceneFilter, Query()],
+                             acl: Acl = Depends(get_acl)) -> dict:
+    """Ids of every scene that matches the filters and that the viewer may edit: what
+    "select all" selects, including items not loaded on screen."""
+    pool = request.app.state.pool
+    f = await expand_hierarchies(pool, f)
+    q = Q()
+    where = [*scene_where(q, f, acl), editable_clause(acl, "s", q)]
+    return await _matching_ids(pool, SCENE_FROM, "s", where, q.args)
 
 
 @router.get("/scenes/{scene_id}")
@@ -466,6 +518,23 @@ async def list_images(request: Request, f: Annotated[ImageFilter, Query()],
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
                           cursor=f.cursor, limit=f.limit, with_total=f.with_total)
     return _image_items(page, f.thumb_w)
+
+
+class ImageIdsFilter(ImageFilter):
+    gallery_id: int | None = None   # the filter model forbids unknown params, so it lives here
+
+
+@router.get("/ids/images")
+async def image_ids_matching(request: Request, f: Annotated[ImageIdsFilter, Query()],
+                             acl: Acl = Depends(get_acl)) -> dict:
+    pool = request.app.state.pool
+    f = await expand_hierarchies(pool, f)
+    q = Q()
+    where = [IMAGE_PRESENT, *content_where(q, f, "image", "i", acl), editable_clause(acl, "i", q)]
+    if f.gallery_id is not None:
+        where.append(f"EXISTS (SELECT 1 FROM gallery_images gi WHERE gi.image_id = i.id "
+                     f"AND gi.gallery_id = {q.p(f.gallery_id)})")
+    return await _matching_ids(pool, IMAGE_FROM, "i", where, q.args)
 
 
 class GalleryImagesParams(ListParams):

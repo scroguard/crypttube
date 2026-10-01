@@ -532,3 +532,58 @@ async def test_both_grouping_strategies_agree(client, seed, monkeypatch):
         results.append(pages)
     assert results[0] == results[1]
     assert [g["performer"]["name"] for p in results[0] for g in p["groups"]] == ["Alice", "Bob", "Carol"]
+
+
+# --- search by path, and "select all matching" ------------------------------------
+
+async def test_search_matches_title_or_path(app, client, seed):
+    pool = app.state.pool
+    # put three scenes under a performer-named folder; titles say nothing about it
+    for i in (2, 4, 6):
+        await pool.execute("UPDATE files SET path = $2 WHERE id = (SELECT file_id FROM scenes WHERE id = $1)",
+                           seed["scenes"][i], f"/media/seed/Jasmine Lane/clip{i}.mp4")
+    assert idx(seed, await scene_ids(client, q="jasmine")) == [2, 4, 6]            # by folder, case-insensitive
+    assert idx(seed, await scene_ids(client, q="Jasmine Lane/clip4")) == [4]
+    assert idx(seed, await scene_ids(client, q="Scene 12")) == [12]                # still by title
+    assert idx(seed, await scene_ids(client, q="seed/s1")) == [1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    # combines with other filters, and with grouping
+    assert idx(seed, await scene_ids(client, q="jasmine", tag_ids=seed["tags"]["Standing"])) == [2, 4, 6]
+    body = (await client.get("/api/groups/scenes", params={"q": "jasmine"})).json()
+    assert [g["performer"]["name"] for g in body["groups"]] == ["Bob"]             # scene 6
+    assert idx(seed, [s["id"] for s in body["unassigned"]["items"]]) == [2, 4]
+
+
+async def test_search_images_and_galleries_by_path(app, client, seed):
+    assert len((await client.get("/api/images", params={"q": "seed/pics"})).json()["items"]) == 5
+    assert [i["title"] for i in (await client.get("/api/images", params={"q": "pics/3"})).json()["items"]] == ["img3"]
+    assert (await client.get("/api/images", params={"q": "nowhere"})).json()["items"] == []
+    assert [g["title"] for g in (await client.get("/api/galleries", params={"q": "seed/pics"})).json()["items"]] == ["Pics"]
+    assert [g["title"] for g in (await client.get("/api/galleries", params={"q": "pic"})).json()["items"]] == ["Pics"]
+
+
+async def test_ids_of_everything_matching(app, client, login_as, seed):
+    present = [i for i in range(N) if i != MISSING]
+    body = (await client.get("/api/ids/scenes")).json()
+    assert idx(seed, body["ids"]) == present and body["truncated"] is False
+    body = (await client.get("/api/ids/scenes", params={"tag_ids": seed["tags"]["Outdoor"]})).json()
+    assert idx(seed, body["ids"]) == [0, 5, 10, 15, 20]
+    imgs = (await client.get("/api/ids/images", params={"gallery_id": seed["gallery"]})).json()
+    assert sorted(imgs["ids"]) == sorted(seed["images"])
+    assert (await client.get("/api/ids/images", params={"gallery_id": 999999})).json()["ids"] == []
+
+    # only what the caller may edit: a viewer can edit nothing in a global library
+    viewer = await login_as("idsviewer", "viewer")
+    assert (await viewer.get("/api/ids/scenes")).json() == {"ids": [], "truncated": False}
+    editor = await login_as("idseditor", "editor")
+    assert len((await editor.get("/api/ids/scenes")).json()["ids"]) == len(present)
+    # and the ids can be bulk-edited in one go
+    ids = (await editor.get("/api/ids/scenes", params={"q": "Scene 1"})).json()["ids"]
+    r = await editor.post("/api/scenes/bulk", json={"ids": ids, "performers": {"mode": "add", "ids": [seed["performers"]["Carol"]]}})
+    assert r.json() == {"updated": len(ids)}
+
+
+async def test_select_all_is_capped(app, client, seed, monkeypatch):
+    from app.api import browse
+    monkeypatch.setattr(browse, "SELECT_ALL_LIMIT", 5)
+    body = (await client.get("/api/ids/scenes")).json()
+    assert len(body["ids"]) == 5 and body["truncated"] is True

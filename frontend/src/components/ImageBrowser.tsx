@@ -2,28 +2,50 @@ import { useCallback, useState } from "react";
 import type { Query } from "../api/client";
 import { useInfiniteList, useMe } from "../api/hooks";
 import type { ImageItem } from "../api/types";
-import BulkBar from "./BulkBar";
+import BulkBar, { fetchMatchingIds } from "./BulkBar";
 import { ImageTile } from "./Cards";
 import InfiniteGrid from "./InfiniteGrid";
 import Lightbox from "./Lightbox";
 
 /** Thumbnail grid + lightbox over any image list endpoint, with a select mode for
- * assigning performers/tags to many images at once. */
-export default function ImageBrowser({ path, query = {} }: { path: string; query?: Query }) {
+ * assigning performers/tags to many images at once. `selecting`/`onSelecting` let a
+ * parent start in (and observe) select mode. */
+export default function ImageBrowser({ path, query = {}, selecting, onSelecting }: {
+  path: string; query?: Query; selecting?: boolean; onSelecting?: (on: boolean) => void;
+}) {
   const { canCreate } = useMe();
   const list = useInfiniteList<ImageItem>(path, query, { limit: 120, withTotal: true });
   const [open, setOpen] = useState<number | null>(null);
-  const [selected, setSelected] = useState<Set<number> | null>(null);
+  const [selected, setSelected] = useState<Set<number> | null>(selecting ? new Set() : null);
+  const [note, setNote] = useState<string | null>(null);
   const toggle = useCallback((id: number) => setSelected((s) => {
     const next = new Set(s);
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   }), []);
+  function setMode(on: boolean) {
+    setSelected(on ? new Set() : null);
+    setNote(null);
+    onSelecting?.(on);
+  }
+  // "/images" takes the filters as they are; a gallery's list is selected by gallery id.
+  const idsQuery: Query = path === "/images" ? query : { gallery_id: Number(path.split("/")[2]) };
+  async function selectAllMatching() {
+    const r = await fetchMatchingIds("images", idsQuery);
+    setSelected(new Set(r.ids));
+    setNote(r.truncated ? "Selected the first 20,000 matches." : r.ids.length ? null : "Nothing here that you can edit.");
+  }
   return (
     <>
-      {canCreate && list.items.length > 0 && (
-        <div className="mb-2 flex justify-end">
-          <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => setSelected((s) => (s ? null : new Set()))}>
+      {canCreate && (list.items.length > 0 || selected) && (
+        <div className="mb-2 flex items-center justify-end gap-2">
+          {note && <span className="text-xs text-amber-400">{note}</span>}
+          {selected && (
+            <button className="btn-ghost" onClick={selectAllMatching} title="Select every image in this list, including ones not loaded yet">
+              Select all matching
+            </button>
+          )}
+          <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => setMode(!selected)}>
             {selected ? "Done selecting" : "Select images"}
           </button>
         </div>

@@ -101,6 +101,8 @@ async def main(n: int, keep: bool) -> None:
                     ("studio tree filter", "/api/scenes", {"studio_ids": 3}),
                     ("4K only", "/api/scenes", {"height_min": 2160}),
                     ("title search", "/api/scenes", {"q": "scene 1999"}),
+                    ("path search (one folder)", "/api/scenes", {"q": "bench/scene1234"}),
+                    ("select-all ids for a tag", "/api/ids/scenes", {"tag_ids": 7}),
                     ("newest + total count", "/api/scenes", {"with_total": True}),
                     ("grouped by performer, page 1", "/api/groups/scenes", {"limit": 20}),
                     ("grouped + tag filter", "/api/groups/scenes", {"limit": 20, "tag_ids": 3}),

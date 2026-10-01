@@ -431,3 +431,18 @@ async def test_rebuilding_a_user_library(app, people, alice_lib):
     msg = await worker.handle_generate(pool, get_settings(), JobContext(pool, job), payload)
     assert msg.startswith("0 rebuilt, 1 failed") and f"scene {alice_lib['scene']}:" in msg
     assert "clip" not in msg
+
+
+async def test_select_all_ids_follow_ownership(app, people, alice_lib, library_dir):
+    alice, editor, admin = people["alice"], people["editor"], people["admin"]
+    lib = (await admin.post("/api/libraries", json={"path": str(library_dir)})).json()
+    await admin.post(f"/api/libraries/{lib['id']}/scan")
+    await drain(app)
+    await alice.patch(f"/api/my/libraries/{alice_lib['id']}", json={"visibility": "everyone"})
+    # alice (a viewer) may edit only her own upload, though she can see the global scenes
+    assert (await alice.get("/api/ids/scenes")).json()["ids"] == [alice_lib["scene"]]
+    # the editor sees alice's shared scene but may not edit it: it is not selected
+    theirs = (await editor.get("/api/ids/scenes")).json()["ids"]
+    assert alice_lib["scene"] not in theirs and len(theirs) == 3
+    # path search works inside user libraries for those who can see them
+    assert await scene_ids(alice, q="clip") == [alice_lib["scene"]]

@@ -1,8 +1,15 @@
 import { useState } from "react";
-import { api } from "../api/client";
+import { api, type Query } from "../api/client";
 import { useWrite } from "../api/hooks";
 import EntityPicker, { creator } from "./EntityPicker";
 import { ErrorBox } from "./ui";
+
+const CHUNK = 5000;
+
+/** Fetch the ids of everything matching a list's filters that the user may edit. */
+export async function fetchMatchingIds(kind: "scenes" | "images", query: Query): Promise<{ ids: number[]; truncated: boolean }> {
+  return api(`/ids/${kind}`, { query });
+}
 
 /** Actions on a selection of scenes, galleries or images (one set-based request each). */
 export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
@@ -10,14 +17,19 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
 }) {
   const [tags, setTags] = useState<number[]>([]);
   const [performers, setPerformers] = useState<number[]>([]);
-  const write = useWrite((body: object) => api(`/${kind}/bulk`, { json: { ids, ...body } }));
+  // Large selections ("select all matching") go to the server in chunks.
+  const write = useWrite(async (body: object) => {
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      await api(`/${kind}/bulk`, { json: { ids: ids.slice(i, i + CHUNK), ...body } });
+    }
+  });
   const run = (body: object) => write.mutate(body, { onSuccess: () => { setTags([]); setPerformers([]); } });
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-700 bg-zinc-900/95 p-3 backdrop-blur" data-testid="bulk-bar">
       <div className="mx-auto flex max-w-[1920px] flex-wrap items-end gap-3">
         <div className="text-sm">
-          <strong>{ids.length}</strong> selected
+          <strong>{ids.length.toLocaleString()}</strong> selected
           <button className="ml-2 text-xs text-zinc-400 underline" onClick={onSelectAll}>select all loaded</button>
           <button className="ml-2 text-xs text-zinc-400 underline" onClick={onDone}>clear</button>
         </div>
@@ -33,6 +45,8 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
           <option value="none">No rating</option>
         </select>
         <button className="btn-ghost" onClick={() => run({ set: { organized: true } })}>Mark organized</button>
+        {write.isPending && <span className="text-sm text-zinc-400">Applying…</span>}
+        {write.isSuccess && !write.isPending && <span className="text-sm text-emerald-400">Done</span>}
         {write.isError && <ErrorBox error={write.error} />}
       </div>
     </div>
