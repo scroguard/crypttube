@@ -86,6 +86,7 @@ export default function UploadLibrary() {
   const [dragging, setDragging] = useState(false);
   const uploader = useUploader(id);
   const del = useWrite(() => api(`/my/libraries/${id}`, { method: "DELETE" }));
+  const rebuild = useWrite(() => api(`/my/libraries/${id}/regenerate`, { method: "POST" }));
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
 
@@ -113,6 +114,9 @@ export default function UploadLibrary() {
         </span>
         <QuotaBar used={libs.data.used_bytes} quota={libs.data.quota_bytes} />
         <button className="btn-ghost" onClick={() => setSettings(true)}>Sharing & settings</button>
+        <button className="btn-ghost" disabled={rebuild.isPending || rebuild.isSuccess}
+                title="Discard and rebuild this library's thumbnails and previews"
+                onClick={() => rebuild.mutate()}>{rebuild.isSuccess ? "Rebuild queued" : "Rebuild previews"}</button>
         <button className="btn-danger" disabled={uploader.busy || del.isPending} onClick={() => {
           if (confirm(`Delete “${lib.name}” and all ${lib.file_count} files in it? This cannot be undone.`))
             del.mutate(undefined, { onSuccess: () => navigate("/uploads", { replace: true }) });

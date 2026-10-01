@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { VirtuosoGrid, type GridStateSnapshot } from "react-virtuoso";
+import type { Paging } from "../api/hooks";
 import { Empty, ErrorBox, Spinner } from "./ui";
 
 // Scroll/render state per history entry, so Back returns to the exact spot.
@@ -13,6 +14,7 @@ const LAYOUTS = {
 };
 
 interface ListState<T> {
+  paging?: Paging | null;
   items: T[];
   isPending: boolean;
   isError: boolean;
@@ -38,7 +40,10 @@ export default function InfiniteGrid<T extends { id: number }>({
   if (list.isPending) return <Spinner className="mt-16" />;
   if (list.isError) return <ErrorBox error={list.error} />;
   if (!list.items.length) return <Empty>{empty}</Empty>;
+  const paging = list.paging ?? null;
   return (
+    <>
+    {paging && <Pager paging={paging} />}
     <VirtuosoGrid
       useWindowScroll
       data={list.items}
@@ -46,10 +51,27 @@ export default function InfiniteGrid<T extends { id: number }>({
       listClassName={LAYOUTS[layout]}
       increaseViewportBy={{ top: 400, bottom: 1200 }}
       itemContent={(i, item) => render(item, i)}
-      endReached={() => list.hasNextPage && !list.isFetchingNextPage && list.fetchNextPage()}
-      restoreStateFrom={snapshots.get(location.key)}
-      stateChanged={(s) => snapshots.set(location.key, s)}
-      components={{ Footer: () => (list.isFetchingNextPage ? <Spinner className="py-6" /> : <div className="h-6" />) }}
+      endReached={() => !paging && list.hasNextPage && !list.isFetchingNextPage && list.fetchNextPage()}
+      restoreStateFrom={paging ? undefined : snapshots.get(location.key)}
+      stateChanged={(s) => !paging && snapshots.set(location.key, s)}
+      components={{ Footer: () => (!paging && list.isFetchingNextPage ? <Spinner className="py-6" /> : <div className="h-6" />) }}
     />
+    {paging && <Pager paging={paging} />}
+    </>
+  );
+}
+
+function Pager({ paging }: { paging: Paging }) {
+  if (!paging.hasPrev && !paging.hasNext) return null;
+  return (
+    <nav className="my-3 flex items-center justify-center gap-3 text-sm" aria-label="Pages" data-testid="pager">
+      <button className="btn-ghost" disabled={!paging.hasPrev || paging.busy} onClick={paging.prev}>‹ Previous</button>
+      <span className="tabular-nums text-zinc-400" data-testid="page-indicator">
+        Page {paging.page + 1}{paging.pageCount ? ` of ${paging.pageCount}` : ""}
+      </span>
+      <button className="btn-ghost" disabled={!paging.hasNext || paging.busy} onClick={paging.next}>
+        {paging.busy ? "Loading…" : "Next ›"}
+      </button>
+    </nav>
   );
 }

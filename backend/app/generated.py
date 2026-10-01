@@ -11,6 +11,7 @@ import hashlib
 import io
 import math
 import os
+import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -41,6 +42,21 @@ def image_version(file_id: int, mod_time) -> str:
     return f"{file_id}-{int(mod_time.timestamp() * 1_000_000):x}"
 
 
+def url_version(version: str, rev: int) -> str:
+    """The `v` query parameter clients see: the storage key plus the rebuild revision.
+    (Storage paths use the bare key, so a rebuild overwrites in place.)"""
+    return f"{version}.{rev}" if rev else version
+
+
+def usable(path: Path) -> bool:
+    """A generated file that exists, is non-empty and can be read. Anything else is
+    treated as missing and regenerated."""
+    try:
+        return path.stat().st_size > 0 and os.access(path, os.R_OK)
+    except OSError:
+        return False
+
+
 def screenshot_path(root: Path, version: str) -> Path:
     return _shard(root, "screenshots", version, ".webp")
 
@@ -51,6 +67,49 @@ def sprite_paths(root: Path, version: str) -> tuple[Path, Path]:
 
 def thumbnail_path(root: Path, kind: str, version: str, width: int) -> Path:
     return _shard(root, f"thumbs/{kind}", f"{version}-w{width}", ".webp")
+
+
+def scene_asset_files(root: Path, version: str) -> list[Path]:
+    return [screenshot_path(root, version), *sprite_paths(root, version),
+            *(thumbnail_path(root, "scenes", version, w) for w in THUMB_WIDTHS)]
+
+
+def image_asset_files(root: Path, version: str) -> list[Path]:
+    return [thumbnail_path(root, "images", version, w) for w in THUMB_WIDTHS]
+
+
+def remove_files(paths) -> None:
+    """Delete generated files; a file that can't be removed is an error worth surfacing
+    (it would otherwise keep being served, or keep failing to be replaced)."""
+    for p in paths:
+        try:
+            p.unlink(missing_ok=True)
+        except IsADirectoryError:
+            shutil.rmtree(p)
+
+
+def check_writable(root: Path) -> str | None:
+    """None if generated content can be written; otherwise an explanation for the admin."""
+    try:
+        ensure_dir(root)
+        fd, tmp = tempfile.mkstemp(dir=root, prefix=".write-test-")
+        os.close(fd)
+        os.unlink(tmp)
+        return None
+    except OSError as e:
+        return (f"the generated-content volume ({root}) is not writable by the app "
+                f"(running as uid {os.getuid()}): {e.strerror or e}")
+
+
+# Everything rebuildable. `entities/` (uploaded performer/studio/tag images) is not.
+REBUILDABLE_DIRS = ("screenshots", "sprites", "thumbs")
+
+
+def wipe_rebuildable(root: Path) -> None:
+    for name in REBUILDABLE_DIRS:
+        target = root / name
+        if target.exists():
+            shutil.rmtree(target)
 
 
 # Generated content lives in a Docker volume that only this stack's containers mount.
@@ -223,15 +282,20 @@ async def make_sprite(path: str, duration: float, version: str, dest_img: Path, 
     await asyncio.to_thread(_atomic_write, dest_vtt, lambda f: f.write(vtt.encode()))
 
 
-async def generate_scene_assets(root: Path, path: str, duration: float | None, version: str) -> list[str]:
-    """Create whatever is missing for one scene. Returns the names of what was made."""
+async def generate_scene_assets(root: Path, path: str, duration: float | None, version: str,
+                                *, url_ver: str | None = None, force: bool = False) -> list[str]:
+    """Create whatever is missing or unusable for one scene; with `force`, discard and
+    rebuild everything. `url_ver` is the version clients will request the sprite sheet
+    with (written into the VTT). Returns the names of what was made."""
     made = []
+    if force:
+        await asyncio.to_thread(remove_files, scene_asset_files(root, version))
     shot = screenshot_path(root, version)
-    if not shot.exists():
+    if not usable(shot):
         await make_screenshot(path, duration, shot)
         made.append("screenshot")
     sprite_img, sprite_vtt = sprite_paths(root, version)
-    if duration and not (sprite_img.exists() and sprite_vtt.exists()):
-        await make_sprite(path, duration, version, sprite_img, sprite_vtt)
+    if duration and not (usable(sprite_img) and usable(sprite_vtt)):
+        await make_sprite(path, duration, url_ver or version, sprite_img, sprite_vtt)
         made.append("sprite")
     return made

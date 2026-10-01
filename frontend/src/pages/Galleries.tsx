@@ -2,7 +2,7 @@ import { useInfiniteList } from "../api/hooks";
 import type { GalleryItem } from "../api/types";
 import { GalleryCard } from "../components/Cards";
 import EntityPicker from "../components/EntityPicker";
-import { SearchBox, SortControl, Toolbar, useUrlFilters } from "../components/FilterBar";
+import { SearchBox, SortControl, Toolbar, useUrlFilters, PageSizeSelect } from "../components/FilterBar";
 import InfiniteGrid from "../components/InfiniteGrid";
 import { plural } from "../lib/format";
 import { GALLERY_FILTERS, toQuery } from "../lib/filters";
@@ -18,6 +18,7 @@ export default function Galleries() {
         <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search galleries…" />
         <SortControl sorts={SORTS} sort={f.sort as string} desc={f.desc as boolean} onChange={(sort, desc) => update({ sort, desc })} />
         <div className="w-64"><EntityPicker kind="tags" value={(f.tags as number[]) ?? []} onChange={(tags) => update({ tags })} placeholder="Filter by tag…" /></div>
+        <PageSizeSelect />
         <span className="ml-auto text-sm text-zinc-500">{list.total != null && plural(list.total, "gallery", "galleries")}</span>
       </Toolbar>
       <InfiniteGrid list={list} render={(g) => <GalleryCard gallery={g} />} empty="No galleries." />

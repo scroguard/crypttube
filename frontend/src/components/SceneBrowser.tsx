@@ -6,7 +6,7 @@ import { SCENE_FILTERS, toQuery } from "../lib/filters";
 import { plural } from "../lib/format";
 import { SceneCard } from "./Cards";
 import EntityPicker, { creator } from "./EntityPicker";
-import { SearchBox, SortControl, Toolbar, useUrlFilters } from "./FilterBar";
+import { SearchBox, SortControl, Toolbar, useUrlFilters, PageSizeSelect } from "./FilterBar";
 import InfiniteGrid from "./InfiniteGrid";
 import { ErrorBox, Field } from "./ui";
 
@@ -56,6 +56,7 @@ export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
             {selected ? "Done selecting" : "Select"}
           </button>
         )}
+        <PageSizeSelect />
         <span className="ml-auto text-sm text-zinc-500" data-testid="total">
           {list.total != null && plural(list.total, "scene")}
         </span>

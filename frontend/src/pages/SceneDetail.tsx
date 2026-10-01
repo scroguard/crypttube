@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api/client";
@@ -15,6 +16,20 @@ export default function SceneDetail() {
   const playback = useDetail<Playback>(`/scenes/${id}/playback`);
   const [editing, setEditing] = useState(false);
   const rate = useWrite((rating: number | null) => api(`/scenes/${id}`, { method: "PATCH", json: { rating } }));
+  const qc = useQueryClient();
+  const [rebuilding, setRebuilding] = useState(false);
+  const regenerate = useWrite(() => api(`/scenes/${id}/regenerate`, { method: "POST" }));
+  function rebuild() {
+    setRebuilding(true);
+    regenerate.mutate(undefined, {
+      onSettled: () => {
+        // The worker rebuilds in the background; pick up the new image URLs shortly after.
+        const refresh = () => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "auth" });
+        setTimeout(refresh, 4000);
+        setTimeout(() => { refresh(); setRebuilding(false); }, 12000);
+      },
+    });
+  }
 
   if (scene.isPending) return <Spinner className="mt-24" />;
   if (scene.isError) return <ErrorBox error={scene.error} />;
@@ -49,7 +64,14 @@ export default function SceneDetail() {
         </div>
         <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} />
         {canEdit && <button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button>}
+        {canEdit && (
+          <button className="btn-ghost" disabled={rebuilding} onClick={rebuild}
+                  title="Rebuild this video's thumbnail and scrub previews">
+            {rebuilding ? "Rebuilding previews…" : "Rebuild previews"}
+          </button>
+        )}
       </div>
+      {regenerate.isError && <ErrorBox error={regenerate.error} className="mt-2" />}
 
       <div className="mt-5 grid gap-6 md:grid-cols-[2fr_1fr]">
         <div className="space-y-4">

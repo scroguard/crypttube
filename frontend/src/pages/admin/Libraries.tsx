@@ -25,7 +25,8 @@ export default function Libraries() {
   const del = useWrite((id: number) => api(`/libraries/${id}`, { method: "DELETE" }));
   const scan = useWrite(({ id, path }: { id: number | null; path?: string }) =>
     api<{ job_id: number }>(id ? `/libraries/${id}/scan` : "/libraries/scan", path ? { json: { path } } : { method: "POST" }));
-  const generate = useWrite(() => api<{ job_id: number }>("/generate", { method: "POST" }));
+  const generate = useWrite((body: { force?: boolean; library_id?: number }) =>
+    api<{ job_id: number }>("/generate", { json: body }));
   const queued = (r: { job_id: number }) => setNotice(`Queued job #${r.job_id}.`);
 
   function submit(e: FormEvent) {
@@ -39,7 +40,11 @@ export default function Libraries() {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <h1 className="mr-auto text-xl font-semibold">Libraries</h1>
         <button className="btn-ghost" onClick={() => scan.mutate({ id: null }, { onSuccess: queued })}>Scan all</button>
-        <button className="btn-ghost" onClick={() => generate.mutate(undefined, { onSuccess: queued })}>Generate missing previews</button>
+        <button className="btn-ghost" title="Create thumbnails and scrub previews that are missing or unreadable"
+                onClick={() => generate.mutate({}, { onSuccess: queued })}>Generate missing previews</button>
+        <button className="btn-ghost" title="Discard every generated thumbnail and preview and build them again"
+                onClick={() => confirm("Rebuild all thumbnails and previews for every library? Existing ones are discarded first; this can take a while on a large library.")
+                  && generate.mutate({ force: true }, { onSuccess: queued })}>Rebuild all previews…</button>
       </div>
       {notice && <p className="mb-3 text-sm text-emerald-400">{notice} <Link to="/admin/jobs" className="underline">View jobs</Link></p>}
       <form onSubmit={submit} className="card mb-6 flex flex-wrap gap-2 p-4">
@@ -59,6 +64,9 @@ export default function Libraries() {
                 <span className="mr-auto" />
                 <button className="btn-ghost py-1" onClick={() => scan.mutate({ id: lib.id }, { onSuccess: queued })}>Scan</button>
                 <button className="btn-ghost py-1" onClick={() => setScanIn(lib)}>Scan folder…</button>
+                <button className="btn-ghost py-1" title="Discard and rebuild this library's thumbnails and previews"
+                        onClick={() => confirm(`Rebuild all thumbnails and previews for ${lib.path}?`)
+                          && generate.mutate({ force: true, library_id: lib.id }, { onSuccess: queued })}>Rebuild previews</button>
                 <button className="btn-danger py-1" onClick={() => confirm(`Remove ${lib.path}? Indexed metadata for it is deleted; files are untouched.`) && del.mutate(lib.id)}>Remove</button>
               </div>
               <div className="mt-3 flex flex-wrap gap-5">
@@ -74,7 +82,7 @@ export default function Libraries() {
           ))}
         </ul>
       )}
-      {(patch.error || del.error || scan.error) && <ErrorBox error={patch.error || del.error || scan.error} className="mt-3" />}
+      {(patch.error || del.error || scan.error || generate.error) && <ErrorBox error={patch.error || del.error || scan.error || generate.error} className="mt-3" />}
 
       <UserLibraries onDelete={(id) => del.mutate(id)} />
 

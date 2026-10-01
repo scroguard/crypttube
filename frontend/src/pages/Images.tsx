@@ -1,7 +1,7 @@
 import { useSearchParams } from "react-router";
 import EntityPicker from "../components/EntityPicker";
 import ImageBrowser from "../components/ImageBrowser";
-import { SortControl, Toolbar } from "../components/FilterBar";
+import { PageSizeSelect, SortControl, Toolbar } from "../components/FilterBar";
 
 const SORTS = { created_at: "Date added", title: "Title", rating: "Rating" };
 
@@ -22,6 +22,7 @@ export default function Images() {
       <Toolbar>
         <SortControl sorts={SORTS} sort={sort} desc={desc} onChange={(s, d) => set({ sort: s, desc: d })} />
         <div className="w-64"><EntityPicker kind="tags" value={tags} onChange={(t) => set({ tags: t })} placeholder="Filter by tag…" /></div>
+        <PageSizeSelect />
       </Toolbar>
       <ImageBrowser path="/images" query={{ sort, desc, tag_ids: tags }} />
     </div>

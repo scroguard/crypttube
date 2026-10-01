@@ -186,6 +186,15 @@ async def delete_library(library_id: int, request: Request, user: User = Depends
     return Response(status_code=204)
 
 
+@router.post("/libraries/{library_id}/regenerate", status_code=202)
+async def regenerate_library(library_id: int, request: Request, user: User = Depends(require_user)) -> dict:
+    """Rebuild all previews and thumbnails of one of my libraries."""
+    await _own_library(request, user, library_id)
+    job_id = await jobs.enqueue(request.app.state.pool, "generate", {"force": True, "library_id": library_id},
+                                dedupe_key=f"generate:force:{library_id}")
+    return {"job_id": job_id}
+
+
 FILE_LIST_LIMIT = 5000
 
 

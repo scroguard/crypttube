@@ -6,6 +6,7 @@ compete with the API process for the event loop.
 
 import asyncio
 import logging
+import os
 import signal
 import traceback
 
@@ -76,42 +77,106 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
 
 
 GENERATE_BATCH = 200
+MAX_REPORTED_ERRORS = 10
 
 
 async def _generate_candidates(pool: asyncpg.Pool, payload: dict):
-    """Yield batches of scenes to generate for: explicit ids, or every scene (paged by id)."""
-    query = """SELECT s.id, s.duration, f.id AS file_id, f.path, f.oshash
-               FROM scenes s JOIN files f ON f.id = s.file_id
-               WHERE f.missing_since IS NULL AND {cond} ORDER BY s.id LIMIT $2"""
+    """Yield batches of scenes in scope: explicit ids, one library, or all (paged by id)."""
+    conds, args = ["f.missing_since IS NULL"], []
     if payload.get("scene_ids"):
-        ids = payload["scene_ids"]
-        for i in range(0, len(ids), GENERATE_BATCH):
-            yield await pool.fetch(query.format(cond="s.id = ANY($1)"), ids[i:i + GENERATE_BATCH], GENERATE_BATCH)
-        return
+        args.append(payload["scene_ids"])
+        conds.append(f"s.id = ANY(${len(args)}::bigint[])")
+    if payload.get("library_id") is not None:
+        args.append(payload["library_id"])
+        conds.append(f"s.library_id = ${len(args)}")
+    query = f"""SELECT s.id, s.duration, s.assets_rev, f.id AS file_id, f.path, f.oshash,
+                       l.owner_id AS library_owner
+                FROM scenes s JOIN files f ON f.id = s.file_id JOIN library_paths l ON l.id = s.library_id
+                WHERE {' AND '.join(conds)} AND s.id > ${len(args) + 1}
+                ORDER BY s.id LIMIT {GENERATE_BATCH}"""
     after = 0
-    while rows := await pool.fetch(query.format(cond="s.id > $1"), after, GENERATE_BATCH):
+    while rows := await pool.fetch(query, *args, after):
         yield rows
         after = rows[-1]["id"]
 
 
+async def _reset_image_thumbnails(pool: asyncpg.Pool, root, library_id: int | None) -> None:
+    """Forced rebuild for images: drop cached thumbnails (they are recreated on demand)
+    and bump the revision so browsers stop using their cached copies."""
+    if library_id is None:
+        await pool.execute("UPDATE images SET assets_rev = assets_rev + 1")
+        return  # the files went with the wipe of thumbs/
+    after = 0
+    while rows := await pool.fetch(
+            """SELECT i.id, f.id AS file_id, f.mod_time FROM images i JOIN files f ON f.id = i.file_id
+               WHERE i.library_id = $1 AND i.id > $2 ORDER BY i.id LIMIT 1000""", library_id, after):
+        files = [p for r in rows
+                 for p in generated.image_asset_files(root, generated.image_version(r["file_id"], r["mod_time"]))]
+        await asyncio.to_thread(generated.remove_files, files)
+        after = rows[-1]["id"]
+    await pool.execute("UPDATE images SET assets_rev = assets_rev + 1 WHERE library_id = $1", library_id)
+
+
 async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
-    """Screenshots and scrub sprites. Existing assets are skipped, so this is idempotent."""
-    total = len(payload["scene_ids"]) if payload.get("scene_ids") else await pool.fetchval(
-        "SELECT count(*) FROM scenes")
+    """Screenshots and scrub sprites for the scenes in scope.
+
+    Default: create what is missing or unusable (empty/unreadable files count as missing),
+    so it is idempotent and also repairs. With `force`: discard and rebuild everything in
+    scope, and bump each item's asset revision so browsers refetch. Failures are reported
+    in the job's message, not just the log."""
+    root = settings.generated_dir
+    force = bool(payload.get("force"))
+    library_id, scene_ids = payload.get("library_id"), payload.get("scene_ids")
+
+    problem = await asyncio.to_thread(generated.check_writable, root)
+    if problem:
+        raise ScanError(problem)  # fails the job with this explanation
+
+    if force and not scene_ids:
+        if library_id is None:
+            # Everything: also clears leftovers of files that no longer exist.
+            await asyncio.to_thread(generated.wipe_rebuildable, root)
+        await _reset_image_thumbnails(pool, root, library_id)
+
+    conds, args = ["true"], []
+    if scene_ids:
+        args.append(scene_ids)
+        conds.append("id = ANY($1::bigint[])")
+    elif library_id is not None:
+        args.append(library_id)
+        conds.append("library_id = $1")
+    total = await pool.fetchval(f"SELECT count(*) FROM scenes WHERE {' AND '.join(conds)}", *args)
+
     sem = asyncio.Semaphore(settings.generate_concurrency)
     made = failed = done = 0
+    errors: list[str] = []
+    # Identical files share one set of assets (keyed by content hash): build them once.
+    locks: dict[str, asyncio.Lock] = {}
+    rebuilt: set[str] = set()
 
     async def one(row):
         nonlocal made, failed
         version = generated.scene_version(row["oshash"], row["file_id"])
-        async with sem:
-            try:
-                if await generated.generate_scene_assets(settings.generated_dir, row["path"],
-                                                         row["duration"], version):
+        rev = row["assets_rev"] + 1 if force else row["assets_rev"]
+        try:
+            async with sem, locks.setdefault(version, asyncio.Lock()):
+                first = version not in rebuilt
+                rebuilt.add(version)
+                if await generated.generate_scene_assets(
+                        root, row["path"], row["duration"], version,
+                        url_ver=generated.url_version(version, rev), force=force and first):
                     made += 1
-            except (ProbeError, OSError) as e:
-                failed += 1
-                log.warning("generate failed for scene %s: %s", row["id"], e)
+        except (ProbeError, OSError) as e:
+            failed += 1
+            # Don't put file names from users' private libraries into the admin's job list.
+            name = f"scene {row['id']}" + ("" if row["library_owner"] is not None
+                                           else f" ({os.path.basename(row['path'])})")
+            log.warning("generate failed for scene %s: %s", row["id"], e)
+            if len(errors) < MAX_REPORTED_ERRORS:
+                errors.append(f"{name}: {str(e).splitlines()[-1][:200]}")
+        finally:
+            if force:
+                await pool.execute("UPDATE scenes SET assets_rev = $2 WHERE id = $1", row["id"], rev)
 
     async for rows in _generate_candidates(pool, payload):
         if await ctx.cancelled():
@@ -119,7 +184,12 @@ async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobC
         await asyncio.gather(*(one(r) for r in rows))
         done += len(rows)
         await ctx.progress(min(1.0, done / max(total, 1)), f"{done}/{total} scenes")
-    return f"{made} generated" + (f", {failed} failed" if failed else "")
+
+    summary = f"{made} {'rebuilt' if force else 'generated'}" + (f", {failed} failed" if failed else "")
+    if errors:
+        more = failed - len(errors)
+        summary += "\n" + "\n".join(errors) + (f"\n…and {more} more" if more > 0 else "")
+    return summary
 
 
 async def handle_refresh_counts(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:

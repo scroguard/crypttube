@@ -3,7 +3,7 @@ import { useInfiniteList, useMe } from "../api/hooks";
 import type { TagItem } from "../api/types";
 import { TagCard } from "../components/Cards";
 import { CreateEntityButton } from "../components/EntityDialogs";
-import { SearchBox, Toolbar } from "../components/FilterBar";
+import { SearchBox, Toolbar, PageSizeSelect } from "../components/FilterBar";
 import InfiniteGrid from "../components/InfiniteGrid";
 import { plural } from "../lib/format";
 
@@ -20,6 +20,7 @@ export default function Tags() {
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" className="accent-accent" checked={roots} onChange={(e) => setP(e.target.checked ? { roots: "1" } : {})} /> Top-level only
         </label>
+        <PageSizeSelect />
         <span className="ml-auto text-sm text-zinc-500">{list.total != null && plural(list.total, "tag")}</span>
         {canCreate && <CreateEntityButton kind="tags" label="tag" />}
       </Toolbar>

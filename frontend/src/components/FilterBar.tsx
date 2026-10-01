@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { readFilters, writeFilters, type FilterSpec, type FilterValues } from "../lib/filters";
+import { PAGE_SIZES, parsePageSize, setPageSize, usePageSize } from "../lib/pageSize";
 
 /** Filters live in the URL, so they survive reloads, are shareable, and Back works. */
 export function useUrlFilters(spec: FilterSpec, defaults: FilterValues = {}) {
@@ -47,4 +48,16 @@ export function SortControl({ sorts, sort, desc, onChange }: {
 
 export function Toolbar({ children }: { children: ReactNode }) {
   return <div className="mb-4 flex flex-wrap items-center gap-2">{children}</div>;
+}
+
+/** "Items per page" preference (stored in this browser); Scroll = continuous loading. */
+export function PageSizeSelect() {
+  const size = usePageSize();
+  return (
+    <select className="input w-auto" value={size ?? ""} aria-label="Items per page" title="Items per page"
+            onChange={(e) => setPageSize(parsePageSize(e.target.value))}>
+      <option value="">Scroll</option>
+      {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
+    </select>
+  );
 }

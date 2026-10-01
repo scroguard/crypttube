@@ -4,6 +4,7 @@ import { buildUrl } from "../api/client";
 import { SCENE_FILTERS, readFilters, toQuery, writeFilters } from "./filters";
 import { age, formatBytes, formatDuration, resolutionLabel } from "./format";
 import { sourceUrl, usableModes } from "./playback";
+import { parsePageSize } from "./pageSize";
 import { cueAt, parseSpriteVtt } from "./vtt";
 
 describe("format", () => {
@@ -89,5 +90,16 @@ describe("filters", () => {
     expect(buildUrl("/scenes", { tag_ids: [1, 2], q: "", desc: false, x: undefined })).toBe(
       "/api/scenes?tag_ids=1&tag_ids=2&desc=false",
     );
+  });
+});
+
+describe("page size preference", () => {
+  it("accepts only offered sizes; anything else means continuous scrolling", () => {
+    expect(parsePageSize("50")).toBe(50);
+    expect(parsePageSize("200")).toBe(200);
+    expect(parsePageSize("")).toBeNull();
+    expect(parsePageSize(null)).toBeNull();
+    expect(parsePageSize("7")).toBeNull();
+    expect(parsePageSize("100000")).toBeNull();
   });
 });

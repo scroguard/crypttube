@@ -85,6 +85,9 @@ scroll position), filters kept in the URL. Highlights:
   decode, falls back automatically on error, manual quality menu (Original, 1080p…360p),
   seek-bar sprite previews, keyboard shortcuts (space/k, j/l, ←/→, ↑/↓, m, f), per-user
   resume, play counts.
+- **Paging**: lists scroll continuously by default; an *items per page* selector
+  (10/20/30/50/100/200, remembered per browser) switches every list to pages with
+  Previous/Next.
 - **Grids**: hover-scrub previews on scene cards, bulk select (tags, performers, rating,
   organized), lazy-loaded WebP thumbnails.
 - **Lightbox**: keyboard/swipe navigation, neighbour preloading, click-to-zoom, loads
@@ -134,7 +137,9 @@ this host; for files added from other machines, use **Scan** / **Scan folder…*
 | `GET /api/scenes/{id}/sprite.vtt`, `sprite.webp` | scrub previews (9×9 keyframe grid + WebVTT `#xywh`) |
 | `GET /api/images/{id}/thumbnail?w=&v=` | WebP, on demand, EXIF-rotated, never upscaled; works for zip members |
 | `GET /api/images/{id}/file` | original image |
-| `POST /api/generate` | queue screenshots/sprites for all scenes lacking them |
+| `POST /api/generate` `{force?, library_id?}` | queue screenshots/sprites that are missing or unusable; `force` discards and rebuilds everything in scope (admin) |
+| `POST /api/scenes/{id}/regenerate` | rebuild one scene's assets (whoever may edit it) |
+| `POST /api/my/libraries/{id}/regenerate` | rebuild one of your own libraries |
 
 Thumbnail widths are fixed (160/320/640/1280) so the cache can't be blown up by
 arbitrary sizes. Generated assets are keyed by content version (scene oshash, image
@@ -143,6 +148,15 @@ file id + mtime); requests that carry the current `v=` get
 keeps shared proxies from caching anything.
 
 Scans queue asset generation for new/changed videos in the worker.
+
+**Repairing generated content.** *Generate missing previews* (Admin → Libraries) creates
+whatever is missing, and treats empty or unreadable files as missing. *Rebuild previews*
+(per library, per scene, per user library) or *Rebuild all previews…* discards and
+regenerates screenshots, scrub sprites and cached thumbnails. Each rebuilt item's asset
+revision is bumped and is part of its image URLs (`v=<hash>.<rev>`), so browsers fetch the
+new files instead of their year-long-cached copies. Failures are listed with reasons in
+the job (Admin → Jobs); if the `generated` volume isn't writable the job fails saying so.
+Uploaded performer/studio/tag images are never touched.
 
 ## Browse API
 

@@ -148,12 +148,12 @@ def page_response(page) -> dict:
 
 
 def scene_thumb(item: dict, w: int) -> str:
-    v = generated.scene_version(item["oshash"], item["file_id"])
+    v = generated.url_version(generated.scene_version(item["oshash"], item["file_id"]), item["assets_rev"])
     return f"/api/scenes/{item['id']}/screenshot?w={w}&v={v}"
 
 
-def image_urls(image_id: int, file_id: int, mod_time, w: int) -> dict:
-    v = generated.image_version(file_id, mod_time)
+def image_urls(image_id: int, file_id: int, mod_time, w: int, rev: int = 0) -> dict:
+    v = generated.url_version(generated.image_version(file_id, mod_time), rev)
     return {"thumbnail_url": f"/api/images/{image_id}/thumbnail?w={w}&v={v}",
             "file_url": f"/api/images/{image_id}/file?v={v}"}
 
@@ -247,7 +247,7 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
         from_="scenes s JOIN files f ON f.id = s.file_id",
         select="""s.id, s.title, s.duration, s.width, s.height, s.release_date, s.rating,
                   s.organized, s.play_count, s.studio_id, s.created_at,
-                  f.id AS file_id, f.oshash, f.missing_since IS NOT NULL AS missing""",
+                  s.assets_rev, f.id AS file_id, f.oshash, f.missing_since IS NOT NULL AS missing""",
         sorts=SCENE_SORTS,
         where=lambda q: scene_where(q, f, acl),
         enrich=lambda q: _scene_enrich(q, acl),
@@ -256,7 +256,7 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
                           cursor=f.cursor, limit=f.limit, with_total=f.with_total)
     for it in page.items:
         it["screenshot_url"] = scene_thumb(it, f.thumb_w)
-        for k in ("file_id", "oshash", "studio_id"):
+        for k in ("file_id", "oshash", "studio_id", "assets_rev"):
             del it[k]
     return page_response(page)
 
@@ -293,6 +293,7 @@ async def get_scene(scene_id: int, request: Request, acl: Acl = Depends(get_acl)
     _edit_flags(out, acl)
     out["screenshot_url"] = scene_thumb(out, 1280)
     out["playback_url"] = f"/api/scenes/{scene_id}/playback"
+    del out["assets_rev"]
     for p in out["performers"]:
         version = p.pop("image_version")
         p["image_url"] = f"/api/performers/{p['id']}/image?v={version}" if p.pop("has_image") else None
@@ -340,9 +341,9 @@ async def list_galleries(request: Request, f: Annotated[GalleryFilter, Query()],
         joins, cols = related("gallery")
         joins += """
             LEFT JOIN LATERAL (
-                SELECT cf.id AS cover_file_id, cf.mod_time AS cover_mod_time
+                SELECT cf.id AS cover_file_id, cf.mod_time AS cover_mod_time, ci.assets_rev AS cover_rev
                 FROM images ci JOIN files cf ON cf.id = ci.file_id WHERE ci.id = p.cover_image_id) r_cv ON true"""
-        return joins, cols + ", r_cv.cover_file_id, r_cv.cover_mod_time"
+        return joins, cols + ", r_cv.cover_file_id, r_cv.cover_mod_time, r_cv.cover_rev"
 
     lq = ListQuery(
         alias="g", from_="galleries g",
@@ -353,8 +354,8 @@ async def list_galleries(request: Request, f: Annotated[GalleryFilter, Query()],
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
                           cursor=f.cursor, limit=f.limit, with_total=f.with_total)
     for it in page.items:
-        fid, mt = it.pop("cover_file_id"), it.pop("cover_mod_time")
-        it["cover_url"] = image_urls(it["cover_image_id"], fid, mt, f.thumb_w)["thumbnail_url"] if fid else None
+        fid, mt, rev = it.pop("cover_file_id"), it.pop("cover_mod_time"), it.pop("cover_rev")
+        it["cover_url"] = image_urls(it["cover_image_id"], fid, mt, f.thumb_w, rev)["thumbnail_url"] if fid else None
         del it["studio_id"]
     return page_response(page)
 
@@ -367,7 +368,7 @@ async def get_gallery(gallery_id: int, request: Request, acl: Acl = Depends(get_
     row = await request.app.state.pool.fetchrow(f"""
         SELECT g.*, z.path AS zip_path,
                (SELECT l.owner_id FROM library_paths l WHERE l.id = g.library_id) AS library_owner_id,
-               cf.id AS cover_file_id, cf.mod_time AS cover_mod_time,
+               cf.id AS cover_file_id, cf.mod_time AS cover_mod_time, ci.assets_rev AS cover_rev,
                (SELECT jsonb_build_object('id', x.id, 'name', x.name) FROM studios x WHERE x.id = g.studio_id) AS studio,
                (SELECT coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name)
                                           ORDER BY x.name COLLATE natural_sort), '[]')
@@ -385,8 +386,8 @@ async def get_gallery(gallery_id: int, request: Request, acl: Acl = Depends(get_
         raise HTTPException(404, "gallery not found")
     out = dict(row)
     _edit_flags(out, acl)
-    fid, mt = out.pop("cover_file_id"), out.pop("cover_mod_time")
-    out["cover_url"] = image_urls(out["cover_image_id"], fid, mt, 640)["thumbnail_url"] if fid else None
+    fid, mt, rev = out.pop("cover_file_id"), out.pop("cover_mod_time"), out.pop("cover_rev")
+    out["cover_url"] = image_urls(out["cover_image_id"], fid, mt, 640, rev)["thumbnail_url"] if fid else None
     out["images_url"] = f"/api/galleries/{gallery_id}/images"
     del out["zip_file_id"], out["studio_id"]
     return out
@@ -401,7 +402,7 @@ IMAGE_SORTS = {
     "title": Sort("coalesce(i.title, '')", "text", collate="natural_sort"),
     "rating": Sort("coalesce(i.rating, -1)", "smallint"),
 }
-IMAGE_SELECT = """i.id, i.title, i.width, i.height, i.rating, i.organized,
+IMAGE_SELECT = """i.id, i.title, i.width, i.height, i.rating, i.organized, i.assets_rev,
                   f.id AS file_id, f.mod_time"""
 IMAGE_JOINS = "JOIN files f ON f.id = i.file_id LEFT JOIN files z ON z.id = f.zip_file_id"
 IMAGE_FROM = f"images i {IMAGE_JOINS}"
@@ -415,7 +416,7 @@ class ImageFilter(ContentFilter):
 
 def _image_items(page, w: int) -> dict:
     for it in page.items:
-        it.update(image_urls(it["id"], it.pop("file_id"), it.pop("mod_time"), w))
+        it.update(image_urls(it["id"], it.pop("file_id"), it.pop("mod_time"), w, it.pop("assets_rev")))
     return page_response(page)
 
 
@@ -489,6 +490,6 @@ async def get_image(image_id: int, request: Request, acl: Acl = Depends(get_acl)
         raise HTTPException(404, "image not found")
     out = dict(row)
     _edit_flags(out, acl)
-    out.update(image_urls(image_id, out.pop("file_id"), out.pop("mod_time"), 1280))
+    out.update(image_urls(image_id, out.pop("file_id"), out.pop("mod_time"), 1280, out.pop("assets_rev")))
     del out["studio_id"]
     return out

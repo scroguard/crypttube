@@ -43,7 +43,8 @@ export default function Jobs() {
                     )}
                   </td>
                   <td className="max-w-md p-3 text-xs text-zinc-400">
-                    {j.error ? <pre className="whitespace-pre-wrap text-red-300">{j.error}</pre> : j.message}
+                    {j.error ? <pre className="whitespace-pre-wrap text-red-300">{j.error}</pre>
+                      : <span className="whitespace-pre-line">{j.message}</span>}
                   </td>
                   <td className="whitespace-nowrap p-3 text-xs text-zinc-500">{formatDateTime(j.started_at ?? j.created_at)}</td>
                   <td className="p-3">

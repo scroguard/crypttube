@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import counts
+from app import counts, jobs
 from app.permissions import (require_can_create, require_content_edit, require_entity_edit,
                              require_visible)
 from app.acl import Acl
@@ -161,6 +161,17 @@ async def patch_gallery(gallery_id: int, body: GalleryPatch, request: Request, a
 @router.patch("/images/{image_id}")
 async def patch_image(image_id: int, body: ImagePatch, request: Request, acl: Acl = Depends(get_acl)):
     return await _patch_content("images", image_id, body, request, acl)
+
+
+@router.post("/scenes/{scene_id}/regenerate", status_code=202)
+async def regenerate_scene(scene_id: int, request: Request, acl: Acl = Depends(get_acl)) -> dict:
+    """Rebuild this scene's screenshot, thumbnails and scrub sprite from the video."""
+    pool = request.app.state.pool
+    await browse.get_scene(scene_id, request, acl)
+    await require_content_edit(pool, acl, "scenes", [scene_id])
+    job_id = await jobs.enqueue(pool, "generate", {"scene_ids": [scene_id], "force": True},
+                                dedupe_key=f"generate:force:scene:{scene_id}")
+    return {"job_id": job_id}
 
 
 class LinkEdit(Body):

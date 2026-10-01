@@ -96,6 +96,17 @@ test("scan just one folder of a library", async () => {
   await expect(row).toContainText("no changes");
 });
 
+test("force-rebuild a library's previews", async () => {
+  await adminNav("Libraries").click();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Rebuild previews", exact: true }).click();
+  await expect(page.getByText(/Queued job #\d+/)).toBeVisible();
+  await adminNav("Jobs").click();
+  const row = page.getByTestId("job-row").filter({ hasText: "generate" }).first();
+  await expect(row).toContainText("3 rebuilt", { timeout: 60_000 });
+  await expect(row).toContainText("done");
+});
+
 test("scene grid shows indexed videos", async () => {
   await nav("Scenes").click();
   await expect(page.getByTestId("scene-card")).toHaveCount(3);
@@ -196,6 +207,43 @@ test("gallery lightbox navigation", async () => {
   await page.screenshot({ path: `${SHOTS}/09-lightbox.png` });
   await page.keyboard.press("Escape");
   await expect(box).toBeHidden();
+});
+
+test("items per page: paged browsing instead of continuous scroll", async () => {
+  await nav("Images").click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(15); // 12 loose + 3 in the zip
+  await expect(page.getByTestId("pager")).toHaveCount(0);
+
+  await page.getByLabel("Items per page").selectOption("10");
+  await expect(page.getByTestId("image-tile")).toHaveCount(10);
+  await expect(page.getByTestId("page-indicator").first()).toHaveText("Page 1 of 2");
+  await expect(page.getByRole("button", { name: "‹ Previous" }).first()).toBeDisabled();
+  await page.screenshot({ path: `${SHOTS}/09a-paged.png` });
+
+  await page.getByRole("button", { name: "Next ›" }).first().click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(5);
+  await expect(page.getByTestId("page-indicator").first()).toHaveText("Page 2 of 2");
+  await expect(page.getByRole("button", { name: "Next ›" }).first()).toBeDisabled();
+  await page.getByRole("button", { name: "‹ Previous" }).first().click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(10);
+
+  // the lightbox steps through the current page
+  await page.getByTestId("image-tile").first().click();
+  await expect(page.getByTestId("lightbox-counter")).toHaveText("1 / 10");
+  await page.keyboard.press("Escape");
+
+  // the choice is remembered, and applies to other lists too
+  await page.reload();
+  await expect(page.getByLabel("Items per page")).toHaveValue("10");
+  await expect(page.getByTestId("image-tile")).toHaveCount(10);
+  await nav("Scenes").click();
+  await expect(page.getByLabel("Items per page")).toHaveValue("10");
+  await expect(page.getByTestId("scene-card")).toHaveCount(3); // fewer than a page: no pager
+  await expect(page.getByTestId("pager")).toHaveCount(0);
+
+  await page.getByLabel("Items per page").selectOption("");   // back to continuous scrolling
+  await nav("Images").click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(15);
 });
 
 test("performer page lists their scenes", async () => {

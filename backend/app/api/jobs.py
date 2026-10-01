@@ -1,6 +1,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict
 
 from app import jobs
 from app.config import get_settings
@@ -53,9 +54,23 @@ async def cancel_job(job_id: int, request: Request) -> dict:
     return {"ok": True}
 
 
+class GenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    force: bool = False              # discard and rebuild, instead of only filling gaps
+    library_id: int | None = None    # limit to one library
+
+
 @router.post("/generate", status_code=202)
-async def generate_missing(request: Request) -> dict:
-    """Queue screenshot/sprite generation for every scene that lacks them."""
-    job_id = await jobs.enqueue(request.app.state.pool, "generate", {"missing": True},
-                                dedupe_key="generate:missing")
-    return {"job_id": job_id}
+async def generate(request: Request, body: GenerateRequest | None = None) -> dict:
+    """Queue screenshot/sprite generation. By default only what is missing or unusable
+    is (re)created; `force` rebuilds everything in scope, including cached thumbnails."""
+    body = body or GenerateRequest()
+    pool = request.app.state.pool
+    if body.library_id is not None and not await pool.fetchval(
+            "SELECT true FROM library_paths WHERE id = $1", body.library_id):
+        raise HTTPException(404, "library not found")
+    payload = {"force": True} if body.force else {"missing": True}
+    if body.library_id is not None:
+        payload["library_id"] = body.library_id
+    key = f"generate:{'force' if body.force else 'missing'}:{body.library_id or 'all'}"
+    return {"job_id": await jobs.enqueue(pool, "generate", payload, dedupe_key=key)}

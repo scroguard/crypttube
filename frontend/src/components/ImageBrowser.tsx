@@ -14,9 +14,11 @@ export default function ImageBrowser({ path, query = {} }: { path: string; query
     <>
       <InfiniteGrid list={list} layout="square" empty="No images."
                     render={(img, i) => <ImageTile image={img} onOpen={() => setOpen(i)} />} />
+      {/* In paged mode the lightbox steps through the current page only. */}
       {open !== null && (
-        <Lightbox images={list.items} index={open} onIndex={setOpen} onClose={() => setOpen(null)} total={list.total}
-                  onNearEnd={() => list.hasNextPage && !list.isFetchingNextPage && list.fetchNextPage()} />
+        <Lightbox images={list.items} index={open} onIndex={setOpen} onClose={() => setOpen(null)}
+                  total={list.paging ? list.items.length : list.total}
+                  onNearEnd={() => !list.paging && list.hasNextPage && !list.isFetchingNextPage && list.fetchNextPage()} />
       )}
     </>
   );

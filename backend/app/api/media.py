@@ -53,10 +53,10 @@ _gen_sem = asyncio.Semaphore(4)
 
 async def _ensure(dest: Path, make) -> Path:
     """Return dest, generating it first (once, with bounded concurrency) if absent."""
-    if dest.exists():
+    if generated.usable(dest):
         return dest
     async with _keyed_lock(str(dest)):
-        if not dest.exists():
+        if not generated.usable(dest):
             async with _gen_sem:
                 try:
                     await make()
@@ -84,7 +84,7 @@ async def _scene(request: Request, scene_id: int, acl: Acl):
     cond = " AND ".join([f"s.id = {q.p(scene_id)}", *visible(acl, "scene", "s", q)])
     row = await request.app.state.pool.fetchrow(
         f"""SELECT s.id, s.duration, s.height, s.video_codec, s.audio_codec,
-                   f.id AS file_id, f.path, f.oshash, f.missing_since
+                   s.assets_rev, f.id AS file_id, f.path, f.oshash, f.missing_since
             FROM scenes s JOIN files f ON f.id = s.file_id WHERE {cond}""",
         *q.args,
     )
@@ -138,6 +138,7 @@ async def playback(scene_id: int, request: Request, acl: Acl = Depends(get_acl))
     s = await _scene(request, scene_id, acl)
     base = f"/api/scenes/{scene_id}"
     version = generated.scene_version(s["oshash"], s["file_id"])
+    urlv = generated.url_version(version, s["assets_rev"])
     sprite_img, sprite_vtt = generated.sprite_paths(get_settings().generated_dir, version)
     return {
         "modes": streaming.playback_modes(s["path"], s["video_codec"], s["audio_codec"]),
@@ -148,8 +149,9 @@ async def playback(scene_id: int, request: Request, acl: Acl = Depends(get_acl))
         "video_codec": s["video_codec"],
         "audio_codec": s["audio_codec"],
         "duration": s["duration"],
-        "screenshot_url": f"{base}/screenshot?v={version}",
-        "sprite_vtt_url": f"{base}/sprite.vtt?v={version}" if sprite_vtt.exists() and sprite_img.exists() else None,
+        "screenshot_url": f"{base}/screenshot?v={urlv}",
+        "sprite_vtt_url": (f"{base}/sprite.vtt?v={urlv}"
+                           if generated.usable(sprite_vtt) and generated.usable(sprite_img) else None),
     }
 
 
@@ -166,19 +168,21 @@ async def screenshot(scene_id: int, request: Request, w: int = 1280, v: str | No
     if w != generated.SCREENSHOT_WIDTH:
         out = generated.thumbnail_path(root, "scenes", version, w)
         await _ensure(out, lambda: asyncio.to_thread(generated.make_thumbnail, master, w, out))
-    return FileResponse(out, media_type="image/webp", headers=_cache_for(v, version))
+    return FileResponse(out, media_type="image/webp",
+                        headers=_cache_for(v, generated.url_version(version, s["assets_rev"])))
 
 
 async def _sprite_file(scene_id: int, request: Request, v: str | None, which: int, media_type: str, acl: Acl):
     s = await _scene(request, scene_id, acl)
     version = generated.scene_version(s["oshash"], s["file_id"])
     path = generated.sprite_paths(get_settings().generated_dir, version)[which]
-    if not path.exists():
+    if not generated.usable(path):
         # Too slow to build inline; queue it and let the player do without for now.
         await jobs.enqueue(request.app.state.pool, "generate", {"scene_ids": [scene_id]},
                            dedupe_key=f"generate:scene:{scene_id}")
         raise HTTPException(404, "sprite not generated yet; queued")
-    return FileResponse(path, media_type=media_type, headers=_cache_for(v, version))
+    return FileResponse(path, media_type=media_type,
+                        headers=_cache_for(v, generated.url_version(version, s["assets_rev"])))
 
 
 @router.get("/scenes/{scene_id}/sprite.webp")
@@ -199,7 +203,7 @@ async def _image(request: Request, image_id: int, acl: Acl):
     q = Q()
     cond = " AND ".join([f"i.id = {q.p(image_id)}", *visible(acl, "image", "i", q)])
     row = await request.app.state.pool.fetchrow(
-        f"""SELECT i.id, i.format, f.id AS file_id, f.path, f.mod_time,
+        f"""SELECT i.id, i.format, i.assets_rev, f.id AS file_id, f.path, f.mod_time,
                    coalesce(z.missing_since, f.missing_since) AS missing_since, z.path AS zip_path
             FROM images i JOIN files f ON f.id = i.file_id
             LEFT JOIN files z ON z.id = f.zip_file_id
@@ -227,14 +231,15 @@ async def image_thumbnail(image_id: int, request: Request, w: int = 320, v: str 
             generated.make_thumbnail(src, w, out)
 
     await _ensure(out, lambda: asyncio.to_thread(make))
-    return FileResponse(out, media_type="image/webp", headers=_cache_for(v, version))
+    return FileResponse(out, media_type="image/webp",
+                        headers=_cache_for(v, generated.url_version(version, img["assets_rev"])))
 
 
 @router.get("/images/{image_id}/file")
 async def image_file(image_id: int, request: Request, v: str | None = None, acl: Acl = Depends(get_acl)):
     """The original image, for the full-size lightbox view."""
     img = await _image(request, image_id, acl)
-    version = generated.image_version(img["file_id"], img["mod_time"])
+    version = generated.url_version(generated.image_version(img["file_id"], img["mod_time"]), img["assets_rev"])
     media_type = mimetypes.guess_type(img["path"])[0] or "application/octet-stream"
     headers = _cache_for(v, version)
     if img["zip_path"] is None:

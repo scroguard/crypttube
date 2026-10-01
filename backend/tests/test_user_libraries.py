@@ -412,3 +412,22 @@ async def test_unindexable_uploads_are_listed_and_deletable(app, people, alice_l
     assert len(await scene_ids(alice)) == 1                      # the broken one produced no scene
     assert (await alice.delete(f"/api/my/libraries/{lib}/files", params={"path": "broken.mp4"})).status_code == 204
     assert "broken.mp4" not in [f["path"] for f in (await alice.get(f"/api/my/libraries/{lib}/files")).json()]
+
+
+async def test_rebuilding_a_user_library(app, people, alice_lib):
+    from app.jobs import JobContext
+    alice, bob, admin, pool = people["alice"], people["bob"], people["admin"], app.state.pool
+    lib = alice_lib["id"]
+    assert (await bob.post(f"/api/my/libraries/{lib}/regenerate")).status_code == 404
+    assert (await admin.post(f"/api/scenes/{alice_lib['scene']}/regenerate")).status_code == 404   # can't even see it
+    assert (await alice.post(f"/api/scenes/{alice_lib['scene']}/regenerate")).status_code == 202   # viewer, but owner
+    assert (await alice.post(f"/api/my/libraries/{lib}/regenerate")).status_code == 202
+
+    # a failure in a private library is reported without its file name
+    root = Path(await pool.fetchval("SELECT path FROM library_paths WHERE id = $1", lib))
+    (root / "clip.mp4").write_bytes(b"broken after indexing" * 20)
+    payload = {"force": True, "library_id": lib}
+    job = await pool.fetchval("INSERT INTO jobs (kind, payload, status) VALUES ('generate', $1, 'running') RETURNING id", payload)
+    msg = await worker.handle_generate(pool, get_settings(), JobContext(pool, job), payload)
+    assert msg.startswith("0 rebuilt, 1 failed") and f"scene {alice_lib['scene']}:" in msg
+    assert "clip" not in msg
