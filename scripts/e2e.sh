@@ -30,6 +30,6 @@ compose=(docker compose -p goon-e2e -f compose.yaml -f compose.e2e.yaml)
 cleanup() { [ "${1:-}" = "--keep" ] || "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1; }
 trap 'cleanup "${1:-}"' EXIT
 "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
-"${compose[@]}" build api worker web
-"${compose[@]}" up -d db api worker web
-"${compose[@]}" run --rm e2e
+"${compose[@]}" build goonstreamer-api goonstreamer-worker goonstreamer-web
+"${compose[@]}" up -d goonstreamer-db goonstreamer-api goonstreamer-worker goonstreamer-web
+"${compose[@]}" run --rm goonstreamer-e2e

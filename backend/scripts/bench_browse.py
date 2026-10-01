@@ -1,6 +1,6 @@
 """Benchmark the list API against a large synthetic library.
 
-    docker compose run --rm api python -m scripts.bench_browse [--scenes 200000]
+    docker compose run --rm goonstreamer-api python -m scripts.bench_browse [--scenes 200000]
 
 Creates (and afterwards drops) a separate database, so real data is untouched.
 """

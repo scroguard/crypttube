@@ -7,24 +7,27 @@ x-backend: &backend
   user: "${PUID:-1000}:${PGID:-1000}"
   restart: unless-stopped
   depends_on:
-    db:
+    goonstreamer-db:
       condition: service_healthy
   environment:
-    DATABASE_URL: postgresql://${POSTGRES_USER:-goon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-goon}
+    DATABASE_URL: postgresql://${POSTGRES_USER:-goon}:${POSTGRES_PASSWORD}@goonstreamer-db:5432/${POSTGRES_DB:-goon}
     GENERATED_DIR: /data/generated
     MEDIA_DIR: /media
     WATCHER_POLLING: ${WATCHER_POLLING:-false}
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
-    # Only nginx (web) can reach the API in production, so trust its X-Forwarded-For
+    # Only nginx (goonstreamer-web) can reach the API in production, so trust its X-Forwarded-For
     # (login throttling is keyed on the real client address).
     FORWARDED_ALLOW_IPS: "*"
   volumes:
     - ${MEDIA_ROOT:-./media}:/media:ro
     - ${GENERATED_ROOT:-./data/generated}:/data/generated
-  networks: [backend]
+  networks: [goonstreamer]
 
+# Service and container names are prefixed so they can't collide with other stacks
+# (container names are global; on a shared network so are service hostnames).
 services:
-  db:
+  goonstreamer-db:
+    container_name: goonstreamer-db
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
@@ -47,37 +50,40 @@ services:
       - jit=off
     volumes:
       - pgdata:/var/lib/postgresql/data
-    networks: [backend]
+    networks: [goonstreamer]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
-    # No published ports: the database is reachable only from the backend network.
+    # No published ports: the database is reachable only from the goonstreamer network.
 
-  api:
+  goonstreamer-api:
     <<: *backend
-    # Not published: reached through `web`.
+    container_name: goonstreamer-api
+    # Not published: reached through goonstreamer-web.
 
   # The single entry point: serves the React app and proxies /api (same-origin).
-  web:
+  goonstreamer-web:
+    container_name: goonstreamer-web
     build:
       context: ./frontend
     restart: unless-stopped
-    depends_on: [api]
-    networks: [backend]
+    depends_on: [goonstreamer-api]
+    networks: [goonstreamer]
     ports:
       - "127.0.0.1:${WEB_PORT:-8420}:80"
 
-  # Scans, file watching and (later) ffmpeg generation. Single instance: the
+  # Scans, file watching and ffmpeg generation. Single instance: the
   # watcher and stale-job recovery assume one worker.
-  worker:
+  goonstreamer-worker:
     <<: *backend
+    container_name: goonstreamer-worker
     command: ["python", "-m", "app.worker"]
     stop_grace_period: 30s
 
 networks:
-  backend:
+  goonstreamer:
 
 volumes:
   pgdata:

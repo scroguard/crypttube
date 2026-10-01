@@ -29,9 +29,9 @@ docker compose -f compose.yaml -f compose.dev.yaml up -d --build
 Tests:
 
 ```sh
-docker compose run --rm api pytest                       # backend (134 tests; needs the dev compose)
-docker compose run --rm web npx vitest run               # frontend unit tests (dev compose)
-docker compose run --rm api python -m scripts.bench_browse   # list API on 200k scenes
+docker compose run --rm goonstreamer-api pytest                     # backend (134 tests; needs the dev compose)
+docker compose run --rm goonstreamer-web npx vitest run             # frontend unit tests (dev compose)
+docker compose run --rm goonstreamer-api python -m scripts.bench_browse # list API on 200k scenes
 scripts/e2e.sh                                           # Playwright, isolated stack
 ```
 
@@ -47,12 +47,15 @@ listens only on `127.0.0.1`.
 
 ## Services
 
-| service  | role |
-|----------|------|
-| `web`    | nginx: React app + `/api` proxy on `127.0.0.1:${WEB_PORT:-8420}` (dev: Vite) |
-| `api`    | FastAPI (docs at `/api/docs`), internal |
-| `db`     | PostgreSQL 17, internal |
-| `worker` | job queue runner + filesystem watcher (single instance) |
+Service and container names share the `goonstreamer-` prefix so they can't collide with
+other stacks on the same Docker host.
+
+| service / container    | role |
+|------------------------|------|
+| `goonstreamer-web`     | nginx: React app + `/api` proxy on `127.0.0.1:${WEB_PORT:-8420}` (dev: Vite) |
+| `goonstreamer-api`     | FastAPI (docs at `/api/docs`), internal |
+| `goonstreamer-db`      | PostgreSQL 17, internal |
+| `goonstreamer-worker`  | job queue runner + filesystem watcher (single instance) |
 
 ## Frontend
 

@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     port: 5173,
     // Same-origin in dev too, so the session cookie behaves exactly as behind nginx.
-    proxy: { "/api": { target: process.env.API_URL ?? "http://api:8000", changeOrigin: false } },
+    proxy: { "/api": { target: process.env.API_URL ?? "http://goonstreamer-api:8000", changeOrigin: false } },
   },
   build: { sourcemap: false, chunkSizeWarningLimit: 800 },
   test: { environment: "node", include: ["src/**/*.test.ts"] },

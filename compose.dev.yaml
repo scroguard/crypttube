@@ -2,7 +2,7 @@
 # or set COMPOSE_FILE=compose.yaml:compose.dev.yaml in .env. Never applied automatically,
 # so deploying compose.yaml alone (e.g. from a stack manager) always gets production.
 services:
-  api:
+  goonstreamer-api:
     build:
       args:
         INSTALL_DEV: "1"
@@ -15,7 +15,7 @@ services:
     # --reload-dir keeps the reloader watching source only, never data or cache dirs.
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]
 
-  worker:
+  goonstreamer-worker:
     build:
       args:
         INSTALL_DEV: "1"
@@ -25,14 +25,14 @@ services:
       - ${GENERATED_ROOT:-./data/generated}:/data/generated
     command: ["watchfiles", "--filter", "python", "python -m app.worker", "app"]
 
-  web:
+  goonstreamer-web:
     build: !reset null
     image: node:22-alpine
     user: "${PUID:-1000}:${PGID:-1000}"
     working_dir: /app
     environment:
       HOME: /tmp
-      API_URL: http://api:8000
+      API_URL: http://goonstreamer-api:8000
     volumes:
       - ./frontend:/app
     command: ["sh", "-c", "npm install --no-audit --no-fund && npm run dev"]
