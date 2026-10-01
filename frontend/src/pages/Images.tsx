@@ -9,6 +9,7 @@ import ImageBrowser from "../components/ImageBrowser";
 import { LAYOUTS } from "../components/InfiniteGrid";
 import Lightbox from "../components/Lightbox";
 import { IMAGE_FILTERS, toQuery } from "../lib/filters";
+import { releaseFocus } from "../lib/useEscape";
 import { useBrowseView } from "../lib/viewPref";
 
 const SORTS = { created_at: "Date added", title: "Title", rating: "Rating" };
@@ -35,7 +36,7 @@ export default function Images() {
         {f.unassigned === true && <span className="chip">No performer</span>}
         {narrowed && <button className="btn-ghost" onClick={reset}>Clear</button>}
         {!grouped && <PageSizeSelect />}
-        {grouped && canCreate && <button className="btn-ghost ml-auto" onClick={() => setSelecting(true)}>Select images</button>}
+        {grouped && canCreate && <button className="btn-ghost ml-auto" onClick={() => { releaseFocus(); setSelecting(true); }}>Select images</button>}
       </Toolbar>
       {grouped ? (
         <GroupedBrowser<ImageItem> kind="images" query={query} layout={LAYOUTS.square} noun="image" empty="No images."

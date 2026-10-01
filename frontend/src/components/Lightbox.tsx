@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useDetail } from "../api/hooks";
 import type { ImageDetail, ImageItem } from "../api/types";
+import { releaseFocus } from "../lib/useEscape";
 import { ContentEditModal } from "./EditForms";
 
 /**
- * Full-screen image viewer. ←/→ or swipe to navigate, click to toggle zoom, Esc to close.
+ * Full-screen image viewer. ←/→ or swipe to navigate, click the picture to toggle zoom;
+ * Esc, the ✕, or a click outside the picture closes it.
  * Neighbours are preloaded so stepping through a gallery is instant; `onNearEnd` lets the
  * caller fetch the next page before the user reaches the end of what's loaded.
  */
@@ -21,6 +23,8 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
   const [loaded, setLoaded] = useState(false);
   const [editing, setEditing] = useState(false);
   const swipe = useRef<number | null>(null);
+  const swiped = useRef(false);
+  const frame = useRef<HTMLDivElement>(null);
   const image = images[index];
   const detail = useDetail<ImageDetail>(image ? `/images/${image.id}` : null).data;
 
@@ -40,8 +44,10 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // While the edit dialog is open (or a field has focus) keys belong to it.
-      if (editing || (e.target as HTMLElement).closest?.("input, textarea, select")) return;
+      // While the edit dialog is open, keys belong to it. Otherwise the viewer owns the
+      // keyboard regardless of what had focus behind it: some browsers leave focus in,
+      // say, the search box when a thumbnail is clicked.
+      if (editing) return;
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); go(1); }
       else if (e.key === "ArrowLeft") go(-1);
@@ -55,9 +61,16 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
     };
   });
 
+  // Take the keyboard when opening, so keys can't land in a field behind the viewer.
+  useEffect(() => {
+    releaseFocus();
+    frame.current?.focus();
+  }, []);
+
   if (!image) return null;
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/95" role="dialog" aria-label="Image viewer" data-testid="lightbox">
+    <div ref={frame} tabIndex={-1} className="fixed inset-0 z-50 flex flex-col bg-black/95 outline-none"
+         role="dialog" aria-modal="true" aria-label="Image viewer" data-testid="lightbox">
       <div className="flex items-center gap-4 px-4 py-2 text-sm text-zinc-300">
         <span className="tabular-nums" data-testid="lightbox-counter">{index + 1} / {total ?? images.length}</span>
         <span className="truncate">{image.title}</span>
@@ -82,9 +95,16 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
            onPointerUp={(e) => {
              const dx = swipe.current == null ? 0 : e.clientX - swipe.current;
              swipe.current = null;
-             if (Math.abs(dx) > 60 && !zoom) go(dx < 0 ? 1 : -1);
-           }}>
-        {!loaded && <img src={image.thumbnail_url} alt="" className="absolute inset-0 m-auto max-h-full max-w-full object-contain opacity-60 blur-sm" />}
+             swiped.current = Math.abs(dx) > 60;
+             if (swiped.current && !zoom) go(dx < 0 ? 1 : -1);
+           }}
+           onClick={(e) => {
+             // A click on the empty area around the picture closes the viewer (the picture
+             // itself toggles zoom, the arrows navigate). The end of a swipe is not a click.
+             const onBackdrop = e.target === e.currentTarget || (e.target as HTMLElement).dataset.backdrop === "1";
+             if (onBackdrop && !swiped.current) onClose();
+           }} data-testid="lightbox-backdrop">
+        {!loaded && <img src={image.thumbnail_url} alt="" data-backdrop="1" className="absolute inset-0 m-auto max-h-full max-w-full object-contain opacity-60 blur-sm" />}
         <img key={image.id} src={image.file_url} alt={image.title ?? ""} onLoad={() => setLoaded(true)}
              onClick={() => setZoom((z) => !z)}
              className={zoom ? "mx-auto max-w-none cursor-zoom-out" : "absolute inset-0 m-auto max-h-full max-w-full cursor-zoom-in object-contain"} />

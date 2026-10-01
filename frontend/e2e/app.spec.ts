@@ -220,6 +220,59 @@ test("gallery lightbox navigation", async () => {
   await expect(box).toBeHidden();
 });
 
+test("lightbox closes with Esc or a click outside; Esc leaves select mode", async () => {
+  await nav("Images").click();
+  await expect(page.getByLabel("Filter by performer…")).toBeVisible();
+  const box = page.getByTestId("lightbox");
+  const firstTile = page.getByTestId("image-tile").first();
+
+  // Esc closes even when a field behind the viewer still has keyboard focus (Firefox and
+  // Safari don't move focus to a clicked thumbnail, so e.g. the search box keeps it).
+  await firstTile.click();
+  await expect(box).toBeVisible();
+  await page.getByLabel("Search").evaluate((el: HTMLElement) => el.focus());
+  await page.keyboard.press("Escape");
+  await expect(box).toBeHidden();
+
+  // ...and when the picture is zoomed in
+  await firstTile.click();
+  await box.locator("img").last().click();
+  await expect(box.locator("img.cursor-zoom-out")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(box).toBeHidden();
+
+  // a click outside the picture closes; a click on the picture only zooms
+  await firstTile.click();
+  await box.locator("img").last().click();
+  await expect(box).toBeVisible();
+  await box.locator("img").last().click();                     // zoom back out
+  await page.getByTestId("lightbox-backdrop").click({ position: { x: 80, y: 120 } });
+  await expect(box).toBeHidden();
+
+  // select mode on images: Esc clears the selection and leaves select mode
+  await page.getByRole("button", { name: "Select images" }).click();
+  await page.getByTestId("image-tile").nth(0).click();
+  await page.getByTestId("image-tile").nth(1).click();
+  const bulk = page.getByTestId("bulk-bar");
+  await expect(bulk).toContainText("2 selected");
+  await page.keyboard.press("Escape");
+  await expect(bulk).toBeHidden();
+  await expect(page.getByRole("button", { name: "Select images" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Done selecting" })).toHaveCount(0);
+
+  // select mode on scenes; Esc while typing in a picker only leaves the field first
+  await nav("Scenes").click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByTestId("scene-card").first().click();
+  await expect(bulk).toContainText("1 selected");
+  await bulk.getByLabel("Tags…").fill("zz");
+  await page.keyboard.press("Escape");
+  await expect(bulk).toBeVisible();                            // still selecting
+  await page.keyboard.press("Escape");
+  await expect(bulk).toBeHidden();
+  await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
+});
+
 test("items per page: paged browsing instead of continuous scroll", async () => {
   await nav("Images").click();
   await expect(page.getByTestId("image-tile")).toHaveCount(15); // 12 loose + 3 in the zip

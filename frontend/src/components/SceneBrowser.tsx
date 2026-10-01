@@ -9,6 +9,7 @@ import EntityPicker from "./EntityPicker";
 import { SearchBox, SortControl, Toolbar, useUrlFilters, PageSizeSelect } from "./FilterBar";
 import GroupedBrowser, { ViewToggle } from "./GroupedBrowser";
 import InfiniteGrid, { LAYOUTS } from "./InfiniteGrid";
+import { releaseFocus, useEscape } from "../lib/useEscape";
 import { useBrowseView } from "../lib/viewPref";
 import BulkBar, { fetchMatchingIds } from "./BulkBar";
 import { Field } from "./ui";
@@ -42,6 +43,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
   const list = useInfiniteList<SceneItem>("/scenes", query, { withTotal: true, enabled: !grouped });
 
   const [note, setNote] = useState<string | null>(null);
+  useEscape(!!selected, () => { setSelected(null); setNote(null); });   // Esc leaves select mode
   async function selectAllMatching() {
     const r = await fetchMatchingIds("scenes", query);
     setSelected(new Set(r.ids));
@@ -67,7 +69,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
         </button>
         {active > 0 && <button className="btn-ghost" onClick={reset}>Clear</button>}
         {canCreate && (
-          <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => { setSelected((s) => (s ? null : new Set())); setNote(null); }}>
+          <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => { releaseFocus(); setSelected((s) => (s ? null : new Set())); setNote(null); }}>
             {selected ? "Done selecting" : "Select"}
           </button>
         )}

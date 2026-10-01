@@ -6,6 +6,7 @@ import BulkBar, { fetchMatchingIds } from "./BulkBar";
 import { ImageTile } from "./Cards";
 import InfiniteGrid from "./InfiniteGrid";
 import Lightbox from "./Lightbox";
+import { releaseFocus, useEscape } from "../lib/useEscape";
 
 /** Thumbnail grid + lightbox over any image list endpoint, with a select mode for
  * assigning performers/tags to many images at once. `selecting`/`onSelecting` let a
@@ -24,10 +25,12 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
     return next;
   }), []);
   function setMode(on: boolean) {
+    releaseFocus();
     setSelected(on ? new Set() : null);
     setNote(null);
     onSelecting?.(on);
   }
+  useEscape(!!selected, () => setMode(false));   // Esc leaves select mode
   // "/images" takes the filters as they are; a gallery's list is selected by gallery id.
   const idsQuery: Query = path === "/images" ? query : { gallery_id: Number(path.split("/")[2]) };
   async function selectAllMatching() {
