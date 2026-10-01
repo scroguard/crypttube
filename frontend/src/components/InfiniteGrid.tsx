@@ -7,7 +7,7 @@ import { Empty, ErrorBox, Spinner } from "./ui";
 // Scroll/render state per history entry, so Back returns to the exact spot.
 const snapshots = new Map<string, GridStateSnapshot>();
 
-const LAYOUTS = {
+export const LAYOUTS = {
   wide: "grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-x-3 gap-y-5",
   portrait: "grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3",
   square: "grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2",

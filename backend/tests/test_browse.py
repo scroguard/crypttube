@@ -418,3 +418,117 @@ async def test_scan_with_changes_requests_count_refresh(app, clean, library_dir)
     await worker.run_one(pool, get_settings().model_copy(update={"scan_settle_seconds": 0}))
     kinds = {r["kind"] for r in await pool.fetch("SELECT kind FROM jobs WHERE status = 'queued'")}
     assert kinds == {"generate", "refresh_counts"}
+
+
+# --- grouped by performer ---------------------------------------------------------
+
+ALICE = [i for i in range(1, N, 2) if i != MISSING]             # odd
+BOB = [i for i in range(0, N, 3)]                                # multiples of 3
+UNASSIGNED = [i for i in range(N) if i % 2 == 0 and i % 3 != 0 and i != 24]
+
+
+def group_view(seed, body):
+    return {g["performer"]["name"]: (g["total"], idx(seed, [s["id"] for s in g["items"]])) for g in body["groups"]}
+
+
+async def test_scenes_grouped_by_performer(client, seed):
+    body = (await client.get("/api/groups/scenes", params={"per_group": 30})).json()
+    assert [g["performer"]["name"] for g in body["groups"]] == ["Alice", "Bob", "Carol"]
+    assert group_view(seed, body) == {"Alice": (len(ALICE), ALICE), "Bob": (len(BOB), BOB), "Carol": (1, [24])}
+    assert body["next_cursor"] is None
+    assert body["unassigned"]["total"] == len(UNASSIGNED)
+    assert idx(seed, [s["id"] for s in body["unassigned"]["items"]]) == UNASSIGNED
+    # a scene with two performers sits in both groups
+    assert set(ALICE) & set(BOB) == {3, 9, 15, 21}
+    # items have exactly the shape of the flat list
+    flat = (await client.get("/api/scenes", params={"limit": 1})).json()["items"][0]
+    assert body["groups"][0]["items"][0].keys() == flat.keys()
+
+
+async def test_groups_limit_items_and_follow_the_sort(client, seed):
+    body = (await client.get("/api/groups/scenes", params={"per_group": 3, "sort": "title", "desc": False})).json()
+    alice = body["groups"][0]
+    assert alice["total"] == len(ALICE) and len(alice["items"]) == 3
+    assert [s["title"] for s in alice["items"]] == [None, None, "Scene 1"]        # untitled (3, 17) sort first
+    newest = (await client.get("/api/groups/scenes", params={"per_group": 2})).json()["groups"][1]
+    assert idx(seed, [s["id"] for s in newest["items"]]) == [21, 24]              # created_at desc -> highest ids
+    assert (await client.get("/api/groups/scenes", params={"sort": "nope"})).status_code == 422
+
+
+async def test_groups_paginate_and_unassigned_comes_last(client, seed):
+    first = (await client.get("/api/groups/scenes", params={"limit": 2})).json()
+    assert [g["performer"]["name"] for g in first["groups"]] == ["Alice", "Bob"]
+    assert first["next_cursor"] and first["unassigned"] is None
+    last = (await client.get("/api/groups/scenes", params={"limit": 2, "cursor": first["next_cursor"]})).json()
+    assert [g["performer"]["name"] for g in last["groups"]] == ["Carol"]
+    assert last["next_cursor"] is None and last["unassigned"]["total"] == len(UNASSIGNED)
+    scene_cursor = (await client.get("/api/scenes", params={"limit": 2})).json()["next_cursor"]
+    assert (await client.get("/api/groups/scenes", params={"cursor": scene_cursor})).status_code == 422
+
+
+async def test_groups_respect_filters(client, seed):
+    body = (await client.get("/api/groups/scenes", params={"tag_ids": seed["tags"]["Outdoor"], "per_group": 30})).json()
+    assert group_view(seed, body) == {"Alice": (2, [5, 15]), "Bob": (2, [0, 15])}   # Carol has none: no group
+    assert idx(seed, [s["id"] for s in body["unassigned"]["items"]]) == [10, 20]
+    none = (await client.get("/api/groups/scenes", params={"q": "no such title"})).json()
+    assert none == {"groups": [], "next_cursor": None, "unassigned": None}
+
+
+async def test_no_performers_filter(client, seed):
+    assert idx(seed, await scene_ids(client, no_performers=True)) == UNASSIGNED
+    with_some = idx(seed, await scene_ids(client, no_performers=False))
+    assert with_some == sorted(set(ALICE) | set(BOB) | {24})
+
+
+async def test_groups_respect_acl(client, seed, restricted):
+    body = (await client.get("/api/groups/scenes", params={"per_group": 30})).json()
+    # Bob is hidden; Carol's only scene is hidden (so is her group); what's left is Alice's visible scenes
+    assert group_view(seed, body) == {"Alice": (len(visible_scenes()), visible_scenes())}
+    assert body["unassigned"] is None
+
+
+async def test_images_grouped_by_performer(app, client, seed):
+    body = (await client.get("/api/groups/images")).json()
+    assert body["groups"] == [] and body["unassigned"]["total"] == 5
+    assert body["unassigned"]["items"][0]["thumbnail_url"].startswith("/api/images/")
+    await app.state.pool.execute("INSERT INTO image_performers VALUES ($1, $2), ($3, $2)",
+                                 seed["images"][0], seed["performers"]["Carol"], seed["images"][1])
+    body = (await client.get("/api/groups/images")).json()
+    [g] = body["groups"]
+    assert (g["performer"]["name"], g["total"]) == ("Carol", 2)
+    assert sorted(i["id"] for i in g["items"]) == sorted(seed["images"][:2])
+    assert body["unassigned"]["total"] == 3
+
+
+async def test_grouped_page_uses_a_fixed_number_of_queries(app, client, seed):
+    real = app.state.pool
+    app.state.pool = counting = CountingPool(real)
+    try:
+        await client.get("/api/auth/me")
+        auth_calls, counting.calls = counting.calls, 0
+        await client.get("/api/groups/scenes", params={"limit": 2})          # more pages follow
+        assert counting.calls == auth_calls + 3                              # probe + groups + their items
+        counting.calls = 0
+        await client.get("/api/groups/scenes")                               # last page adds "unassigned"
+        assert counting.calls == auth_calls + 4
+    finally:
+        app.state.pool = real
+
+
+async def test_both_grouping_strategies_agree(client, seed, monkeypatch):
+    """Few matches are grouped from the items, many by walking performers; same answer."""
+    from app.api import groups
+    params = {"per_group": 4, "limit": 2, "sort": "title", "desc": False}
+    results = []
+    for threshold in (5000, 0):          # sparse strategy, then dense strategy
+        monkeypatch.setattr(groups, "SPARSE_LIMIT", threshold)
+        pages, cursor = [], None
+        while True:
+            body = (await client.get("/api/groups/scenes", params={**params, **({"cursor": cursor} if cursor else {})})).json()
+            pages.append(body)
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+        results.append(pages)
+    assert results[0] == results[1]
+    assert [g["performer"]["name"] for p in results[0] for g in p["groups"]] == ["Alice", "Bob", "Carol"]

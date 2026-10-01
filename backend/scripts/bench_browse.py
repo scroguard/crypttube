@@ -67,7 +67,8 @@ async def main(n: int, keep: bool) -> None:
     os.environ["POSTGRES_DB"] = BENCH_DB
     os.environ.pop("DATABASE_URL", None)
     get_settings.cache_clear()
-    from app.acl import get_acl, load_acl
+    from app import auth
+    from app.acl import load_acl
     from app.main import app, lifespan
 
     try:
@@ -77,11 +78,19 @@ async def main(n: int, keep: bool) -> None:
             await pool.execute(SEED_SQL.format(n=n))
             print(f"seeded {n:,} scenes in {time.perf_counter() - t:.1f}s")
             from app import counts
-            await pool.execute("INSERT INTO user_hidden_tags VALUES (1, 2)  ON CONFLICT DO NOTHING")
+            # user 1 ("restricted") comes from the seed; add an admin to browse unrestricted
+            admin_id = await pool.fetchval(
+                "INSERT INTO users (username, password_hash, role) VALUES ('bench-admin', 'x', 'admin') RETURNING id")
+
+            async def signed_in(user_id: int) -> dict:
+                return {"cookies": {auth.COOKIE_NAME: await auth.create_session(pool, user_id, "bench")},
+                        "headers": {"X-Requested-With": "bench"}}
+
             t = time.perf_counter()
             viewers = await counts.refresh(pool)
             print(f"refresh_counts ({viewers} viewers) took {time.perf_counter() - t:.2f}s")
-            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://bench") as c:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://bench",
+                                   **await signed_in(admin_id)) as c:
                 cases = [
                     ("newest, page 1", "/api/scenes", {}),
                     ("title, page 1", "/api/scenes", {"sort": "title", "desc": False}),
@@ -93,12 +102,15 @@ async def main(n: int, keep: bool) -> None:
                     ("4K only", "/api/scenes", {"height_min": 2160}),
                     ("title search", "/api/scenes", {"q": "scene 1999"}),
                     ("newest + total count", "/api/scenes", {"with_total": True}),
+                    ("grouped by performer, page 1", "/api/groups/scenes", {"limit": 20}),
+                    ("grouped + tag filter", "/api/groups/scenes", {"limit": 20, "tag_ids": 3}),
+                    ("grouped, sorted by title", "/api/groups/scenes", {"limit": 20, "sort": "title", "desc": False}),
                     ("performers (with counts)", "/api/performers", {}),
                     ("tags (with counts)", "/api/tags", {}),
                 ]
                 print(f"\n{'case':38} {'median':>9}")
                 for label, url, params in cases:
-                    ms, _ = await timed(c, url, {"limit": 60, **params})
+                    ms, _ = await timed(c, url, {"limit": 60, **params})  # params may override limit
                     print(f"{label:38} {ms:8.1f}ms")
 
                 # Deep pagination: walk forward to ~page 1000 and time a page there.
@@ -109,8 +121,9 @@ async def main(n: int, keep: bool) -> None:
                 ms, _ = await timed(c, "/api/scenes", {"limit": 60, "cursor": cursor})
                 print(f"{'newest, page 1001 (row ~60,000)':38} {ms:8.1f}ms")
 
-                acl = await load_acl(pool, 1)
-                app.dependency_overrides[get_acl] = lambda: acl
+            acl = await load_acl(pool, 1)
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://bench",
+                                   **await signed_in(1)) as c:
                 print(f"\nrestricted user: {len(acl.tags)} hidden tags, {len(acl.studios)} studios, "
                       f"{len(acl.performers)} performers")
                 for label, params in [("newest, page 1", {}), ("title, page 1", {"sort": "title"}),
@@ -118,7 +131,8 @@ async def main(n: int, keep: bool) -> None:
                     ms, body = await timed(c, "/api/scenes", {"limit": 60, **params})
                     extra = f"  (total {body['total']:,})" if body["total"] else ""
                     print(f"{'ACL ' + label:38} {ms:8.1f}ms{extra}")
-                app.dependency_overrides.clear()
+                ms, _ = await timed(c, "/api/groups/scenes", {"limit": 20})
+                print(f"{'ACL grouped by performer':38} {ms:8.1f}ms")
     finally:
         if not keep:
             await admin.execute(f"DROP DATABASE IF EXISTS {BENCH_DB} WITH (FORCE)")

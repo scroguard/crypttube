@@ -53,6 +53,7 @@ class ContentFilter(ListParams):
     rating_min: int | None = Field(None, ge=0, le=100)
     organized: bool | None = None
     library_ids: list[int] = []
+    no_performers: bool | None = Field(None, description="true: only items with no performer assigned")
     # internal: tag_ids resolved into groups by expand_hierarchies()
     tag_groups: list[list[int]] | None = Field(None, exclude=True)
 
@@ -122,6 +123,8 @@ def content_where(q: Q, f: ContentFilter, kind: str, alias: str, acl: Acl) -> li
         w.append(f"{alias}.organized = {q.p(f.organized)}")
     if f.library_ids:
         w.append(f"{alias}.library_id = ANY({q.p(f.library_ids)}::bigint[])")
+    if f.no_performers is not None:
+        w.append(f"cardinality({alias}.performer_ids) {'=' if f.no_performers else '>'} 0")
     return w
 
 
@@ -229,6 +232,31 @@ def scene_where(q: Q, f: SceneFilter, acl: Acl) -> list[str]:
     return w
 
 
+SCENE_FROM = "scenes s JOIN files f ON f.id = s.file_id"
+SCENE_SELECT = """s.id, s.title, s.duration, s.width, s.height, s.release_date, s.rating,
+                  s.organized, s.play_count, s.studio_id, s.created_at,
+                  s.assets_rev, f.id AS file_id, f.oshash, f.missing_since IS NOT NULL AS missing"""
+
+
+def finish_scene(it: dict, thumb_w: int) -> dict:
+    """Turn a SCENE_SELECT (+ enrich) row into the list item clients get."""
+    it["screenshot_url"] = scene_thumb(it, thumb_w)
+    for k in ("file_id", "oshash", "studio_id", "assets_rev"):
+        del it[k]
+    return it
+
+
+async def scenes_by_id(pool, ids: list[int], acl: Acl, thumb_w: int) -> dict[int, dict]:
+    """List-shaped scene items for specific ids (callers have already applied visibility)."""
+    q = Q()
+    ph = q.p(ids)
+    joins, cols = _scene_enrich(q, acl)
+    rows = await pool.fetch(
+        f"""WITH p AS (SELECT {SCENE_SELECT} FROM {SCENE_FROM} WHERE s.id = ANY({ph}::bigint[]))
+            SELECT p.* {cols} FROM p {joins}""", *q.args)
+    return {r["id"]: finish_scene(dict(r), thumb_w) for r in rows}
+
+
 def _scene_enrich(q: Q, acl: Acl) -> tuple[str, str]:
     joins, cols = related("scene")
     joins += f"""
@@ -244,10 +272,8 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
     f = await expand_hierarchies(request.app.state.pool, f)
     lq = ListQuery(
         alias="s",
-        from_="scenes s JOIN files f ON f.id = s.file_id",
-        select="""s.id, s.title, s.duration, s.width, s.height, s.release_date, s.rating,
-                  s.organized, s.play_count, s.studio_id, s.created_at,
-                  s.assets_rev, f.id AS file_id, f.oshash, f.missing_since IS NOT NULL AS missing""",
+        from_=SCENE_FROM,
+        select=SCENE_SELECT,
         sorts=SCENE_SORTS,
         where=lambda q: scene_where(q, f, acl),
         enrich=lambda q: _scene_enrich(q, acl),
@@ -255,9 +281,7 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
                           cursor=f.cursor, limit=f.limit, with_total=f.with_total)
     for it in page.items:
-        it["screenshot_url"] = scene_thumb(it, f.thumb_w)
-        for k in ("file_id", "oshash", "studio_id", "assets_rev"):
-            del it[k]
+        finish_scene(it, f.thumb_w)
     return page_response(page)
 
 
@@ -414,10 +438,20 @@ class ImageFilter(ContentFilter):
     thumb_w: int = 320
 
 
+def finish_image(it: dict, w: int) -> dict:
+    it.update(image_urls(it["id"], it.pop("file_id"), it.pop("mod_time"), w, it.pop("assets_rev")))
+    return it
+
+
 def _image_items(page, w: int) -> dict:
     for it in page.items:
-        it.update(image_urls(it["id"], it.pop("file_id"), it.pop("mod_time"), w, it.pop("assets_rev")))
+        finish_image(it, w)
     return page_response(page)
+
+
+async def images_by_id(pool, ids: list[int], acl: Acl, thumb_w: int) -> dict[int, dict]:
+    rows = await pool.fetch(f"SELECT {IMAGE_SELECT} FROM {IMAGE_FROM} WHERE i.id = ANY($1::bigint[])", ids)
+    return {r["id"]: finish_image(dict(r), thumb_w) for r in rows}
 
 
 @router.get("/images")

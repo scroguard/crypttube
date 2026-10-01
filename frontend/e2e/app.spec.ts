@@ -109,6 +109,10 @@ test("force-rebuild a library's previews", async () => {
 
 test("scene grid shows indexed videos", async () => {
   await nav("Scenes").click();
+  // Grouped-by-performer is the default; nothing is assigned yet, so it's one section.
+  await expect(page.getByTestId("group")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Unassigned" })).toBeVisible();
+  await page.getByRole("button", { name: "Grid", exact: true }).click(); // remembered for the rest of the run
   await expect(page.getByTestId("scene-card")).toHaveCount(3);
   await expect(page.getByTestId("total")).toHaveText("3 scenes");
   await expect(page.getByTestId("scene-card").first().locator("img")).toHaveJSProperty("complete", true);
@@ -302,6 +306,45 @@ test("assign performers to images (bulk + lightbox) and to a scene (inline)", as
   await expect(page.getByTestId("scene-card")).toHaveCount(2);
   await page.getByRole("tab", { name: "Images" }).click();
   await expect(page.getByTestId("image-tile")).toHaveCount(2);
+});
+
+test("scenes and images grouped by performer", async () => {
+  await nav("Scenes").click();
+  await page.getByRole("button", { name: "By performer" }).click();
+  const alice = page.getByRole("region", { name: "Alice" });
+  const rest = page.getByRole("region", { name: "Unassigned" });
+  await expect(page.getByTestId("group")).toHaveCount(2);              // Alice first, then Unassigned
+  await expect(alice.getByTestId("group-count")).toHaveText("2 scenes");
+  await expect(alice.getByTestId("scene-card")).toHaveCount(2);
+  await expect(rest.getByTestId("group-count")).toHaveText("1 scene");
+  await expect(rest.getByTestId("scene-card")).toContainText("Beach Day");
+  await page.screenshot({ path: `${SHOTS}/09g-grouped-scenes.png` });
+
+  // a performer's section opens as the flat grid filtered to them
+  await alice.getByRole("link", { name: /Open as grid|See all/ }).click();
+  await expect(page).toHaveURL(/performers=\d+/);
+  await expect(page.getByTestId("scene-card")).toHaveCount(2);
+  await expect(page.getByTestId("total")).toHaveText("2 scenes");
+
+  // images: 2 are Alice's, 13 unassigned (12 shown + "See all")
+  await nav("Images").click();
+  const aliceImgs = page.getByRole("region", { name: "Alice" });
+  const restImgs = page.getByRole("region", { name: "Unassigned" });
+  await expect(aliceImgs.getByTestId("group-count")).toHaveText("2 images");
+  await expect(restImgs.getByTestId("group-count")).toHaveText("13 images");
+  await expect(restImgs.getByTestId("image-tile")).toHaveCount(12);
+  await page.screenshot({ path: `${SHOTS}/09h-grouped-images.png` });
+  await aliceImgs.getByTestId("image-tile").first().click();
+  await expect(page.getByTestId("lightbox-counter")).toHaveText("1 / 2");  // steps through that group
+  await page.keyboard.press("Escape");
+  await restImgs.getByRole("link", { name: "See all 13 →" }).click();
+  await expect(page).toHaveURL(/unassigned=1/);
+  await expect(page.getByTestId("image-tile")).toHaveCount(13);
+
+  // back to the flat grid for the rest of the run
+  await nav("Scenes").click();
+  await page.getByRole("button", { name: "Grid", exact: true }).click();
+  await expect(page.getByTestId("scene-card")).toHaveCount(3);
 });
 
 test("performer image: from the library, from server files, by upload; unsafe URLs refused", async () => {

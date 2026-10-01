@@ -85,6 +85,11 @@ scroll position), filters kept in the URL. Highlights:
   decode, falls back automatically on error, manual quality menu (Original, 1080p…360p),
   seek-bar sprite previews, keyboard shortcuts (space/k, j/l, ←/→, ↑/↓, m, f), per-user
   resume, play counts.
+- **Grouped by performer**: Scenes and Images open grouped (a section per performer with
+  their first dozen items and a link to all of them, then "Unassigned"); a toggle switches
+  to the flat grid, remembered per browser. `GET /api/groups/{scenes,images}` backs it:
+  same filters/sort/ACL as the lists, performers paged by name, strategy chosen by how
+  many items match (~55 ms per page at 200k scenes).
 - **Paging**: lists scroll continuously by default; an *items per page* selector
   (10/20/30/50/100/200, remembered per browser) switches every list to pages with
   Previous/Next.

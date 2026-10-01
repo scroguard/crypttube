@@ -20,6 +20,7 @@ export const SCENE_FILTERS: FilterSpec = {
   organized: { param: "organized", kind: "bool" },
   played: { param: "played", kind: "bool" },
   missing: { param: "file_status", kind: "string" },
+  unassigned: { param: "no_performers", kind: "bool" },
 };
 
 export const GALLERY_FILTERS: FilterSpec = {
@@ -31,6 +32,15 @@ export const GALLERY_FILTERS: FilterSpec = {
   performers: SCENE_FILTERS.performers,
   studios: SCENE_FILTERS.studios,
   rating: SCENE_FILTERS.rating,
+};
+
+export const IMAGE_FILTERS: FilterSpec = {
+  q: SCENE_FILTERS.q,
+  sort: SCENE_FILTERS.sort,
+  desc: SCENE_FILTERS.desc,
+  tags: SCENE_FILTERS.tags,
+  performers: SCENE_FILTERS.performers,
+  unassigned: SCENE_FILTERS.unassigned,
 };
 
 export type FilterValues = Record<string, string | number | boolean | number[] | undefined>;

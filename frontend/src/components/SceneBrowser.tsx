@@ -7,7 +7,9 @@ import { plural } from "../lib/format";
 import { SceneCard } from "./Cards";
 import EntityPicker from "./EntityPicker";
 import { SearchBox, SortControl, Toolbar, useUrlFilters, PageSizeSelect } from "./FilterBar";
-import InfiniteGrid from "./InfiniteGrid";
+import GroupedBrowser, { ViewToggle } from "./GroupedBrowser";
+import InfiniteGrid, { LAYOUTS } from "./InfiniteGrid";
+import { useBrowseView } from "../lib/viewPref";
 import BulkBar from "./BulkBar";
 import { Field } from "./ui";
 
@@ -27,14 +29,19 @@ const triState = (v: unknown) => (v === undefined ? "" : v ? "1" : "0");
 const fromTri = (s: string) => (s === "" ? undefined : s === "1");
 
 /** Scene grid with URL-synced filters. `fixed` pins filters (e.g. a performer's page). */
-export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
+export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?: Query; groupable?: boolean }) {
   const { canCreate, isAdmin } = useMe();
   const [f, update, reset] = useUrlFilters(SCENE_FILTERS, { sort: "created_at", desc: true });
   const [panel, setPanel] = useState(false);
   const [selected, setSelected] = useState<Set<number> | null>(null);
-  const list = useInfiniteList<SceneItem>("/scenes", { ...toQuery(f, SCENE_FILTERS), ...fixed }, { withTotal: true });
+  const view = useBrowseView();
+  // Grouping by performer makes no sense once a performer (or "unassigned") is selected,
+  // and selecting for bulk edits needs the flat grid.
+  const grouped = groupable && view === "grouped" && !f.performers && f.unassigned === undefined && !selected;
+  const query = { ...toQuery(f, SCENE_FILTERS), ...fixed };
+  const list = useInfiniteList<SceneItem>("/scenes", query, { withTotal: true, enabled: !grouped });
 
-  const active = ["tags", "xtags", "performers", "studios", "res", "rating", "organized", "played", "missing"]
+  const active = ["tags", "xtags", "performers", "unassigned", "studios", "res", "rating", "organized", "played", "missing"]
     .filter((k) => f[k] !== undefined).length;
   const toggle = useCallback((id: number) => setSelected((s) => {
     const next = new Set(s);
@@ -48,6 +55,7 @@ export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
         <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search titles…" />
         <SortControl sorts={SORTS} sort={f.sort as string} desc={f.desc as boolean}
                      onChange={(sort, desc) => update({ sort, desc })} />
+        {groupable && <ViewToggle />}
         <button className={panel || active ? "btn-primary" : "btn-ghost"} onClick={() => setPanel((p) => !p)} aria-expanded={panel}>
           Filters{active ? ` (${active})` : ""}
         </button>
@@ -57,9 +65,9 @@ export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
             {selected ? "Done selecting" : "Select"}
           </button>
         )}
-        <PageSizeSelect />
+        {!grouped && <PageSizeSelect />}
         <span className="ml-auto text-sm text-zinc-500" data-testid="total">
-          {list.total != null && plural(list.total, "scene")}
+          {!grouped && list.total != null && plural(list.total, "scene")}
         </span>
       </Toolbar>
 
@@ -78,6 +86,11 @@ export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
           {!fixed.performer_ids && (
             <Field label="Performers">
               <EntityPicker kind="performers" value={(f.performers as number[]) ?? []} onChange={(performers) => update({ performers })} />
+              <label className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+                <input type="checkbox" className="accent-accent" checked={f.unassigned === true}
+                       onChange={(e) => update({ unassigned: e.target.checked ? true : undefined })} />
+                Only scenes with no performer
+              </label>
             </Field>
           )}
           {!fixed.studio_ids && (
@@ -117,8 +130,13 @@ export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
         </div>
       )}
 
-      <InfiniteGrid list={list} empty="No scenes match."
-                    render={(s) => <SceneCard scene={s} selected={selected?.has(s.id)} onToggle={selected ? toggle : undefined} />} />
+      {grouped ? (
+        <GroupedBrowser<SceneItem> kind="scenes" query={query} layout={LAYOUTS.wide} noun="scene" empty="No scenes match."
+                                   renderItem={(s) => <SceneCard scene={s} />} />
+      ) : (
+        <InfiniteGrid list={list} empty="No scenes match."
+                      render={(s) => <SceneCard scene={s} selected={selected?.has(s.id)} onToggle={selected ? toggle : undefined} />} />
+      )}
       {selected && selected.size > 0 && (
         <BulkBar kind="scenes" ids={[...selected]} onDone={() => setSelected(new Set())} onSelectAll={() => setSelected(new Set(list.items.map((s) => s.id)))} />
       )}
