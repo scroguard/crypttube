@@ -15,6 +15,9 @@ x-backend: &backend
     MEDIA_DIR: /media
     WATCHER_POLLING: ${WATCHER_POLLING:-false}
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    # Only nginx (web) can reach the API in production, so trust its X-Forwarded-For
+    # (login throttling is keyed on the real client address).
+    FORWARDED_ALLOW_IPS: "*"
   volumes:
     - ${MEDIA_ROOT:-./media}:/media:ro
     - ${GENERATED_ROOT:-./data/generated}:/data/generated
@@ -54,8 +57,17 @@ services:
 
   api:
     <<: *backend
+    # Not published: reached through `web`.
+
+  # The single entry point: serves the React app and proxies /api (same-origin).
+  web:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on: [api]
+    networks: [backend]
     ports:
-      - "127.0.0.1:${API_PORT:-8420}:8000"
+      - "127.0.0.1:${WEB_PORT:-8420}:80"
 
   # Scans, file watching and (later) ffmpeg generation. Single instance: the
   # watcher and stale-job recovery assume one worker.

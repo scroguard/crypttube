@@ -1,0 +1,211 @@
+import { expect, test, type Page } from "@playwright/test";
+
+// One long, ordered journey through the app on a fresh, isolated stack.
+test.describe.configure({ mode: "serial" });
+
+const ADMIN = { username: "admin", password: "e2e-admin-password" };
+const SHOTS = "test-results/screens";
+let page: Page;
+
+async function waitForApi(p: Page) {
+  for (let i = 0; i < 60; i++) {
+    const r = await p.request.get("/api/health").catch(() => null);
+    if (r?.ok()) return;
+    await p.waitForTimeout(1000);
+  }
+  throw new Error("API never became healthy");
+}
+
+const nav = (name: string) => page.getByRole("navigation", { name: "Main" }).getByRole("link", { name, exact: true });
+const adminNav = (name: string) => page.getByRole("navigation", { name: "Admin" }).getByRole("link", { name, exact: true });
+
+async function login(username: string, password: string) {
+  await page.goto("/");
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+}
+
+test.beforeAll(async ({ browser }) => {
+  page = await browser.newPage();
+  await waitForApi(page);
+});
+
+test("first run: create the admin account", async () => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Welcome" })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/01-setup.png` });
+  await page.getByLabel("Username").fill(ADMIN.username);
+  await page.getByLabel("Password (8+ characters)").fill(ADMIN.password);
+  await page.getByLabel("Confirm password").fill(ADMIN.password);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByText("No scenes match.")).toBeVisible();
+});
+
+test("admin adds a library and it gets indexed", async () => {
+  await nav("Admin").click();
+  await page.getByLabel("Library path").fill("/media/lib");
+  await page.getByRole("button", { name: "Add library" }).click();
+  await expect(page.getByTestId("library")).toContainText("/media/lib");
+  await expect(page.getByText(/Queued job #\d+/)).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/02-libraries.png` });
+
+  await adminNav("Jobs").click();
+  // scan -> generate + refresh_counts all finish
+  await expect(async () => {
+    const rows = page.getByTestId("job-row");
+    expect(await rows.count()).toBeGreaterThanOrEqual(3);
+    await expect(rows.filter({ hasText: /queued|running/ })).toHaveCount(0);
+  }).toPass({ timeout: 90_000 });
+  await expect(page.getByTestId("job-row").filter({ hasText: "failed" })).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS}/03-jobs.png` });
+});
+
+test("scene grid shows indexed videos", async () => {
+  await nav("Scenes").click();
+  await expect(page.getByTestId("scene-card")).toHaveCount(3);
+  await expect(page.getByTestId("total")).toHaveText("3 scenes");
+  await expect(page.getByTestId("scene-card").first().locator("img")).toHaveJSProperty("complete", true);
+  // hover-scrub over the sprite sheet
+  await page.getByTestId("scene-card").first().locator("img").hover({ position: { x: 150, y: 60 } });
+  await page.screenshot({ path: `${SHOTS}/04-scenes.png` });
+
+  await page.getByRole("combobox", { name: "Sort by" }).selectOption("title");
+  await page.getByRole("button", { name: "Descending" }).click();
+  await expect(page.getByTestId("scene-card").first()).toContainText("Beach Day");
+  expect(page.url()).toContain("sort=title");
+});
+
+test("player: direct play, seeking, quality menu", async () => {
+  await page.getByText("City Lights").click();
+  const player = page.getByTestId("player");
+  await expect(player).toBeVisible();
+  const canPlayVp9 = await page.evaluate(() => document.createElement("video").canPlayType('video/webm; codecs="vp09.00.10.08, opus"'));
+  test.skip(!canPlayVp9, "browser build lacks VP9");
+
+  await player.getByRole("button", { name: "Play" }).first().click();
+  await expect(async () => {
+    const t = await page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime);
+    expect(t).toBeGreaterThan(0.5);
+  }).toPass();
+
+  // click the middle of the seek bar -> ~10s of 20s
+  const bar = page.getByTestId("seekbar");
+  const box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.screenshot({ path: `${SHOTS}/05-player-scrub.png` });
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.getByTestId("time")).toContainText(/^0:1[0-2] \/ 0:20/);
+
+  await page.getByTestId("quality").click();
+  await expect(page.getByRole("menuitemradio", { name: /Original/ })).toBeChecked();
+  await expect(page.getByRole("menuitemradio", { name: "360p" })).toBeVisible();
+  const canH264 = await page.evaluate(() => document.createElement("video").canPlayType('video/mp4; codecs="avc1.640028, mp4a.40.2"'));
+  if (canH264) {
+    await page.getByRole("menuitemradio", { name: "360p" }).click();
+    await expect(page.getByTestId("quality")).toHaveText("360p");
+    await expect(async () => {
+      expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.src)).toContain("mode=transcode");
+      expect(await page.locator("video").evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.3);
+    }).toPass();
+    // position was preserved across the switch (converted stream started at the offset)
+    await expect(page.getByTestId("time")).toContainText(/^0:1\d \/ 0:20/);
+  } else {
+    await page.keyboard.press("Escape");
+  }
+  await page.locator("video").evaluate((v: HTMLVideoElement) => v.pause());
+});
+
+test("editor workflow: rate and tag a scene", async () => {
+  await page.getByRole("button", { name: "Edit" }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit scene" });
+  await dialog.getByLabel("tags").fill("Outdoor");
+  await dialog.getByRole("option", { name: "Create “Outdoor”" }).click();
+  await dialog.getByLabel("performers").fill("Alice");
+  await dialog.getByRole("option", { name: "Create “Alice”" }).click();
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("link", { name: "Outdoor" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Alice" })).toBeVisible();
+  await page.getByLabel("Rating 0 of 5").getByRole("button").nth(3).click();
+  await expect(page.getByLabel("Rating 4 of 5")).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/06-scene-detail.png`, fullPage: true });
+});
+
+test("filters: tag filter via the filter panel", async () => {
+  await nav("Scenes").click();
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  await page.getByLabel("Add tags…").first().fill("Out");
+  await page.getByRole("option", { name: "Outdoor" }).click();
+  await expect(page.getByTestId("scene-card")).toHaveCount(1);
+  await expect(page.getByTestId("scene-card")).toContainText("City Lights");
+  await page.screenshot({ path: `${SHOTS}/07-filtered.png` });
+  await page.getByRole("button", { name: "Clear" }).click();
+  await expect(page.getByTestId("scene-card")).toHaveCount(3);
+});
+
+test("gallery lightbox navigation", async () => {
+  await nav("Galleries").click();
+  await expect(page.getByTestId("gallery-card")).toHaveCount(2); // folder + zip
+  await page.getByTestId("gallery-card").filter({ hasText: "pics" }).getByRole("link").first().click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(12);
+  await page.screenshot({ path: `${SHOTS}/08-gallery.png` });
+  await page.getByTestId("image-tile").first().click();
+  const box = page.getByTestId("lightbox");
+  await expect(box).toBeVisible();
+  await expect(page.getByTestId("lightbox-counter")).toHaveText("1 / 12");
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByTestId("lightbox-counter")).toHaveText("2 / 12");
+  await expect(box.locator("img").last()).toHaveJSProperty("complete", true);
+  await page.screenshot({ path: `${SHOTS}/09-lightbox.png` });
+  await page.keyboard.press("Escape");
+  await expect(box).toBeHidden();
+});
+
+test("performer page lists their scenes", async () => {
+  await nav("Performers").click();
+  await page.getByTestId("performer-card").filter({ hasText: "Alice" }).click();
+  await expect(page.getByRole("heading", { name: "Alice" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Scenes" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("scene-card")).toHaveCount(1);
+  await page.screenshot({ path: `${SHOTS}/10-performer.png` });
+});
+
+test("admin restricts a viewer, who then can't see the content", async () => {
+  await page.goto("/admin/users");
+  await page.getByRole("button", { name: "New user" }).click();
+  const dialog = page.getByRole("dialog", { name: "New user" });
+  await dialog.getByLabel("Username").fill("kid");
+  await dialog.getByLabel("Password (8+ characters)").fill("kid-password");
+  await dialog.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("heading", { name: "kid" })).toBeVisible();
+  await page.getByLabel("Add tags…").fill("Outdoor");
+  await page.getByRole("option", { name: "Outdoor" }).click();
+  await page.getByRole("button", { name: "Save restrictions" }).click();
+  await expect(page.getByText("Saved")).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/11-user-restrictions.png` });
+
+  await page.getByRole("button", { name: `${ADMIN.username} ▾` }).click();
+  await page.getByRole("menuitem", { name: "Log out" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+
+  await login("kid", "kid-password");
+  await expect(page.getByTestId("scene-card")).toHaveCount(2);
+  await expect(page.getByText("City Lights")).toHaveCount(0);
+  await expect(nav("Admin")).toHaveCount(0);
+  const hidden = await page.request.get("/api/scenes?q=City");
+  expect((await hidden.json()).items).toHaveLength(0);
+  await page.goto("/tags");
+  await expect(page.getByTestId("tag-card")).toHaveCount(0);
+});
+
+test("wrong password is rejected", async () => {
+  await page.getByRole("button", { name: "kid ▾" }).click();
+  await page.getByRole("menuitem", { name: "Log out" }).click();
+  await page.getByLabel("Username").fill("kid");
+  await page.getByLabel("Password").fill("not-the-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("alert")).toHaveText("invalid username or password");
+});

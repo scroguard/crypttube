@@ -250,6 +250,12 @@ class Scanner:
                     probe = await asyncio.to_thread(media.probe_image, e.path)
                 else:
                     probe = await asyncio.to_thread(media.read_archive, e.path)
+            # Resolve the folder gallery *before* taking a connection for the
+            # transaction: acquiring a second pool connection while holding one
+            # deadlocks once every pooled connection is held by a waiting task.
+            gallery_id = None
+            if e.kind == "image" and folder_galleries:
+                gallery_id = await self._folder_gallery(os.path.dirname(e.path))
             async with self.pool.acquire() as conn, conn.transaction():
                 if file_id is None:
                     file_id = await conn.fetchval(
@@ -268,7 +274,7 @@ class Scanner:
                     if how != "moved":
                         self.stats.scene_ids.append(scene_id)
                 elif e.kind == "image":
-                    await self._upsert_image(conn, file_id, e.path, probe, folder_galleries)
+                    await self._upsert_image(conn, file_id, e.path, probe, gallery_id)
                 else:
                     await self._upsert_archive(conn, file_id, library_id, e, probe)
             setattr(self.stats, how, getattr(self.stats, how) + 1)
@@ -297,7 +303,7 @@ class Scanner:
             p["video_codec"], p["audio_codec"], p["container"], _stem(path),
         )
 
-    async def _upsert_image(self, conn, file_id, path, info: media.ImageInfo, folder_galleries) -> None:
+    async def _upsert_image(self, conn, file_id, path, info: media.ImageInfo, gallery_id: int | None) -> None:
         image_id = await conn.fetchval(
             """INSERT INTO images (file_id, width, height, format, title) VALUES ($1, $2, $3, $4, $5)
                ON CONFLICT (file_id) DO UPDATE SET
@@ -305,9 +311,8 @@ class Scanner:
                RETURNING id""",
             file_id, info.width, info.height, info.format, _stem(path),
         )
-        if not folder_galleries:
+        if gallery_id is None:
             return
-        gallery_id = await self._folder_gallery(os.path.dirname(path))
         # A moved image leaves its old folder gallery.
         old = await conn.fetch(
             """DELETE FROM gallery_images gi USING galleries g

@@ -1,0 +1,94 @@
+import { useState, type FormEvent, type ReactNode } from "react";
+import { api } from "../api/client";
+import { useWrite } from "../api/hooks";
+import type { Ref } from "../api/types";
+import EntityPicker, { creator } from "./EntityPicker";
+import { ErrorBox, Field, Modal, Toggle } from "./ui";
+
+const ids = (refs: Ref[] | undefined) => (refs ?? []).map((r) => r.id);
+
+interface ContentLike {
+  id: number;
+  title: string | null;
+  details?: string | null;
+  release_date?: string | null;
+  urls?: string[];
+  organized: boolean;
+  studio: Ref | null;
+  performers: Ref[];
+  tags: Ref[];
+}
+
+/** Edit dialog for scenes, galleries and images (fields shown depend on the kind). */
+export function ContentEditModal({ kind, item, onClose }: {
+  kind: "scenes" | "galleries" | "images"; item: ContentLike; onClose: () => void;
+}) {
+  const [title, setTitle] = useState(item.title ?? "");
+  const [details, setDetails] = useState(item.details ?? "");
+  const [date, setDate] = useState(item.release_date ?? "");
+  const [urls, setUrls] = useState((item.urls ?? []).join("\n"));
+  const [organized, setOrganized] = useState(item.organized);
+  const [studio, setStudio] = useState(item.studio ? [item.studio.id] : []);
+  const [performers, setPerformers] = useState(ids(item.performers));
+  const [tags, setTags] = useState(ids(item.tags));
+  const save = useWrite((body: object) => api(`/${kind}/${item.id}`, { method: "PATCH", json: body }));
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    const body: Record<string, unknown> = {
+      title: title.trim() || null, organized, studio_id: studio[0] ?? null, performer_ids: performers, tag_ids: tags,
+    };
+    if (kind !== "images") Object.assign(body, { details: details.trim() || null, release_date: date || null });
+    if (kind === "scenes") body.urls = urls.split("\n").map((u) => u.trim()).filter(Boolean);
+    save.mutate(body, { onSuccess: onClose });
+  }
+
+  return (
+    <Modal title={`Edit ${kind.slice(0, -1).replace("gallerie", "gallery")}`} onClose={onClose} wide>
+      <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2"><Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field></div>
+        {kind !== "images" && <Field label="Release date"><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>}
+        <Field label="Studio"><EntityPicker kind="studios" single value={studio} onChange={setStudio} onCreate={creator("studios")} /></Field>
+        <div className="sm:col-span-2"><Field label="Performers"><EntityPicker kind="performers" value={performers} onChange={setPerformers} onCreate={creator("performers")} /></Field></div>
+        <div className="sm:col-span-2"><Field label="Tags"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} /></Field></div>
+        {kind !== "images" && (
+          <div className="sm:col-span-2"><Field label="Details"><textarea className="input min-h-24" value={details} onChange={(e) => setDetails(e.target.value)} /></Field></div>
+        )}
+        {kind === "scenes" && (
+          <div className="sm:col-span-2"><Field label="URLs (one per line)"><textarea className="input min-h-16 font-mono text-xs" value={urls} onChange={(e) => setUrls(e.target.value)} /></Field></div>
+        )}
+        <Toggle checked={organized} onChange={setOrganized} label="Organized" />
+        <FormButtons busy={save.isPending} error={save.error} onCancel={onClose} />
+      </form>
+    </Modal>
+  );
+}
+
+export function FormButtons({ busy, error, onCancel, label = "Save", children }: {
+  busy: boolean; error: unknown; onCancel?: () => void; label?: string; children?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2 sm:col-span-2">
+      {error ? <ErrorBox error={error} className="mr-auto" /> : null}
+      {children}
+      {onCancel && <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>}
+      <button className="btn-primary" disabled={busy}>{busy ? "Saving…" : label}</button>
+    </div>
+  );
+}
+
+/** Upload / replace / remove the image of a performer, studio or tag. */
+export function EntityImageControls({ kind, id, hasImage }: { kind: "performers" | "studios" | "tags"; id: number; hasImage: boolean }) {
+  const upload = useWrite((file: File) => api(`/${kind}/${id}/image`, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } }));
+  const remove = useWrite(() => api(`/${kind}/${id}/image`, { method: "DELETE" }));
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="btn-ghost cursor-pointer">
+        {hasImage ? "Replace image" : "Upload image"}
+        <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload.mutate(e.target.files[0])} />
+      </label>
+      {hasImage && <button className="btn-ghost" onClick={() => remove.mutate()}>Remove image</button>}
+      {(upload.error || remove.error) && <ErrorBox error={upload.error || remove.error} />}
+    </div>
+  );
+}

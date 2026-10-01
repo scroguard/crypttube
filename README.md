@@ -1,26 +1,36 @@
 # goon-streamer
 
-Self-hosted, privacy-first media organizer (Stash-inspired). FastAPI + PostgreSQL + FFmpeg,
-React frontend (coming). Everything runs via Docker Compose; no telemetry, no outbound calls.
+Self-hosted, privacy-first media organizer (Stash-inspired). FastAPI + PostgreSQL + FFmpeg
+backend, React + Tailwind frontend. Everything runs via Docker Compose; no telemetry, no
+outbound calls, no external fonts/CDNs.
 
 ## Running
 
 ```sh
 cp .env.example .env          # set POSTGRES_PASSWORD, MEDIA_ROOT, PUID/PGID (`id -u`/`id -g`)
-docker compose up -d --build  # dev mode (source mounted, auto-reload)
-curl localhost:8420/api/health
-docker compose run --rm api pytest
+docker compose up -d --build  # dev mode: Vite + API with auto-reload
 ```
 
-Production-style (no dev override): `docker compose -f compose.yaml up -d --build`.
+Open http://localhost:8420. On first run you're asked to create the admin account; then
+add a library under **Admin → Libraries** (paths are inside the container, under `/media`).
 
-First run: create the admin account (only possible while no users exist):
+Production-style: `docker compose -f compose.yaml up -d --build`. Only the `web` service
+(nginx serving the built app and proxying `/api`) is published; the API and database
+are internal. In dev, the API is also reachable directly on `127.0.0.1:${API_PORT:-8421}`.
+
+Tests:
 
 ```sh
-curl -X POST localhost:8420/api/auth/setup -H 'X-Requested-With: cli' \
-     -H 'Content-Type: application/json' -d '{"username": "admin", "password": "<8+ chars>"}'
+docker compose run --rm api pytest                       # backend (134 tests)
+docker compose run --rm web npx vitest run               # frontend unit tests
+docker compose run --rm api python -m scripts.bench_browse   # list API on 200k scenes
+scripts/e2e.sh                                           # Playwright, isolated stack
 ```
 
+`scripts/e2e.sh` generates fixture media and runs the full UI journey (setup, scan,
+playback/seek/transcode, editing, filters, lightbox, restricted user) against the
+production build in a separate compose project (`goon-e2e`) with its own database; it
+never touches your data. Screenshots land in `frontend/test-results/screens/`.
 Behind HTTPS (reverse proxy with TLS), set `COOKIE_SECURE=true`.
 
 Media is mounted **read-only** at `/media`; generated content lives in `GENERATED_ROOT`
@@ -31,9 +41,32 @@ listens only on `127.0.0.1`.
 
 | service  | role |
 |----------|------|
-| `db`     | PostgreSQL 17, internal network only |
-| `api`    | FastAPI on `127.0.0.1:${API_PORT}` (docs at `/api/docs`) |
+| `web`    | nginx: React app + `/api` proxy on `127.0.0.1:${WEB_PORT:-8420}` (dev: Vite) |
+| `api`    | FastAPI (docs at `/api/docs`), internal |
+| `db`     | PostgreSQL 17, internal |
 | `worker` | job queue runner + filesystem watcher (single instance) |
+
+## Frontend
+
+React 19 SPA (`frontend/`), TanStack Query for caching, react-virtuoso for virtualized
+window-scrolled grids (only on-screen cards exist in the DOM; Back restores the exact
+scroll position), filters kept in the URL. Highlights:
+
+- **Player**: picks direct play / remux / transcode by asking the browser what it can
+  decode, falls back automatically on error, manual quality menu (Original, 1080p…360p),
+  seek-bar sprite previews, keyboard shortcuts (space/k, j/l, ←/→, ↑/↓, m, f), per-user
+  resume, play counts.
+- **Grids**: hover-scrub previews on scene cards, bulk select (tags, performers, rating,
+  organized), lazy-loaded WebP thumbnails.
+- **Lightbox**: keyboard/swipe navigation, neighbour preloading, click-to-zoom, loads
+  further pages as you approach the end.
+- **Editing** (editors/admins): scenes, galleries, images, performers (incl. images),
+  studios, tags (hierarchy, merge); create tags/performers/studios inline from pickers.
+- **Admin**: libraries (watch, exclusions, scan), live job monitor, users and per-user
+  content restrictions.
+
+nginx sends a strict CSP (`default-src 'self'`), `no-referrer`, `nosniff`, frame denial,
+and keeps access logs off (URLs identify content).
 
 ## Ingestion
 

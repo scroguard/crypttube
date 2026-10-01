@@ -9,6 +9,8 @@ services:
       - ./backend:/app
       - ${MEDIA_ROOT:-./media}:/media:ro
       - ${GENERATED_ROOT:-./data/generated}:/data/generated
+    ports:
+      - "127.0.0.1:${API_PORT:-8421}:8000"  # direct API access for debugging (dev only)
     # --reload-dir keeps the reloader watching source only, never data or cache dirs.
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]
 
@@ -21,3 +23,17 @@ services:
       - ${MEDIA_ROOT:-./media}:/media:ro
       - ${GENERATED_ROOT:-./data/generated}:/data/generated
     command: ["watchfiles", "--filter", "python", "python -m app.worker", "app"]
+
+  web:
+    build: !reset null
+    image: node:22-alpine
+    user: "${PUID:-1000}:${PGID:-1000}"
+    working_dir: /app
+    environment:
+      HOME: /tmp
+      API_URL: http://api:8000
+    volumes:
+      - ./frontend:/app
+    command: ["sh", "-c", "npm install --no-audit --no-fund && npm run dev"]
+    ports: !override
+      - "127.0.0.1:${WEB_PORT:-8420}:5173"

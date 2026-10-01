@@ -178,3 +178,22 @@ async def test_generated_dir_is_never_scanned(app, clean, library_dir, sample_me
     assert stats.new == 7
     paths = [r["path"] for r in await app.state.pool.fetch("SELECT path FROM files")]
     assert not any("/generated/" in p for p in paths)
+
+
+async def test_many_images_with_a_small_pool_do_not_deadlock(app, clean, library_dir, sample_media):
+    """Regression: each image used to hold a pooled connection while waiting for a
+    second one (folder gallery lookup); with more concurrent files than connections,
+    the scan hung forever."""
+    import asyncio
+    from app.db import create_pool
+    for i in range(40):
+        shutil.copy(sample_media / "img0.jpg", library_dir / "pics" / f"extra{i}.jpg")
+    lid = await app.state.pool.fetchval(
+        "INSERT INTO library_paths (path) VALUES ($1) RETURNING id", str(library_dir))
+    small = await create_pool(os.environ["DATABASE_URL"], min_size=1, max_size=2)
+    try:
+        stats = await asyncio.wait_for(
+            Scanner(small, get_settings().generated_dir, settle_seconds=0).scan(lid), timeout=60)
+    finally:
+        await small.close()
+    assert stats.new == 47 and stats.failed == 0
