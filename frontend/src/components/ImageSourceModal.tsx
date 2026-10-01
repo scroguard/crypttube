@@ -25,6 +25,7 @@ export default function ImageSourceModal({ kind, id, onClose }: { kind: Kind; id
 
   return (
     <Modal title="Choose an image" onClose={onClose} wide>
+      <RandomSource kind={kind} base={base} onClose={onClose} />
       <Tabs tabs={tabs as Record<Source, string>} value={tab} onChange={setTab} />
       {tab === "upload" && (
         <div className="py-6 text-center">
@@ -50,6 +51,34 @@ export default function ImageSourceModal({ kind, id, onClose }: { kind: Kind; id
       {apply.isPending && tab !== "url" && <p className="mt-3 text-sm text-zinc-400">Saving…</p>}
       {apply.isError && <ErrorBox error={apply.error} className="mt-3" />}
     </Modal>
+  );
+}
+
+/**
+ * "Surprise me": use a random one of the images assigned to this performer (or studio, or
+ * tag). The dialog stays open so the button can be pressed again for a different one.
+ */
+function RandomSource({ kind, base, onClose }: { kind: Kind; base: string; onClose: () => void }) {
+  const pick = useWrite((exclude: number | null) =>
+    api<{ image_id: number; thumbnail_url: string }>(`${base}/random`, { json: { exclude_image_id: exclude } }));
+  const self = kind === "performers" ? "this performer's" : kind === "studios" ? "this studio's" : "this tag's";
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950/40 p-3" data-testid="random-source">
+      {pick.data && (
+        <img src={pick.data.thumbnail_url} alt="Current pick" data-testid="random-pick" data-image-id={pick.data.image_id}
+             className={`h-16 w-16 rounded-md object-cover ${pick.isPending ? "opacity-50" : ""}`} />
+      )}
+      <button type="button" className="btn-primary" disabled={pick.isPending}
+              onClick={() => pick.mutate(pick.data?.image_id ?? null)}>
+        🎲 {pick.data ? "Pick another" : "Random"}
+      </button>
+      <span className="min-w-0 flex-1 text-sm text-zinc-400">
+        {pick.isError ? <span className="text-red-300" role="alert">{pick.error.message}</span>
+          : pick.data ? "Saved. Not the one? Pick another."
+          : `Use a random one of ${self} images.`}
+      </span>
+      {pick.data && <button type="button" className="btn-ghost" onClick={onClose}>Done</button>}
+    </div>
   );
 }
 

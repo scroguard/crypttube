@@ -239,3 +239,41 @@ async def test_browse_lists_image_files_with_previews(client, login_as, indexed)
     assert (await client.get("/api/libraries/browse/preview", params={"path": "/etc/hostname"})).status_code == 422
     editor = await login_as("ed4", "editor")
     assert (await editor.get("/api/libraries/browse/preview", params={"path": body["files"][0]["path"]})).status_code == 403
+
+
+async def test_random_image_from_the_assigned_ones(app, client, indexed):
+    perf = (await client.post("/api/performers", json={"name": "Random Pick"})).json()["id"]
+    r = await client.post(f"/api/performers/{perf}/image/random")
+    assert r.status_code == 404 and "no images are assigned" in r.json()["detail"]
+
+    mine = [i for p, i in indexed["images"].items() if "pics/img" in p]          # 3 of the 6 images
+    for iid in mine:
+        assert (await client.patch(f"/api/images/{iid}", json={"performer_ids": [perf]})).status_code == 200
+    seen, last = set(), None
+    for _ in range(12):
+        r = await client.post(f"/api/performers/{perf}/image/random", json={"exclude_image_id": last})
+        assert r.status_code == 200, r.text
+        pick = r.json()
+        assert pick["image_id"] in mine and pick["image_id"] != last              # always a different one
+        assert (await client.get(pick["thumbnail_url"])).status_code == 200
+        seen.add(pick["image_id"])
+        last = pick["image_id"]
+    assert len(seen) > 1
+    assert (await served_image(client, "performers", perf)).format == "WEBP"
+
+    # a single assigned image: "again" simply gives the same one
+    solo = (await client.post("/api/tags", json={"name": "Solo"})).json()["id"]
+    await client.patch(f"/api/images/{mine[0]}", json={"tag_ids": [solo]})
+    for _ in range(2):
+        r = await client.post(f"/api/tags/{solo}/image/random", json={"exclude_image_id": mine[0]})
+        assert r.json()["image_id"] == mine[0]
+    # an image that has gone missing is never picked
+    await app.state.pool.execute(
+        "UPDATE files SET missing_since = now() WHERE id = (SELECT file_id FROM images WHERE id = $1)", mine[0])
+    assert (await client.post(f"/api/tags/{solo}/image/random")).status_code == 404
+
+
+async def test_random_image_needs_edit_rights(client, login_as, indexed):
+    perf = (await client.post("/api/performers", json={"name": "Guarded"})).json()["id"]
+    viewer = await login_as("vera", "viewer")
+    assert (await viewer.post(f"/api/performers/{perf}/image/random")).status_code == 403

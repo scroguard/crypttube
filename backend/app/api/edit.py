@@ -23,7 +23,8 @@ from app.auth import require_admin
 from app.fetch import FetchError, fetch_image_bytes
 from app.permissions import (require_can_create, require_content_edit, require_entity_edit,
                              require_visible)
-from app.acl import Acl
+from app.acl import Acl, visible
+from app.sql import Q
 from app.auth import get_acl
 from app.api import browse, entities
 from app.config import get_settings
@@ -596,6 +597,37 @@ async def entity_image_from_library(kind: str, entity_id: int, body: ImageFromLi
     return await _store_entity_image(request, kind, entity_id, data)
 
 
+class RandomImage(Body):
+    exclude_image_id: int | None = None   # the previous pick, so "again" gives a different one
+
+
+# How content is linked to each kind of entity.
+ASSIGNED = {"performers": "{p} = ANY(i.performer_ids)", "tags": "{p} = ANY(i.tag_ids)", "studios": "i.studio_id = {p}"}
+
+
+async def entity_image_random(kind: str, entity_id: int, body: RandomImage, request: Request, acl: Acl) -> dict:
+    """Use a random one of the images assigned to this performer (or tag, or studio), among
+    those the caller can see. Returns which image was used."""
+    await _editable_entity(kind, entity_id, request, acl)
+    q = Q()
+    where = [ASSIGNED[kind].format(p=q.p(entity_id)), browse.IMAGE_PRESENT, *visible(acl, "image", "i", q)]
+    base = f"""SELECT i.id, i.assets_rev, f.id AS file_id, f.mod_time FROM images i
+               JOIN files f ON f.id = i.file_id LEFT JOIN files z ON z.id = f.zip_file_id
+               WHERE {' AND '.join(where)}"""
+    pool = request.app.state.pool
+    row = None
+    if body.exclude_image_id is not None:
+        row = await pool.fetchrow(f"{base} AND i.id <> {q.p(body.exclude_image_id)} ORDER BY random() LIMIT 1", *q.args)
+        q.args.pop()
+    if row is None:   # nothing else to choose from (or no previous pick)
+        row = await pool.fetchrow(f"{base} ORDER BY random() LIMIT 1", *q.args)
+    if row is None:
+        raise HTTPException(404, f"no images are assigned to this {kind[:-1]} yet")
+    await entity_image_from_library(kind, entity_id, ImageFromLibrary(image_id=row["id"]), request, acl)
+    return {"image_id": row["id"],
+            **browse.image_urls(row["id"], row["file_id"], row["mod_time"], 320, row["assets_rev"])}
+
+
 class ImageFromPath(Body):
     path: str = Field(min_length=1, max_length=4000)
 
@@ -652,6 +684,10 @@ def _entity_routes(kind: str) -> None:
                            acl: Acl = Depends(get_acl)) -> Response:
         return await entity_image_from_library(kind, entity_id, body, request, acl)
 
+    async def random_image(entity_id: int, request: Request, body: RandomImage | None = None,
+                           acl: Acl = Depends(get_acl)) -> dict:
+        return await entity_image_random(kind, entity_id, body or RandomImage(), request, acl)
+
     async def from_path(entity_id: int, body: ImageFromPath, request: Request, acl: Acl = Depends(get_acl),
                         _admin=Depends(require_admin)) -> Response:
         return await entity_image_from_path(kind, entity_id, body, request, acl)
@@ -660,6 +696,7 @@ def _entity_routes(kind: str) -> None:
                                    (delete_image, "DELETE", "/image", 204), (get_image, "GET", "/image", None),
                                    (from_url, "POST", "/image/from-url", 204),
                                    (from_library, "POST", "/image/from-library", 204),
+                                   (random_image, "POST", "/image/random", 200),
                                    (from_path, "POST", "/image/from-path", 204)):
         fn.__name__ = f"{fn.__name__}_{kind}"
         target = read_router if method == "GET" else router

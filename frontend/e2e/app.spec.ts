@@ -499,6 +499,21 @@ test("performer image: from the library, from server files, by upload; unsafe UR
   await expect(dialog).toBeHidden();
   await expect(portrait).toBeVisible();
 
+  // random: one of the images assigned to her; "pick another" always gives a different one
+  const uploaded = await portrait.getAttribute("src");
+  await page.getByRole("button", { name: "Change image" }).click();
+  await dialog.getByRole("button", { name: "Random" }).click();
+  const pick = dialog.getByTestId("random-pick");
+  await expect(pick).toBeVisible();
+  await expect(dialog).toContainText("Saved. Not the one? Pick another.");
+  const firstPick = await pick.getAttribute("data-image-id");
+  await page.screenshot({ path: `${SHOTS}/09g-image-random.png` });
+  await dialog.getByRole("button", { name: "Pick another" }).click();
+  await expect(pick).not.toHaveAttribute("data-image-id", firstPick!);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(portrait).not.toHaveAttribute("src", uploaded!);
+
   // shown on the performer's card in the list too
   await nav("Performers").click();
   await expect(page.getByTestId("performer-card").filter({ hasText: "Alice" }).locator("img")).toBeVisible();
