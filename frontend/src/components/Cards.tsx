@@ -124,11 +124,19 @@ export const GalleryCard = memo(function GalleryCard({ gallery }: { gallery: Gal
   );
 });
 
-export const ImageTile = memo(function ImageTile({ image, onOpen }: { image: ImageItem; onOpen: () => void }) {
+export const ImageTile = memo(function ImageTile({ image, onOpen, selected, onToggle }: {
+  image: ImageItem; onOpen: () => void; selected?: boolean; onToggle?: (id: number) => void;
+}) {
   return (
-    <button onClick={onOpen} data-testid="image-tile" className="relative block aspect-square w-full overflow-hidden rounded-md bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent">
+    <button onClick={() => (onToggle ? onToggle(image.id) : onOpen())} data-testid="image-tile" aria-pressed={onToggle ? !!selected : undefined}
+            className={`relative block aspect-square w-full overflow-hidden rounded-md bg-zinc-900 ring-2 focus:outline-none focus:ring-accent ${selected ? "ring-accent" : "ring-transparent"}`}>
       <img src={image.thumbnail_url} alt={image.title ?? ""} loading="lazy" decoding="async"
            className="h-full w-full object-cover transition-transform duration-200 hover:scale-[1.03]" />
+      {onToggle && (
+        <span className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded border-2 text-sm ${selected ? "border-accent bg-accent" : "border-white/80 bg-black/40"}`}>
+          {selected && "✓"}
+        </span>
+      )}
     </button>
   );
 });

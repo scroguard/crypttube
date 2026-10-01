@@ -1,14 +1,15 @@
 import { useCallback, useState } from "react";
-import { api, type Query } from "../api/client";
-import { useInfiniteList, useMe, useWrite } from "../api/hooks";
+import type { Query } from "../api/client";
+import { useInfiniteList, useMe } from "../api/hooks";
 import type { SceneItem } from "../api/types";
 import { SCENE_FILTERS, toQuery } from "../lib/filters";
 import { plural } from "../lib/format";
 import { SceneCard } from "./Cards";
-import EntityPicker, { creator } from "./EntityPicker";
+import EntityPicker from "./EntityPicker";
 import { SearchBox, SortControl, Toolbar, useUrlFilters, PageSizeSelect } from "./FilterBar";
 import InfiniteGrid from "./InfiniteGrid";
-import { ErrorBox, Field } from "./ui";
+import BulkBar from "./BulkBar";
+import { Field } from "./ui";
 
 const SORTS = {
   created_at: "Date added",
@@ -119,39 +120,8 @@ export default function SceneBrowser({ fixed = {} }: { fixed?: Query }) {
       <InfiniteGrid list={list} empty="No scenes match."
                     render={(s) => <SceneCard scene={s} selected={selected?.has(s.id)} onToggle={selected ? toggle : undefined} />} />
       {selected && selected.size > 0 && (
-        <BulkBar ids={[...selected]} onDone={() => setSelected(new Set())} onSelectAll={() => setSelected(new Set(list.items.map((s) => s.id)))} />
+        <BulkBar kind="scenes" ids={[...selected]} onDone={() => setSelected(new Set())} onSelectAll={() => setSelected(new Set(list.items.map((s) => s.id)))} />
       )}
-    </div>
-  );
-}
-
-function BulkBar({ ids, onDone, onSelectAll }: { ids: number[]; onDone: () => void; onSelectAll: () => void }) {
-  const [tags, setTags] = useState<number[]>([]);
-  const [performers, setPerformers] = useState<number[]>([]);
-  const write = useWrite((body: object) => api("/scenes/bulk", { json: { ids, ...body } }));
-  const run = (body: object) => write.mutate(body, { onSuccess: () => { setTags([]); setPerformers([]); } });
-
-  return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-700 bg-zinc-900/95 p-3 backdrop-blur" data-testid="bulk-bar">
-      <div className="mx-auto flex max-w-[1920px] flex-wrap items-end gap-3">
-        <div className="text-sm">
-          <strong>{ids.length}</strong> selected
-          <button className="ml-2 text-xs text-zinc-400 underline" onClick={onSelectAll}>select all loaded</button>
-          <button className="ml-2 text-xs text-zinc-400 underline" onClick={onDone}>clear</button>
-        </div>
-        <div className="w-64"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} placeholder="Tags…" /></div>
-        <button className="btn-primary" disabled={!tags.length} onClick={() => run({ tags: { mode: "add", ids: tags } })}>Add tags</button>
-        <button className="btn-ghost" disabled={!tags.length} onClick={() => run({ tags: { mode: "remove", ids: tags } })}>Remove tags</button>
-        <div className="w-56"><EntityPicker kind="performers" value={performers} onChange={setPerformers} placeholder="Performers…" /></div>
-        <button className="btn-primary" disabled={!performers.length} onClick={() => run({ performers: { mode: "add", ids: performers } })}>Add performers</button>
-        <select className="input w-auto" defaultValue="" onChange={(e) => e.target.value && run({ set: { rating: e.target.value === "none" ? null : +e.target.value } })} aria-label="Set rating">
-          <option value="" disabled>Set rating…</option>
-          {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n * 20}>{"★".repeat(n)}</option>)}
-          <option value="none">No rating</option>
-        </select>
-        <button className="btn-ghost" onClick={() => run({ set: { organized: true } })}>Mark organized</button>
-        {write.isError && <ErrorBox error={write.error} />}
-      </div>
     </div>
   );
 }

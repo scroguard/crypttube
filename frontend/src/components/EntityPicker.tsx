@@ -1,5 +1,6 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 import { api } from "../api/client";
 import type { Page, Ref } from "../api/types";
 
@@ -23,13 +24,15 @@ export function useNames(kind: EntityKind, ids: number[]): Map<number, string> {
  * Multi (or single) select with type-ahead search against the list API. Editors can
  * create a missing tag/performer/studio inline.
  */
-export default function EntityPicker({ kind, value, onChange, single = false, placeholder, onCreate }: {
+export default function EntityPicker({ kind, value, onChange, single = false, placeholder, onCreate, linked = false }: {
   kind: EntityKind;
   value: number[];
   onChange: (ids: number[]) => void;
   single?: boolean;
   placeholder?: string;
   onCreate?: (name: string) => Promise<number>;
+  /** Make the selected names links to their pages (for pickers shown inline on a page). */
+  linked?: boolean;
 }) {
   const [text, setText] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -85,7 +88,9 @@ export default function EntityPicker({ kind, value, onChange, single = false, pl
       <div className="input flex min-h-[38px] flex-wrap items-center gap-1 py-1" onClick={() => setOpen(true)}>
         {value.map((id) => (
           <span key={id} className="chip">
-            {names.get(id)}
+            {linked
+              ? <Link to={`/${kind}/${id}`} className="hover:text-accent-hover" onClick={(e) => e.stopPropagation()}>{names.get(id)}</Link>
+              : names.get(id)}
             <button type="button" aria-label={`Remove ${names.get(id)}`} className="text-zinc-400 hover:text-white"
                     onClick={(e) => { e.stopPropagation(); onChange(value.filter((v) => v !== id)); }}>×</button>
           </span>

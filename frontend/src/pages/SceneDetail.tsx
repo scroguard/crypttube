@@ -6,8 +6,9 @@ import { useDetail, useWrite } from "../api/hooks";
 import type { Playback, SceneDetail as Scene } from "../api/types";
 import Chips from "../components/Chips";
 import { ContentEditModal } from "../components/EditForms";
+import EntityPicker, { creator } from "../components/EntityPicker";
 import VideoPlayer from "../components/VideoPlayer";
-import { ErrorBox, Initials, Rating, Spinner } from "../components/ui";
+import { ErrorBox, Field, Initials, Rating, Spinner } from "../components/ui";
 import { formatBytes, formatDate, formatDateTime, formatDuration, resolutionLabel } from "../lib/format";
 
 export default function SceneDetail() {
@@ -16,6 +17,7 @@ export default function SceneDetail() {
   const playback = useDetail<Playback>(`/scenes/${id}/playback`);
   const [editing, setEditing] = useState(false);
   const rate = useWrite((rating: number | null) => api(`/scenes/${id}`, { method: "PATCH", json: { rating } }));
+  const assign = useWrite((body: object) => api(`/scenes/${id}`, { method: "PATCH", json: body }));
   const qc = useQueryClient();
   const [rebuilding, setRebuilding] = useState(false);
   const regenerate = useWrite(() => api(`/scenes/${id}/regenerate`, { method: "POST" }));
@@ -87,7 +89,21 @@ export default function SceneDetail() {
               ))}
             </div>
           )}
-          <Chips items={s.tags} to="tags" />
+          {canEdit ? (
+            <div className="grid gap-3 sm:grid-cols-2" data-testid="quick-assign">
+              <Field label="Performers">
+                <EntityPicker kind="performers" linked value={s.performers.map((p) => p.id)} onCreate={creator("performers")}
+                              placeholder="Add performers…" onChange={(ids) => assign.mutate({ performer_ids: ids })} />
+              </Field>
+              <Field label="Tags">
+                <EntityPicker kind="tags" linked value={s.tags.map((t) => t.id)} onCreate={creator("tags")}
+                              placeholder="Add tags…" onChange={(ids) => assign.mutate({ tag_ids: ids })} />
+              </Field>
+              {assign.isError && <ErrorBox error={assign.error} className="sm:col-span-2" />}
+            </div>
+          ) : (
+            <Chips items={s.tags} to="tags" />
+          )}
           {s.details && <p className="whitespace-pre-line text-sm leading-relaxed text-zinc-300">{s.details}</p>}
           {s.urls.length > 0 && (
             <ul className="text-sm">

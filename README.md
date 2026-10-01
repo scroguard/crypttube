@@ -92,6 +92,9 @@ scroll position), filters kept in the URL. Highlights:
   organized), lazy-loaded WebP thumbnails.
 - **Lightbox**: keyboard/swipe navigation, neighbour preloading, click-to-zoom, loads
   further pages as you approach the end.
+- **Assigning performers/tags**: directly on the scene page (inline pickers), in the image
+  lightbox (Edit), or in bulk on any scene or image grid (Select → add/remove performers
+  and tags).
 - **Editing** (editors/admins): scenes, galleries, images, performers (incl. images),
   studios, tags (hierarchy, merge); create tags/performers/studios inline from pickers.
 - **Admin**: libraries (watch, exclusions, scan), live job monitor, users and per-user

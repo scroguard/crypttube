@@ -123,6 +123,8 @@ export interface ImageDetail extends ImageItem {
   galleries: { id: number; title: string | null }[];
   performers: Ref[];
   tags: Ref[];
+  can_edit: boolean;
+  mine: boolean;
 }
 
 export interface PerformerItem {

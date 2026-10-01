@@ -173,7 +173,7 @@ test("editor workflow: rate and tag a scene", async () => {
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("link", { name: "Outdoor" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Alice" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Alice" }).first()).toBeVisible();
   await page.getByLabel("Rating 0 of 5").getByRole("button").nth(3).click();
   await expect(page.getByLabel("Rating 4 of 5")).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/06-scene-detail.png`, fullPage: true });
@@ -253,6 +253,55 @@ test("performer page lists their scenes", async () => {
   await expect(page.getByRole("tab", { name: "Scenes" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("scene-card")).toHaveCount(1);
   await page.screenshot({ path: `${SHOTS}/10-performer.png` });
+});
+
+test("assign performers to images (bulk + lightbox) and to a scene (inline)", async () => {
+  // bulk: select two images of a gallery and add a performer
+  await nav("Galleries").click();
+  await page.getByTestId("gallery-card").filter({ hasText: "pics" }).getByRole("link").first().click();
+  await page.getByRole("button", { name: "Select images" }).click();
+  await page.getByTestId("image-tile").nth(0).click();
+  await page.getByTestId("image-tile").nth(1).click();
+  const bulk = page.getByTestId("bulk-bar");
+  await expect(bulk).toContainText("2 selected");
+  await bulk.getByLabel("Performers…").fill("Ali");
+  await page.getByRole("option", { name: "Alice" }).click();
+  await bulk.getByRole("button", { name: "Add performers" }).click();
+  await expect(bulk.getByRole("button", { name: "Add performers" })).toBeDisabled(); // applied, picker reset
+  await page.screenshot({ path: `${SHOTS}/09b-bulk-images.png` });
+  await page.getByRole("button", { name: "Done selecting" }).click();
+
+  // lightbox: shows who is in the image, and can edit it
+  await page.getByTestId("image-tile").first().click();
+  await expect(page.getByTestId("lightbox-meta")).toContainText("Alice");
+  await page.getByTestId("lightbox").getByRole("button", { name: "Edit" }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit image" });
+  await dialog.getByLabel("Add tags…").pressSequentially("Portrait", { delay: 15 });
+  await dialog.getByRole("option", { name: "Create “Portrait”" }).click();
+  await page.keyboard.press("ArrowRight"); // typing keys must not flip to the next image
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId("lightbox-counter")).toHaveText("1 / 12");
+  await expect(page.getByTestId("lightbox-meta")).toContainText("Portrait");
+  await page.screenshot({ path: `${SHOTS}/09c-lightbox-meta.png` });
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("lightbox")).toBeHidden();
+
+  // scene page: assign a performer right there, no dialog
+  await nav("Scenes").click();
+  await page.getByText("Night Drive").click();
+  const quick = page.getByTestId("quick-assign");
+  await quick.getByLabel("Add performers…").fill("Ali");
+  await page.getByRole("option", { name: "Alice" }).click();
+  await expect(page.getByRole("link", { name: "Alice" }).first()).toBeVisible(); // saved and shown
+  await page.screenshot({ path: `${SHOTS}/09d-scene-assign.png` });
+
+  // the performer's page reflects both
+  await nav("Performers").click();
+  await page.getByTestId("performer-card").filter({ hasText: "Alice" }).click();
+  await expect(page.getByTestId("scene-card")).toHaveCount(2);
+  await page.getByRole("tab", { name: "Images" }).click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(2);
 });
 
 test("dialogs keep focus while typing (create performer, studio, tag)", async () => {

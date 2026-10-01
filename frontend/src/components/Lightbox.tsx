@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { ImageItem } from "../api/types";
+import { Link } from "react-router";
+import { useDetail } from "../api/hooks";
+import type { ImageDetail, ImageItem } from "../api/types";
+import { ContentEditModal } from "./EditForms";
 
 /**
  * Full-screen image viewer. ←/→ or swipe to navigate, click to toggle zoom, Esc to close.
@@ -16,8 +19,10 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
 }) {
   const [zoom, setZoom] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [editing, setEditing] = useState(false);
   const swipe = useRef<number | null>(null);
   const image = images[index];
+  const detail = useDetail<ImageDetail>(image ? `/images/${image.id}` : null).data;
 
   const go = (delta: number) => {
     const next = index + delta;
@@ -35,6 +40,8 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // While the edit dialog is open (or a field has focus) keys belong to it.
+      if (editing || (e.target as HTMLElement).closest?.("input, textarea, select")) return;
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); go(1); }
       else if (e.key === "ArrowLeft") go(-1);
@@ -55,7 +62,18 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
         <span className="tabular-nums" data-testid="lightbox-counter">{index + 1} / {total ?? images.length}</span>
         <span className="truncate">{image.title}</span>
         <span className="text-zinc-500">{image.width}×{image.height}</span>
+        {detail && detail.id === image.id && (
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="lightbox-meta">
+            {detail.performers.map((p) => (
+              <Link key={`p${p.id}`} to={`/performers/${p.id}`} className="chip bg-accent/20 text-rose-200">{p.name}</Link>
+            ))}
+            {detail.tags.map((t) => <Link key={`t${t.id}`} to={`/tags/${t.id}`} className="chip">{t.name}</Link>)}
+          </span>
+        )}
         <div className="flex-1" />
+        {detail?.can_edit && detail.id === image.id && (
+          <button onClick={() => setEditing(true)} className="hover:text-white">Edit</button>
+        )}
         <a href={image.file_url} target="_blank" rel="noreferrer" className="hover:text-white">Original</a>
         <button onClick={onClose} className="text-xl hover:text-white" aria-label="Close">✕</button>
       </div>
@@ -79,6 +97,7 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
                   className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-2xl text-white hover:bg-black/80">›</button>
         )}
       </div>
+      {editing && detail && <ContentEditModal kind="images" item={detail} onClose={() => setEditing(false)} />}
     </div>
   );
 }
