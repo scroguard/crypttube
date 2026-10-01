@@ -25,23 +25,36 @@ export function Empty({ children }: { children: ReactNode }) {
 export function Modal({ title, onClose, children, wide = false }: {
   title: string; onClose: () => void; children: ReactNode; wide?: boolean;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  // Callers pass inline closures (a new function every render). Reading the latest
+  // one through a ref keeps the effects below from re-running on each keystroke,
+  // which used to yank focus out of the field being typed in.
+  const close = useRef(onClose);
+  close.current = onClose;
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close.current();
     window.addEventListener("keydown", onKey);
-    ref.current?.querySelector<HTMLElement>("input, textarea, select, button")?.focus();
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
+
+  // Initial focus, once: the first form field in the body (never the header's close button).
+  useEffect(() => {
+    const el = body.current;
+    (el?.querySelector<HTMLElement>("input:not([type=hidden]), textarea, select")
+      ?? el?.querySelector<HTMLElement>("button"))?.focus();
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 pt-[10vh]"
-         onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-label={title}
+         onMouseDown={(e) => e.target === e.currentTarget && close.current()}>
+      <div role="dialog" aria-label={title}
            className={`card w-full ${wide ? "max-w-3xl" : "max-w-md"} bg-zinc-900 p-5 shadow-2xl`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
-          <button className="text-zinc-400 hover:text-white" onClick={onClose} aria-label="Close">✕</button>
+          <button className="text-zinc-400 hover:text-white" onClick={() => close.current()} aria-label="Close">✕</button>
         </div>
-        {children}
+        <div ref={body}>{children}</div>
       </div>
     </div>
   );

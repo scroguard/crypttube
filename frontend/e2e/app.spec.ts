@@ -173,6 +173,46 @@ test("performer page lists their scenes", async () => {
   await page.screenshot({ path: `${SHOTS}/10-performer.png` });
 });
 
+test("dialogs keep focus while typing (create performer, studio, tag)", async () => {
+  // Regression: the modal re-ran its focus logic on every keystroke and moved focus to
+  // the close button. fill() sets values in one go, so type key by key like a person.
+  for (const [navName, button, name] of [
+    ["Performers", "New performer", "Charlie Typed"],
+    ["Studios", "New studio", "Typed Studio"],
+    ["Tags", "New tag", "Typed Tag"],
+  ] as const) {
+    await nav(navName).click();
+    await page.getByRole("button", { name: button }).click();
+    const dialog = page.getByRole("dialog", { name: button });
+    const input = dialog.getByLabel("Name");
+    await expect(input).toBeFocused();
+    await input.pressSequentially(name, { delay: 20 });
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue(name);
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+  }
+});
+
+test("edit dialog keeps focus while typing", async () => {
+  await nav("Scenes").click();
+  await page.getByText("Beach Day").click();
+  await page.getByRole("button", { name: "Edit" }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit scene" });
+  const title = dialog.getByLabel("Title");
+  await expect(title).toBeFocused();
+  await title.press("End");
+  await title.pressSequentially(" Typed", { delay: 20 });
+  await expect(title).toBeFocused();
+  const details = dialog.getByLabel("Details");
+  await details.click();
+  await details.pressSequentially("Some notes", { delay: 20 });
+  await expect(details).toBeFocused();
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("scene-title")).toHaveText("Beach Day Typed");
+  await expect(page.getByText("Some notes")).toBeVisible();
+});
+
 test("admin restricts a viewer, who then can't see the content", async () => {
   await page.goto("/admin/users");
   await page.getByRole("button", { name: "New user" }).click();
