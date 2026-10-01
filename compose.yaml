@@ -3,7 +3,8 @@ name: goon-streamer
 x-backend: &backend
   build:
     context: ./backend
-  # Run as the host user that owns GENERATED_ROOT (and can read MEDIA_ROOT).
+  # Run as a host user that can read MEDIA_ROOT. Generated content lives in the
+  # `generated` volume, which any PUID can write to.
   user: "${PUID:-1000}:${PGID:-1000}"
   restart: unless-stopped
   depends_on:
@@ -24,7 +25,9 @@ x-backend: &backend
     FORWARDED_ALLOW_IPS: "*"
   volumes:
     - ${MEDIA_ROOT:-./media}:/media:ro
-    - ${GENERATED_ROOT:-./data/generated}:/data/generated
+    # Thumbnails, scrub sprites, performer/studio/tag images. Rebuildable from the
+    # media except uploaded entity images; back it up together with pgdata.
+    - generated:/data/generated
   networks: [goonstreamer]
 
 # Service and container names are prefixed so they can't collide with other stacks
@@ -91,3 +94,4 @@ networks:
 
 volumes:
   pgdata:
+  generated:

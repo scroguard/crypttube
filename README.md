@@ -7,7 +7,7 @@ outbound calls, no external fonts/CDNs.
 ## Running
 
 ```sh
-cp .env.example .env          # set POSTGRES_PASSWORD, MEDIA_ROOT, GENERATED_ROOT, PUID/PGID
+cp .env.example .env          # set POSTGRES_PASSWORD, MEDIA_ROOT, PUID/PGID
 docker compose up -d --build  # production: compose.yaml only
 ```
 
@@ -41,8 +41,10 @@ production build in a separate compose project (`goon-e2e`) with its own databas
 never touches your data. Screenshots land in `frontend/test-results/screens/`.
 Behind HTTPS (reverse proxy with TLS), set `COOKIE_SECURE=true`.
 
-Media is mounted **read-only** at `/media`; generated content lives in `GENERATED_ROOT`
-(mounted at `/data/generated`). The database has no published port, and the API
+Media is mounted **read-only** at `/media`. Everything the app writes lives in two
+Docker volumes: `pgdata` (database) and `generated` (thumbnails, sprites, uploaded
+performer/studio/tag images, at `/data/generated`). Back up both; `generated` is
+rebuildable from the media except uploaded images. The database has no published port, and the API
 listens only on `127.0.0.1`.
 
 ## Services

@@ -1,6 +1,6 @@
 # Isolated end-to-end test stack. Run via scripts/e2e.sh, which uses its own project
-# name (goon-e2e): separate database and generated-content volumes, no published
-# ports, and generated fixture media instead of your library.
+# name (goon-e2e), so its database and generated-content volumes are its own; no
+# published ports, and generated fixture media instead of your library.
 # Fixed container names are global, so the test stack gets its own.
 services:
   goonstreamer-db:
@@ -11,7 +11,6 @@ services:
       SCAN_SETTLE_SECONDS: "1"
     volumes:
       - ./frontend/e2e/media:/media:ro
-      - e2e_generated:/data/generated
   goonstreamer-worker:
     container_name: goonstreamer-e2e-worker
     environment:
@@ -19,7 +18,6 @@ services:
       WATCHER_QUIET_SECONDS: "1"
     volumes:
       - ./frontend/e2e/media:/media:ro
-      - e2e_generated:/data/generated
   goonstreamer-web:
     container_name: goonstreamer-e2e-web
     ports: !reset []
@@ -37,6 +35,3 @@ services:
       - ./frontend:/app
     networks: [goonstreamer]
     command: ["npx", "playwright", "test"]
-
-volumes:
-  e2e_generated:

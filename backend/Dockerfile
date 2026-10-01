@@ -20,7 +20,8 @@ RUN pip install -r requirements.txt \
 
 COPY . .
 
-# Default non-root user; compose overrides the uid/gid with PUID/PGID.
+# Default non-root user; compose overrides the uid/gid with PUID/PGID. A new named
+# volume mounted here copies this directory's permissions, so any PUID can write.
 RUN mkdir -p /data/generated && chmod 777 /data/generated
 USER 1000:1000
 

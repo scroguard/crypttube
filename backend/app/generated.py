@@ -53,12 +53,31 @@ def thumbnail_path(root: Path, kind: str, version: str, width: int) -> Path:
     return _shard(root, f"thumbs/{kind}", f"{version}-w{width}", ".webp")
 
 
+# Generated content lives in a Docker volume that only this stack's containers mount.
+# Files and folders are created group/world-accessible so that changing PUID later
+# never leaves earlier files unreadable or folders unwritable.
+FILE_MODE = 0o666
+DIR_MODE = 0o777
+
+
+def ensure_dir(path: Path) -> None:
+    if path.is_dir():
+        return
+    ensure_dir(path.parent)
+    try:
+        path.mkdir(mode=DIR_MODE)
+        os.chmod(path, DIR_MODE)  # mkdir's mode is filtered by the umask
+    except FileExistsError:
+        pass
+
+
 def _atomic_write(dest: Path, write) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".tmp-")
+    ensure_dir(dest.parent)
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".tmp-")  # created 0600
     try:
         with os.fdopen(fd, "wb") as f:
             write(f)
+        os.chmod(tmp, FILE_MODE)
         os.replace(tmp, dest)
     except BaseException:
         os.unlink(tmp)

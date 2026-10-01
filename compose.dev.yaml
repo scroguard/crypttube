@@ -9,7 +9,7 @@ services:
     volumes:
       - ./backend:/app
       - ${MEDIA_ROOT:-./media}:/media:ro
-      - ${GENERATED_ROOT:-./data/generated}:/data/generated
+      - generated:/data/generated
     ports:
       - "127.0.0.1:${API_PORT:-8421}:8000"  # direct API access for debugging (dev only)
     # --reload-dir keeps the reloader watching source only, never data or cache dirs.
@@ -22,7 +22,7 @@ services:
     volumes:
       - ./backend:/app
       - ${MEDIA_ROOT:-./media}:/media:ro
-      - ${GENERATED_ROOT:-./data/generated}:/data/generated
+      - generated:/data/generated
     command: ["watchfiles", "--filter", "python", "python -m app.worker", "app"]
 
   goonstreamer-web:

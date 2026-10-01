@@ -268,3 +268,16 @@ async def test_scan_queues_generation_for_new_scenes_only(app, indexed):
     await pool.execute("INSERT INTO jobs (kind, payload) VALUES ('scan', $1)", {"library_id": lid})
     await worker.run_one(pool, get_settings().model_copy(update={"scan_settle_seconds": 0}))
     assert await pool.fetchval("SELECT count(*) FROM jobs WHERE kind = 'generate'") == 0  # nothing new
+
+
+def test_generated_files_survive_a_puid_change(tmp_path):
+    """Generated content is shared across container restarts that may run as a
+    different PUID: folders must stay writable and files readable by anyone."""
+    import stat
+    dest = tmp_path / "screenshots" / "ab" / "x.webp"
+    generated._atomic_write(dest, lambda f: f.write(b"data"))
+    assert dest.read_bytes() == b"data"
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o666
+    for d in (dest.parent, dest.parent.parent):
+        assert stat.S_IMODE(d.stat().st_mode) == 0o777
+    assert not [p for p in dest.parent.iterdir() if p.name.startswith(".tmp-")]
