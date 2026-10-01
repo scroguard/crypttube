@@ -304,6 +304,53 @@ test("assign performers to images (bulk + lightbox) and to a scene (inline)", as
   await expect(page.getByTestId("image-tile")).toHaveCount(2);
 });
 
+test("performer image: from the library, from server files, by upload; unsafe URLs refused", async () => {
+  await nav("Performers").click();
+  await page.getByTestId("performer-card").filter({ hasText: "Alice" }).click();
+  const portrait = page.locator("img[src*='/api/performers/']").first();
+  await expect(portrait).toHaveCount(0);
+
+  // from the library
+  await page.getByRole("button", { name: "Add image" }).click();
+  const dialog = page.getByRole("dialog", { name: "Choose an image" });
+  await dialog.getByRole("tab", { name: "From library" }).click();
+  await expect(dialog.getByTestId("source-item").first()).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/09e-image-from-library.png` });
+  await dialog.getByTestId("source-item").first().click();
+  await expect(dialog).toBeHidden();
+  await expect(portrait).toBeVisible();
+  const first = await portrait.getAttribute("src");
+
+  // from the read-only media store (admin)
+  await page.getByRole("button", { name: "Change image" }).click();
+  await dialog.getByRole("tab", { name: "Server files" }).click();
+  await dialog.getByRole("button", { name: "Open lib" }).click();
+  await dialog.getByRole("button", { name: "Open pics" }).click();
+  await expect(dialog.getByTestId("server-path")).toHaveText("/media/lib/pics");
+  await expect(dialog.getByTestId("server-file")).toHaveCount(12);
+  await page.screenshot({ path: `${SHOTS}/09f-image-from-server.png` });
+  await dialog.getByTestId("server-file").nth(5).click();
+  await expect(dialog).toBeHidden();
+  await expect(portrait).not.toHaveAttribute("src", first!);
+
+  // from a URL: internal addresses are refused with a clear message
+  await page.getByRole("button", { name: "Change image" }).click();
+  await dialog.getByRole("tab", { name: "From URL" }).click();
+  await dialog.getByLabel("Image address").fill("http://127.0.0.1:8000/api/health");
+  await dialog.getByRole("button", { name: "Fetch image" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("not on the public internet");
+
+  // by upload
+  await dialog.getByRole("tab", { name: "Upload" }).click();
+  await dialog.getByTestId("image-upload").setInputFiles("e2e/media/lib/pics/photo3.jpg");
+  await expect(dialog).toBeHidden();
+  await expect(portrait).toBeVisible();
+
+  // shown on the performer's card in the list too
+  await nav("Performers").click();
+  await expect(page.getByTestId("performer-card").filter({ hasText: "Alice" }).locator("img")).toBeVisible();
+});
+
 test("dialogs keep focus while typing (create performer, studio, tag)", async () => {
   // Regression: the modal re-ran its focus logic on every keystroke and moved focus to
   // the close button. fill() sets values in one go, so type key by key like a person.

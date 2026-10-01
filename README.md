@@ -192,6 +192,14 @@ How it stays fast (`python -m scripts.bench_browse` measures it on 200k scenes):
 - `POST/PATCH/DELETE /api/{performers,studios,tags}`: hierarchy cycles return 409;
   `POST /api/tags/{id}/merge {"source_ids": [...]}` folds tags together.
 - `PUT/GET/DELETE /api/{performers,studios,tags}/{id}/image`: raw image body, stored as WebP (≤1024px).
+  Other sources (UI: **Add/Change image**): `POST …/image/from-library {image_id | scene_id}`
+  (anything the user can see), `POST …/image/from-path {path}` (admins: any image file in
+  the media store, browsable with previews), `POST …/image/from-url {url}`.
+- **From URL is the app's only outbound request** and happens only on that explicit action.
+  `app/fetch.py` allows http(s) to public internet addresses only (no loopback, LAN,
+  link-local/metadata, CGNAT…), connects to the address it validated, re-validates every
+  redirect, caps size and time, and sends no cookies or referrer. `URL_IMAGE_FETCH=false`
+  disables it.
 - `POST /api/scenes/{id}/play`, `PUT /api/scenes/{id}/resume {"time": s}`.
 
 Writes queue a debounced `refresh_counts` job; list counts catch up within seconds.

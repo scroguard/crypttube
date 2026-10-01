@@ -16,7 +16,11 @@ from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import counts, jobs
+from app import counts, generated, jobs
+from app.api import media as media_api
+from app.api.libraries import media_file_path
+from app.auth import require_admin
+from app.fetch import FetchError, fetch_image_bytes
 from app.permissions import (require_can_create, require_content_edit, require_entity_edit,
                              require_visible)
 from app.acl import Acl
@@ -32,6 +36,7 @@ read_router = APIRouter(tags=["edit"])
 
 Rating = Field(None, ge=0, le=100)
 MAX_IMAGE_UPLOAD = 20 * 1024 * 1024
+MAX_SOURCE_IMAGE = 100 * 1024 * 1024   # an original picked from the media store
 ENTITY_IMAGE_MAX = 1024
 
 
@@ -531,10 +536,79 @@ async def upload_entity_image(kind: str, entity_id: int, request: Request, acl: 
     data = await request.body()
     if not data or len(data) > MAX_IMAGE_UPLOAD:
         raise HTTPException(413 if data else 422, "image too large" if data else "empty body")
+    return await _store_entity_image(request, kind, entity_id, data)
+
+
+async def _store_entity_image(request: Request, kind: str, entity_id: int, data: bytes) -> Response:
+    """Normalize to WebP and attach to the entity. The UPDATE also bumps updated_at,
+    which is the image URL's version, so browsers pick up the new picture."""
     rel = f"entities/{kind}/{entity_id}.webp"
     await asyncio.to_thread(_normalize_image, data, get_settings().generated_dir / rel)
     await request.app.state.pool.execute(f"UPDATE {kind} SET image_path = $2 WHERE id = $1", entity_id, rel)
     return Response(status_code=204)
+
+
+async def _editable_entity(kind: str, entity_id: int, request: Request, acl: Acl) -> None:
+    await ENTITY_TABLES[kind](entity_id, request, acl)   # 404 unless visible
+    await require_entity_edit(request.app.state.pool, acl, kind[:-1], [entity_id])
+
+
+class ImageFromUrl(Body):
+    url: str = Field(min_length=1, max_length=2000)
+
+
+async def entity_image_from_url(kind: str, entity_id: int, body: ImageFromUrl, request: Request, acl: Acl) -> Response:
+    """Download an image from the internet and use it. See app/fetch.py for the rules."""
+    await _editable_entity(kind, entity_id, request, acl)
+    if not get_settings().url_image_fetch:
+        raise HTTPException(403, "fetching images from URLs is disabled on this server")
+    try:
+        data = await fetch_image_bytes(body.url, max_bytes=MAX_IMAGE_UPLOAD)
+    except FetchError as e:
+        raise HTTPException(422, str(e)) from e
+    return await _store_entity_image(request, kind, entity_id, data)
+
+
+class ImageFromLibrary(Body):
+    image_id: int | None = None
+    scene_id: int | None = None
+
+
+async def entity_image_from_library(kind: str, entity_id: int, body: ImageFromLibrary, request: Request,
+                                    acl: Acl) -> Response:
+    """Use an image that is already in the system: an indexed image, or a scene's
+    screenshot. The source must be visible to whoever is doing this."""
+    await _editable_entity(kind, entity_id, request, acl)
+    if (body.image_id is None) == (body.scene_id is None):
+        raise HTTPException(422, "give exactly one of image_id or scene_id")
+    if body.image_id is not None:
+        img = await media_api._image(request, body.image_id, acl)   # 404 if hidden or missing
+
+        def read() -> bytes:
+            with generated.open_image_source(img["path"], img["zip_path"]) as f:
+                return f.read()
+        data = await asyncio.to_thread(read)
+    else:
+        scene = await media_api._scene(request, body.scene_id, acl)
+        version = generated.scene_version(scene["oshash"], scene["file_id"])
+        shot = generated.screenshot_path(get_settings().generated_dir, version)
+        if not generated.usable(shot):
+            await generated.make_screenshot(scene["path"], scene["duration"], shot)
+        data = await asyncio.to_thread(shot.read_bytes)
+    return await _store_entity_image(request, kind, entity_id, data)
+
+
+class ImageFromPath(Body):
+    path: str = Field(min_length=1, max_length=4000)
+
+
+async def entity_image_from_path(kind: str, entity_id: int, body: ImageFromPath, request: Request, acl: Acl) -> Response:
+    """Admins: use any image file in the read-only media store, indexed or not."""
+    await _editable_entity(kind, entity_id, request, acl)
+    path = media_file_path(body.path)
+    if path.stat().st_size > MAX_SOURCE_IMAGE:
+        raise HTTPException(413, "image too large")
+    return await _store_entity_image(request, kind, entity_id, await asyncio.to_thread(path.read_bytes))
 
 
 async def delete_entity_image(kind: str, entity_id: int, request: Request, acl: Acl) -> Response:
@@ -573,8 +647,22 @@ def _entity_routes(kind: str) -> None:
     async def get_image(entity_id: int, request: Request, v: str | None = None, acl: Acl = Depends(get_acl)):
         return await get_entity_image(kind, entity_id, request, v, acl)
 
+    async def from_url(entity_id: int, body: ImageFromUrl, request: Request, acl: Acl = Depends(get_acl)) -> Response:
+        return await entity_image_from_url(kind, entity_id, body, request, acl)
+
+    async def from_library(entity_id: int, body: ImageFromLibrary, request: Request,
+                           acl: Acl = Depends(get_acl)) -> Response:
+        return await entity_image_from_library(kind, entity_id, body, request, acl)
+
+    async def from_path(entity_id: int, body: ImageFromPath, request: Request, acl: Acl = Depends(get_acl),
+                        _admin=Depends(require_admin)) -> Response:
+        return await entity_image_from_path(kind, entity_id, body, request, acl)
+
     for fn, method, path, code in ((delete, "DELETE", "", 204), (put_image, "PUT", "/image", 204),
-                                   (delete_image, "DELETE", "/image", 204), (get_image, "GET", "/image", None)):
+                                   (delete_image, "DELETE", "/image", 204), (get_image, "GET", "/image", None),
+                                   (from_url, "POST", "/image/from-url", 204),
+                                   (from_library, "POST", "/image/from-library", 204),
+                                   (from_path, "POST", "/image/from-path", 204)):
         fn.__name__ = f"{fn.__name__}_{kind}"
         target = read_router if method == "GET" else router
         target.add_api_route(f"/{kind}/{{entity_id}}{path}", fn, methods=[method],

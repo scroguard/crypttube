@@ -278,7 +278,7 @@ async def get_scene(scene_id: int, request: Request, acl: Acl = Depends(get_acl)
                (SELECT coalesce(jsonb_agg(jsonb_build_object(
                            'id', x.id, 'name', x.name, 'disambiguation', x.disambiguation,
                            'gender', x.gender, 'has_image', x.image_path IS NOT NULL,
-                           'image_version', floor(extract(epoch FROM x.updated_at))::bigint)
+                           'image_version', floor(extract(epoch FROM x.updated_at) * 1000)::bigint)
                            ORDER BY x.name COLLATE natural_sort), '[]')
                 FROM scene_performers l JOIN performers x ON x.id = l.performer_id
                 WHERE l.scene_id = s.id) AS performers,

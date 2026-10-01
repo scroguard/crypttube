@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # auth: set true when served over HTTPS (reverse proxy with TLS)
     cookie_secure: bool = False
     # media delivery
+    # Allow "set image from URL" (the app's only outbound request, made on explicit request).
+    url_image_fetch: bool = True
     max_transcodes: int = 2
     generate_concurrency: int = 2
 

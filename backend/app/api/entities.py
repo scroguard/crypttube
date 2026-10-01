@@ -22,7 +22,7 @@ router = APIRouter(tags=["browse"])
 def entity_image_url(kind: str, entity_id: int, image_path: str | None, updated_at) -> str | None:
     if not image_path:
         return None
-    return f"/api/{kind}/{entity_id}/image?v={int(updated_at.timestamp())}"
+    return f"/api/{kind}/{entity_id}/image?v={int(updated_at.timestamp() * 1000)}"
 
 
 def counts(q: Q, acl: Acl, kind: str, alias: str) -> tuple[str, str]:

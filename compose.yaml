@@ -20,6 +20,9 @@ x-backend: &backend
     MEDIA_DIR: /media
     WATCHER_POLLING: ${WATCHER_POLLING:-false}
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    # "Set image from URL" makes the server download a picture when a user asks for it
+    # (public internet addresses only). Set to false to forbid any outbound request.
+    URL_IMAGE_FETCH: ${URL_IMAGE_FETCH:-true}
     # Only nginx (goonstreamer-web) can reach the API in production, so trust its X-Forwarded-For
     # (login throttling is keyed on the real client address).
     FORWARDED_ALLOW_IPS: "*"

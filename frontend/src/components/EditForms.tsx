@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useWrite } from "../api/hooks";
 import type { Ref } from "../api/types";
 import EntityPicker, { creator } from "./EntityPicker";
+import ImageSourceModal from "./ImageSourceModal";
 import { ErrorBox, Field, Modal, Toggle } from "./ui";
 
 const ids = (refs: Ref[] | undefined) => (refs ?? []).map((r) => r.id);
@@ -77,18 +78,16 @@ export function FormButtons({ busy, error, onCancel, label = "Save", children }:
   );
 }
 
-/** Upload / replace / remove the image of a performer, studio or tag. */
+/** Set / replace / remove the image of a performer, studio or tag. */
 export function EntityImageControls({ kind, id, hasImage }: { kind: "performers" | "studios" | "tags"; id: number; hasImage: boolean }) {
-  const upload = useWrite((file: File) => api(`/${kind}/${id}/image`, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } }));
+  const [choosing, setChoosing] = useState(false);
   const remove = useWrite(() => api(`/${kind}/${id}/image`, { method: "DELETE" }));
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <label className="btn-ghost cursor-pointer">
-        {hasImage ? "Replace image" : "Upload image"}
-        <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload.mutate(e.target.files[0])} />
-      </label>
+      <button className="btn-ghost" onClick={() => setChoosing(true)}>{hasImage ? "Change image" : "Add image"}</button>
       {hasImage && <button className="btn-ghost" onClick={() => remove.mutate()}>Remove image</button>}
-      {(upload.error || remove.error) && <ErrorBox error={upload.error || remove.error} />}
+      {remove.error ? <ErrorBox error={remove.error} /> : null}
+      {choosing && <ImageSourceModal kind={kind} id={id} onClose={() => setChoosing(false)} />}
     </div>
   );
 }

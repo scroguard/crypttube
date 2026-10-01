@@ -1,13 +1,14 @@
 import asyncio
+import io
 import os
 import re
 from pathlib import Path
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from app import jobs
+from app import jobs, media
 from app.api.my_libraries import remove_library
 from app.config import get_settings
 from app.watcher import scan_dedupe_key
@@ -31,6 +32,25 @@ class LibraryPatch(BaseModel):
     watch: bool | None = None
     create_folder_galleries: bool | None = None
     exclude_patterns: list[str] | None = None
+
+
+_preview_slots = asyncio.Semaphore(4)
+
+
+def _preview_bytes(path: Path, width: int) -> bytes:
+    from PIL import Image, ImageOps
+    buf = io.BytesIO()
+    try:
+        with Image.open(path) as im:
+            im.draft("RGB", (width, width))
+            im = ImageOps.exif_transpose(im)
+            im.thumbnail((width, width))
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGB")
+            im.save(buf, "WEBP", quality=70)
+    except Exception as e:  # Pillow raises many types for unreadable files
+        raise HTTPException(422, "cannot preview this file") from e
+    return buf.getvalue()
 
 
 class ScanRequest(BaseModel):
@@ -70,6 +90,35 @@ def _natural(name: str) -> list:
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
 
 
+def media_file_path(raw: str) -> Path:
+    """Resolve a client-supplied path to an existing image file inside the media root."""
+    if not raw.startswith("/"):
+        raise HTTPException(422, "path must be absolute")
+    media_root = get_settings().media_dir.resolve()
+    path = Path(raw).resolve()
+    if not path.is_relative_to(media_root):
+        raise HTTPException(422, f"path must be inside {media_root}")
+    if not path.is_file():
+        raise HTTPException(404, "file not found")
+    if media.classify(path.name) != "image":
+        raise HTTPException(415, "not an image file")
+    return path
+
+
+def _list_images(path: Path) -> list[dict]:
+    out = []
+    with os.scandir(path) as it:
+        for entry in it:
+            if entry.name.startswith(".") or media.classify(entry.name) != "image":
+                continue
+            try:
+                if entry.is_file(follow_symlinks=False):
+                    out.append({"name": entry.name, "path": entry.path, "size": entry.stat().st_size})
+            except OSError:
+                continue
+    return sorted(out, key=lambda f: _natural(f["name"]))
+
+
 def _list_subdirs(path: Path, skip: Path) -> list[str]:
     """Visible subdirectories, mirroring what the scanner walks: hidden directories and
     symlinked directories are skipped (os.walk doesn't follow links)."""
@@ -89,8 +138,17 @@ def _list_subdirs(path: Path, skip: Path) -> list[str]:
     return sorted(names, key=_natural)
 
 
+@router.get("/browse/preview")
+async def browse_preview(path: str) -> Response:
+    """A small preview of an image file in the media store (it need not be indexed)."""
+    file = media_file_path(path)
+    async with _preview_slots:
+        data = await asyncio.to_thread(_preview_bytes, file, 240)
+    return Response(data, media_type="image/webp", headers={"Cache-Control": "private, max-age=300"})
+
+
 @router.get("/browse")
-async def browse(request: Request, path: str | None = None) -> dict:
+async def browse(request: Request, path: str | None = None, images: bool = False) -> dict:
     """List the subdirectories of a folder under the media root, for picking a library
     path or a subfolder to scan. Never lists anything outside the media root."""
     settings = get_settings()
@@ -113,7 +171,9 @@ async def browse(request: Request, path: str | None = None) -> dict:
                        if target == Path(lp) or target.is_relative_to(lp)), None)
     entries = [{"name": n, "path": str(target / n), "library_id": libraries.get(str(target / n))}
                for n in names[:BROWSE_LIMIT]]
+    files = (await asyncio.to_thread(_list_images, target))[:BROWSE_LIMIT] if images else []
     return {
+        "files": files,
         "path": str(target),
         "root": str(media),
         "parent": str(target.parent) if target != media else None,

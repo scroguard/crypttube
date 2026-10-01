@@ -101,6 +101,11 @@ async def clean(app):
         """TRUNCATE library_paths, files, scenes, images, galleries, studios, performers,
                     tags, jobs, entity_counts RESTART IDENTITY CASCADE"""
     )
+    # Generated assets are keyed by content hash, so leftovers from one test would look
+    # like "already generated" to the next.
+    for d in (Path(os.environ["GENERATED_DIR"]), Path(os.environ["UPLOADS_DIR"])):
+        shutil.rmtree(d, ignore_errors=True)
+        d.mkdir(parents=True, exist_ok=True)
     # Keep the signed-in test admin (and its session) alive across cleans.
     await app.state.pool.execute("DELETE FROM users WHERE username <> $1", TEST_ADMIN)
 
