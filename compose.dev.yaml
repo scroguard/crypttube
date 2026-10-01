@@ -1,5 +1,6 @@
-# Development overrides, applied automatically by `docker compose up`.
-# For a production-style run use: docker compose -f compose.yaml up -d
+# Development overrides (opt-in): docker compose -f compose.yaml -f compose.dev.yaml up -d
+# or set COMPOSE_FILE=compose.yaml:compose.dev.yaml in .env. Never applied automatically,
+# so deploying compose.yaml alone (e.g. from a stack manager) always gets production.
 services:
   api:
     build:

@@ -7,22 +7,30 @@ outbound calls, no external fonts/CDNs.
 ## Running
 
 ```sh
-cp .env.example .env          # set POSTGRES_PASSWORD, MEDIA_ROOT, PUID/PGID (`id -u`/`id -g`)
-docker compose up -d --build  # dev mode: Vite + API with auto-reload
+cp .env.example .env          # set POSTGRES_PASSWORD, MEDIA_ROOT, GENERATED_ROOT, PUID/PGID
+docker compose up -d --build  # production: compose.yaml only
 ```
 
 Open http://localhost:8420. On first run you're asked to create the admin account; then
 add a library under **Admin → Libraries** (paths are inside the container, under `/media`).
 
-Production-style: `docker compose -f compose.yaml up -d --build`. Only the `web` service
-(nginx serving the built app and proxying `/api`) is published; the API and database
-are internal. In dev, the API is also reachable directly on `127.0.0.1:${API_PORT:-8421}`.
+Only the `web` service (nginx serving the built app and proxying `/api`) is published;
+the API and database are internal. `compose.yaml` is self-contained, so stack managers
+(Dockhand, Portainer, …) can deploy it directly from the repo.
+
+**Development** is opt-in via `compose.dev.yaml` (Vite with hot reload, API/worker
+auto-reload with source mounted, API also on `127.0.0.1:${API_PORT:-8421}`):
+
+```sh
+docker compose -f compose.yaml -f compose.dev.yaml up -d --build
+# or put COMPOSE_FILE=compose.yaml:compose.dev.yaml in .env and use plain `docker compose`
+```
 
 Tests:
 
 ```sh
-docker compose run --rm api pytest                       # backend (134 tests)
-docker compose run --rm web npx vitest run               # frontend unit tests
+docker compose run --rm api pytest                       # backend (134 tests; needs the dev compose)
+docker compose run --rm web npx vitest run               # frontend unit tests (dev compose)
 docker compose run --rm api python -m scripts.bench_browse   # list API on 200k scenes
 scripts/e2e.sh                                           # Playwright, isolated stack
 ```
