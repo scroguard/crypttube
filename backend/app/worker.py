@@ -187,9 +187,8 @@ async def main() -> None:
     watcher = LibraryWatcher(pool, polling=settings.watcher_polling,
                              quiet_seconds=settings.watcher_quiet_seconds,
                              max_wait_seconds=settings.watcher_max_wait_seconds)
-    await watcher.reload()
-
     reload_requested = asyncio.Event()
+    reload_requested.set()  # initial watcher setup runs inside reload_loop, off the job loop's path
     listener = await asyncpg.connect(**settings.db_params())
     await listener.add_listener(jobs.NOTIFY_CHANNEL, lambda *_: wake.set())
     await listener.add_listener(LIBRARIES_CHANNEL, lambda *_: reload_requested.set())
@@ -202,7 +201,10 @@ async def main() -> None:
                 w.cancel()
             if reload_requested.is_set() and not stop.is_set():
                 reload_requested.clear()
-                await watcher.reload()
+                try:
+                    await watcher.reload()
+                except Exception:
+                    log.exception("watcher reload failed")
 
     log.info("worker ready")
     try:

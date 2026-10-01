@@ -195,6 +195,8 @@ export interface Library {
   watch: boolean;
   create_folder_galleries: boolean;
   exclude_patterns: string[];
+  watch_state: "starting" | "active" | "error" | null;
+  watch_error: string | null;
   created_at: string;
 }
 

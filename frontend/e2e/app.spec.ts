@@ -56,6 +56,7 @@ test("admin adds a library and it gets indexed", async () => {
   await expect(page.getByLabel("Library path")).toHaveValue("/media/lib");
   await page.getByRole("button", { name: "Add library" }).click();
   await expect(page.getByTestId("library")).toContainText("/media/lib");
+  await expect(page.getByTestId("watch-state")).toHaveText("Watching");
   await expect(page.getByText(/Queued job #\d+/)).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/02-libraries.png` });
 

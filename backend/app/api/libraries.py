@@ -14,7 +14,7 @@ from app.worker import LIBRARIES_CHANNEL
 
 router = APIRouter(prefix="/libraries", tags=["libraries"])
 
-COLUMNS = "id, path, enabled, watch, create_folder_galleries, exclude_patterns, created_at"
+COLUMNS = "id, path, enabled, watch, create_folder_galleries, exclude_patterns, watch_state, watch_error, created_at"
 
 
 class LibraryIn(BaseModel):

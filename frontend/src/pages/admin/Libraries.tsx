@@ -9,7 +9,12 @@ import { ErrorBox, Spinner, Toggle } from "../../components/ui";
 import AdminNav from "./AdminNav";
 
 export default function Libraries() {
-  const libs = useQuery({ queryKey: ["libraries"], queryFn: () => api<Library[]>("/libraries") });
+  const libs = useQuery({
+    queryKey: ["libraries"],
+    queryFn: () => api<Library[]>("/libraries"),
+    // Watcher startup happens in the background; poll until it settles.
+    refetchInterval: (q) => (q.state.data?.some((l) => l.watch && l.watch_state !== "active" && l.watch_state !== "error") ? 2000 : false),
+  });
   const [path, setPath] = useState("/media/");
   const [notice, setNotice] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
@@ -48,7 +53,9 @@ export default function Libraries() {
           {libs.data.map((lib) => (
             <li key={lib.id} className="card p-4" data-testid="library">
               <div className="flex flex-wrap items-center gap-2">
-                <code className="mr-auto break-all text-sm">{lib.path}</code>
+                <code className="break-all text-sm">{lib.path}</code>
+                <WatchBadge lib={lib} />
+                <span className="mr-auto" />
                 <button className="btn-ghost py-1" onClick={() => scan.mutate({ id: lib.id }, { onSuccess: queued })}>Scan</button>
                 <button className="btn-ghost py-1" onClick={() => setScanIn(lib)}>Scan folder…</button>
                 <button className="btn-danger py-1" onClick={() => confirm(`Remove ${lib.path}? Indexed metadata for it is deleted; files are untouched.`) && del.mutate(lib.id)}>Remove</button>
@@ -58,6 +65,9 @@ export default function Libraries() {
                 <Toggle checked={lib.watch} onChange={(v) => patch.mutate({ id: lib.id, watch: v })} label="Watch for changes" />
                 <Toggle checked={lib.create_folder_galleries} onChange={(v) => patch.mutate({ id: lib.id, create_folder_galleries: v })} label="Folder galleries" />
               </div>
+              {lib.watch && lib.watch_state === "error" && lib.watch_error && (
+                <p className="mt-2 text-xs text-red-300">Change watching is off for this library: {lib.watch_error}. Scans still work.</p>
+              )}
               <ExcludeEditor lib={lib} onSave={(patterns) => patch.mutate({ id: lib.id, exclude_patterns: patterns })} />
             </li>
           ))}
@@ -87,6 +97,19 @@ export default function Libraries() {
         />
       )}
     </div>
+  );
+}
+
+function WatchBadge({ lib }: { lib: Library }) {
+  if (!lib.enabled || !lib.watch) return null;
+  if (lib.watch_state === "active") return <span className="chip bg-emerald-950 text-emerald-300" data-testid="watch-state">Watching</span>;
+  if (lib.watch_state === "error")
+    return <span className="chip bg-red-950 text-red-300" data-testid="watch-state" title={lib.watch_error ?? ""}>Watch failed</span>;
+  return (
+    <span className="chip bg-amber-950 text-amber-300" data-testid="watch-state"
+          title="Registering every folder for change notifications; scans and other jobs keep running meanwhile">
+      Starting watcher…
+    </span>
   );
 }
 

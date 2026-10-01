@@ -108,49 +108,117 @@ class _Handler(FileSystemEventHandler):
             self.emit(self.library_id, self._dir_for(src, event.is_directory, removed))
 
 
+WATCH_LIMIT_HINT = ("too many folders for the kernel's inotify watch limit; raise "
+                    "fs.inotify.max_user_watches on the host or set WATCHER_POLLING=true")
+
+
+def _inotify_fds() -> set[int]:
+    """This process's open inotify descriptors (Linux; empty elsewhere)."""
+    fds = set()
+    try:
+        for name in os.listdir("/proc/self/fd"):
+            try:
+                if os.readlink(f"/proc/self/fd/{name}") == "anon_inode:inotify":
+                    fds.add(int(name))
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return fds
+
+
+def _stop_observer(observer) -> None:
+    try:
+        observer.stop()
+        observer.join(timeout=5)
+    except Exception:  # never started, or already dead
+        pass
+
+
 class LibraryWatcher:
+    """One watchdog observer per watched library.
+
+    Starting an inotify observer registers a watch on every folder of the library,
+    synchronously. That can take minutes on a big tree or a network mount, so it runs
+    in a worker thread: the job loop keeps running meanwhile. Reloads are incremental
+    (only libraries that changed are restarted), and a library that can't be watched
+    is reported in library_paths.watch_state/watch_error instead of taking the worker down.
+    """
+
     def __init__(self, pool: asyncpg.Pool, *, polling: bool = False,
                  quiet_seconds: float = 5, max_wait_seconds: float = 60):
         self.pool = pool
         self.polling = polling
         self.debouncer = Debouncer(quiet_seconds, max_wait_seconds)
-        self._observer = None
+        self._observers: dict[int, tuple[str, object]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._roots: dict[int, str] = {}
+        self._lock = asyncio.Lock()
 
     def _emit(self, library_id: int, directory: str) -> None:
         # Called on watchdog's thread.
         self._loop.call_soon_threadsafe(self.debouncer.add, library_id, directory)
 
-    async def reload(self) -> None:
-        """(Re)build watches from the library_paths table."""
-        self._loop = asyncio.get_running_loop()
-        self.stop()
-        rows = await self.pool.fetch(
-            "SELECT id, path FROM library_paths WHERE enabled AND watch ORDER BY id"
-        )
-        self._roots = {r["id"]: r["path"].rstrip("/") for r in rows}
-        if not rows:
-            return
+    def _start(self, library_id: int, path: str) -> tuple[object | None, str | None]:
+        """Runs in a thread. Returns (observer, None) or (None, error message)."""
+        if not os.path.isdir(path):
+            return None, "library path is not available"
         observer = PollingObserver(timeout=10) if self.polling else Observer()
-        for r in rows:
-            if not os.path.isdir(r["path"]):
-                log.warning("not watching %s: path unavailable", r["path"])
-                continue
-            try:
-                observer.schedule(_Handler(r["id"], r["path"], self._emit), r["path"], recursive=True)
-            except OSError as e:  # typically inotify watch limit
-                log.error("cannot watch %s: %s (raise fs.inotify.max_user_watches "
-                          "or set WATCHER_POLLING=true)", r["path"], e)
-        observer.start()
-        self._observer = observer
-        log.info("watching %d librar%s", len(rows), "y" if len(rows) == 1 else "ies")
+        before = _inotify_fds()
+        try:
+            observer.schedule(_Handler(library_id, path, self._emit), path, recursive=True)
+            observer.start()
+        except OSError as e:
+            _stop_observer(observer)
+            # watchdog opens an inotify descriptor and adds watches folder by folder; when
+            # that fails part-way it never closes the descriptor, so the watches already
+            # added stay held. The limit is per host user, so the leak would break watching
+            # for every other library (and container) running as the same user.
+            # Closing the orphaned descriptor releases all of its watches.
+            for fd in _inotify_fds() - before:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            return None, WATCH_LIMIT_HINT if e.errno == 28 else str(e)
+        return observer, None
+
+    async def reload(self) -> None:
+        """Bring running observers in line with library_paths (enabled AND watch)."""
+        self._loop = asyncio.get_running_loop()
+        async with self._lock:
+            rows = await self.pool.fetch("SELECT id, path FROM library_paths WHERE enabled AND watch ORDER BY id")
+            wanted = {r["id"]: r["path"].rstrip("/") for r in rows}
+            self._roots = wanted
+
+            for lid in [lid for lid, (path, _) in self._observers.items() if wanted.get(lid) != path]:
+                _, observer = self._observers.pop(lid)
+                await asyncio.to_thread(_stop_observer, observer)
+            await self.pool.execute(
+                "UPDATE library_paths SET watch_state = NULL, watch_error = NULL "
+                "WHERE NOT (enabled AND watch) AND watch_state IS NOT NULL")
+
+            new = {lid: path for lid, path in wanted.items() if lid not in self._observers}
+            if new:
+                await self.pool.execute(
+                    "UPDATE library_paths SET watch_state = 'starting', watch_error = NULL WHERE id = ANY($1)",
+                    list(new))
+            for lid, path in new.items():
+                observer, error = await asyncio.to_thread(self._start, lid, path)
+                if observer is not None:
+                    self._observers[lid] = (path, observer)
+                else:
+                    log.error("cannot watch %s: %s", path, error)
+                await self.pool.execute(
+                    "UPDATE library_paths SET watch_state = $2, watch_error = $3 WHERE id = $1",
+                    lid, "active" if observer is not None else "error", error)
+            log.info("watching %d of %d librar%s", len(self._observers), len(wanted),
+                     "y" if len(wanted) == 1 else "ies")
 
     def stop(self) -> None:
-        if self._observer is not None:
-            self._observer.stop()
-            self._observer.join(timeout=5)
-            self._observer = None
+        for _, observer in self._observers.values():
+            _stop_observer(observer)
+        self._observers.clear()
 
     async def flush(self) -> int:
         """Enqueue scans for directories that have gone quiet. Returns jobs enqueued."""

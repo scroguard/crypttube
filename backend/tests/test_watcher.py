@@ -95,3 +95,142 @@ async def test_flush_root_means_full_scan(app, clean):
     w.debouncer.add(1, "/m/lib/sub")
     assert await w.flush() == 1
     assert await app.state.pool.fetchval("SELECT dedupe_key FROM jobs") == "scan:1"
+
+
+# --- observer lifecycle -----------------------------------------------------------
+
+import asyncio  # noqa: E402
+import os  # noqa: E402
+import tempfile  # noqa: E402
+
+import pytest  # noqa: E402
+
+from app import watcher as watcher_mod  # noqa: E402
+
+
+class FakeObserver:
+    """Stands in for watchdog's Observer; `behaviour(path)` runs inside start()."""
+    behaviour = staticmethod(lambda path: None)
+    started: list[str] = []
+
+    def __init__(self):
+        self.path = None
+
+    def schedule(self, handler, path, recursive):
+        self.path = path
+
+    def start(self):
+        FakeObserver.behaviour(self.path)
+        FakeObserver.started.append(self.path)
+
+    def stop(self):
+        pass
+
+    def join(self, timeout=None):
+        pass
+
+
+@pytest.fixture
+def fake_observer(monkeypatch):
+    FakeObserver.started = []
+    FakeObserver.behaviour = staticmethod(lambda path: None)
+    monkeypatch.setattr(watcher_mod, "Observer", FakeObserver)
+    return FakeObserver
+
+
+async def _libs(pool, n):
+    paths = [tempfile.mkdtemp(dir=os.environ["MEDIA_DIR"]) for _ in range(n)]
+    ids = [await pool.fetchval("INSERT INTO library_paths (path, watch) VALUES ($1, true) RETURNING id", p)
+           for p in paths]
+    return ids, paths
+
+
+async def _states(pool):
+    return {r["id"]: (r["watch_state"], r["watch_error"])
+            for r in await pool.fetch("SELECT id, watch_state, watch_error FROM library_paths")}
+
+
+async def test_slow_watch_setup_does_not_block_the_event_loop(app, clean, fake_observer):
+    """Regression: registering watches on a big/network tree ran on the event loop and
+    froze the job loop (queued jobs sat idle with nothing in the logs)."""
+    import time
+    fake_observer.behaviour = staticmethod(lambda path: time.sleep(0.6))
+    await _libs(app.state.pool, 1)
+    w = LibraryWatcher(app.state.pool)
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.02)
+            ticks += 1
+
+    t = asyncio.create_task(ticker())
+    await w.reload()
+    t.cancel()
+    assert ticks >= 10
+    w.stop()
+
+
+async def test_watch_limit_failure_is_reported_not_fatal(app, clean, fake_observer):
+    (bad, good), (bad_path, good_path) = await _libs(app.state.pool, 2)
+
+    def start(path):
+        if path == bad_path:
+            raise OSError(28, "inotify watch limit reached")
+
+    fake_observer.behaviour = staticmethod(start)
+    w = LibraryWatcher(app.state.pool)
+    await w.reload()  # must not raise
+    states = await _states(app.state.pool)
+    assert states[good] == ("active", None)
+    assert states[bad][0] == "error" and "max_user_watches" in states[bad][1]
+    assert fake_observer.started == [good_path]
+    w.stop()
+
+
+async def test_reload_is_incremental(app, clean, fake_observer):
+    (a, b), (pa, pb) = await _libs(app.state.pool, 2)
+    w = LibraryWatcher(app.state.pool)
+    await w.reload()
+    assert sorted(fake_observer.started) == sorted([pa, pb])
+    fake_observer.started.clear()
+
+    await app.state.pool.execute("UPDATE library_paths SET watch = false WHERE id = $1", b)
+    await w.reload()
+    assert fake_observer.started == []  # library a was not re-registered
+    states = await _states(app.state.pool)
+    assert states == {a: ("active", None), b: (None, None)}
+
+    await app.state.pool.execute("UPDATE library_paths SET watch = true WHERE id = $1", b)
+    await w.reload()
+    assert fake_observer.started == [pb]
+    w.stop()
+
+
+async def test_unavailable_path_is_reported(app, clean, fake_observer):
+    (lid,), (path,) = await _libs(app.state.pool, 1)
+    os.rmdir(path)
+    w = LibraryWatcher(app.state.pool)
+    await w.reload()
+    assert (await _states(app.state.pool))[lid] == ("error", "library path is not available")
+
+
+async def test_failed_watch_releases_its_inotify_descriptor(app, clean, fake_observer):
+    """Regression: a start that hit the watch limit part-way leaked the inotify
+    descriptor (and every watch on it), starving other libraries of watches."""
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    opened = []
+
+    def start(path):
+        opened.append(libc.inotify_init())  # what watchdog does before adding watches
+        raise OSError(28, "inotify watch limit reached")
+
+    fake_observer.behaviour = staticmethod(start)
+    await _libs(app.state.pool, 1)
+    before = watcher_mod._inotify_fds()
+    w = LibraryWatcher(app.state.pool)
+    await w.reload()
+    assert opened and opened[0] > 0
+    assert watcher_mod._inotify_fds() == before  # the orphaned descriptor was closed

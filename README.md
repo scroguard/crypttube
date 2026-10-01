@@ -96,8 +96,14 @@ marked missing; a library whose root is unavailable (unmounted drive) fails the 
 instead of marking everything missing; files modified in the last 10s are deferred to a
 delayed re-scan. Folders of images become galleries, as do `.zip`/`.cbz` archives.
 
-The watcher uses inotify. For network mounts, or libraries with more directories than
-`fs.inotify.max_user_watches`, set `WATCHER_POLLING=true`.
+The watcher uses inotify, which needs one watch per folder. Registering them happens in
+the background (jobs keep running) and can take a while on big or network-mounted
+libraries; each library card in **Admin → Libraries** shows *Starting watcher…*,
+*Watching*, or *Watch failed* with the reason. If a library has more folders than
+`fs.inotify.max_user_watches` (a per-host-user limit), raise it on the host, e.g.
+`sysctl -w fs.inotify.max_user_watches=1048576` (persist in `/etc/sysctl.d/`), or set
+`WATCHER_POLLING=true`. Note that inotify on NFS/SMB mounts only sees changes made through
+this host; for files added from other machines, use **Scan** / **Scan folder…**.
 
 ## Media delivery
 
