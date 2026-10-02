@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, type Query } from "../api/client";
 import { useWrite } from "../api/hooks";
+import DeleteMediaButton from "./DeleteMedia";
 import EntityPicker, { creator } from "./EntityPicker";
 import { ErrorBox } from "./ui";
 
@@ -45,6 +46,7 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
           <option value="none">No rating</option>
         </select>
         <button className="btn-ghost" onClick={() => run({ set: { organized: true } })}>Mark organized</button>
+        <DeleteMediaButton kind={kind} ids={ids} onDeleted={onDone} />
         {write.isPending && <span className="text-sm text-zinc-400">Applying…</span>}
         {write.isSuccess && !write.isPending && <span className="text-sm text-emerald-400">Done</span>}
         {write.isError && <ErrorBox error={write.error} />}

@@ -10,14 +10,14 @@ services:
     environment:
       SCAN_SETTLE_SECONDS: "1"
     volumes:
-      - ./frontend/e2e/media:/media:ro
+      - ./frontend/e2e/media:/media
   goonstreamer-worker:
     container_name: goonstreamer-e2e-worker
     environment:
       SCAN_SETTLE_SECONDS: "1"
       WATCHER_QUIET_SECONDS: "1"
     volumes:
-      - ./frontend/e2e/media:/media:ro
+      - ./frontend/e2e/media:/media
   goonstreamer-web:
     container_name: goonstreamer-e2e-web
     ports: !reset []

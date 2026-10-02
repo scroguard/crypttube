@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { api } from "../api/client";
 import { useDetail, useWrite } from "../api/hooks";
 import type { GalleryDetail as Gallery } from "../api/types";
 import { RefLinks } from "../components/Cards";
 import Chips from "../components/Chips";
+import DeleteMediaButton from "../components/DeleteMedia";
 import { ContentEditModal } from "../components/EditForms";
 import ImageBrowser from "../components/ImageBrowser";
 import { ErrorBox, Rating, Spinner } from "../components/ui";
@@ -14,6 +15,7 @@ export default function GalleryDetail() {
   const id = Number(useParams().id);
   const gallery = useDetail<Gallery>(`/galleries/${id}`);
   const [editing, setEditing] = useState(false);
+  const navigate = useNavigate();
   const rate = useWrite((rating: number | null) => api(`/galleries/${id}`, { method: "PATCH", json: { rating } }));
 
   if (gallery.isPending) return <Spinner className="mt-24" />;
@@ -34,6 +36,7 @@ export default function GalleryDetail() {
         </div>
         <Rating value={g.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} />
         {canEdit && <button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button>}
+        <DeleteMediaButton kind="galleries" ids={[id]} onDeleted={() => navigate("/galleries", { replace: true })} />
       </div>
       <div className="mb-4"><Chips items={g.tags} to="tags" /></div>
       {g.details && <p className="mb-4 whitespace-pre-line text-sm text-zinc-300">{g.details}</p>}

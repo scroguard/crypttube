@@ -9,14 +9,20 @@ details of the copies (so no rating or tag is lost whichever copy is kept), down
 list of extra copies, delete those outside the app, then run Maintenance -> Clean up.
 """
 
+import asyncio
+import filecmp
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict
 
-from app import counts
+from app import counts, jobs
 from app.api import browse
+from app.config import get_settings
+from app.deletion import DeleteError, delete_content
+
+JOB_KIND = "delete_duplicates"
 
 router = APIRouter(prefix="/duplicates", tags=["duplicates"])
 
@@ -126,6 +132,92 @@ async def combine(body: Combine, request: Request) -> dict:
             await _combine(conn, body.kind, ids)
     await counts.request_refresh(pool)
     return {"groups": len(groups)}
+
+
+def _identical(a: str, b: str) -> bool:
+    try:
+        return filecmp.cmp(a, b, shallow=False)
+    except OSError:
+        return False
+
+
+async def delete_extra_copy(pool, kind: str, content_id: int) -> dict:
+    """Delete one copy of a duplicated file. First its details are combined into the
+    other copies, and it is compared byte for byte with one that stays: the fingerprint
+    only looks at the ends of a file, and a deletion must not rest on that alone."""
+    table = TABLE[kind]
+    candidates = CANDIDATES.format(table=table)
+    rows = await pool.fetch(
+        f"""SELECT c.id, f.path FROM {candidates} AND (f.oshash, f.size) =
+                (SELECT f2.oshash, f2.size FROM files f2 JOIN {table} c2 ON c2.file_id = f2.id WHERE c2.id = $1)
+            ORDER BY f.id""", content_id)
+    target = next((r for r in rows if r["id"] == content_id), None)
+    others = [r for r in rows if r["id"] != content_id]
+    if target is None:
+        raise HTTPException(404, "not found")
+    if not others:
+        raise HTTPException(409, "this is the only copy left")
+    if not await asyncio.to_thread(_identical, target["path"], others[0]["path"]):
+        raise HTTPException(409, "the files are not identical byte for byte; nothing was deleted")
+    async with pool.acquire() as conn, conn.transaction():
+        await _combine(conn, kind, [r["id"] for r in rows])
+    result = await delete_content(pool, get_settings().generated_dir, table, [content_id], None)
+    if not result["deleted"]:
+        raise HTTPException(409, result["skipped"][0]["reason"] if result["skipped"] else "nothing was deleted")
+    return result
+
+
+class DeleteCopy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Kind
+    id: int
+
+
+@router.post("/delete")
+async def delete_copy(body: DeleteCopy, request: Request) -> dict:
+    try:
+        return await delete_extra_copy(request.app.state.pool, body.kind, body.id)
+    except DeleteError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+class DeleteExtras(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Kind
+
+
+@router.post("/delete-extras", status_code=202)
+async def delete_extras(body: DeleteExtras, request: Request) -> dict:
+    """Queue a job that deletes every extra copy (all but the first-indexed of each set)."""
+    return {"job_id": await jobs.enqueue(request.app.state.pool, JOB_KIND, {"kind": body.kind},
+                                         dedupe_key=f"{JOB_KIND}:{body.kind}")}
+
+
+async def run_delete_extras(pool, ctx, kind: str) -> str:
+    rows = await pool.fetch(
+        f"""SELECT array_agg(c.id ORDER BY f.id) AS ids FROM {CANDIDATES.format(table=TABLE[kind])}
+            GROUP BY f.oshash, f.size HAVING count(*) > 1""")
+    extras = [i for r in rows for i in r["ids"][1:]]
+    deleted = freed = different = failed = 0
+    for n, content_id in enumerate(extras, start=1):
+        if await ctx.cancelled():
+            break
+        try:
+            result = await delete_extra_copy(pool, kind, content_id)
+            deleted += 1
+            freed += result["bytes"]
+        except HTTPException as e:
+            if "not identical" in str(e.detail):
+                different += 1
+            else:
+                failed += 1
+        await ctx.progress(n / len(extras), f"{n}/{len(extras)} extra copies checked")
+    message = f"deleted {deleted} extra copies ({freed / 1_048_576:.1f} MB freed)"
+    if different:
+        message += f"; {different} kept because they are not identical byte for byte"
+    if failed:
+        message += f"; {failed} could not be deleted"
+    return message
 
 
 @router.get("/extra-copies.txt", response_class=PlainTextResponse)

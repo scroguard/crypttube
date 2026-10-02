@@ -32,7 +32,10 @@ x-backend: &backend
     # (login throttling is keyed on the real client address).
     FORWARDED_ALLOW_IPS: "*"
   volumes:
-    - ${MEDIA_ROOT:-./media}:/media:ro
+    # Read-write so admins can delete files (Delete buttons, duplicate removal). The app
+    # never modifies or moves a file, and deletes only on an admin's explicit request.
+    # Set MEDIA_MODE=ro to make deletion impossible; everything else works the same.
+    - ${MEDIA_ROOT:-./media}:/media:${MEDIA_MODE:-rw}
     # Thumbnails, scrub sprites, performer/studio/tag images. Rebuildable from the
     # media except uploaded entity images; back it up together with pgdata.
     - generated:/data/generated

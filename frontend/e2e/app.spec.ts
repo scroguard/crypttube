@@ -895,14 +895,61 @@ test("duplicates: same file under another name is found, details combined, list 
     const text = fs.readFileSync(await download.path(), "utf8");
     expect(text.trim().split("\n")).toHaveLength(1);
     expect(text).toContain("/media/lib/videos/Beach Day");
+
+    // delete the extra copy: the file goes, the original stays (with the combined details)
+    page.once("dialog", (d) => d.accept());
+    await group.getByRole("button", { name: "Delete /media/lib/videos/Beach Day (copy).mp4" }).click();
+    await expect(page.getByTestId("duplicate-group")).toHaveCount(0);
+    expect(fs.existsSync(copy)).toBe(false);
+    expect(fs.existsSync("e2e/media/lib/videos/Beach Day.mp4")).toBe(true);
+    await nav("Scenes").click();
+    await expect(page.getByTestId("total")).toHaveText("3 scenes");
   } finally {
     fs.rmSync(copy, { force: true });
   }
-  // clean up after ourselves so the library is back to three scenes
-  await page.goto("/admin/maintenance");
-  page.once("dialog", (d) => d.accept());
-  await page.getByTestId("cleanup").getByRole("button", { name: "Clean up now…" }).click();
-  await expect(page.getByTestId("cleanup-report")).toContainText("Removed 1 scenes", { timeout: 30_000 });
+});
+
+test("admin deletes media from disk: one scene from its page, images in bulk", async () => {
+  const video = "e2e/media/lib/videos/zz Delete Me.mp4";
+  const pics = ["e2e/media/lib/pics/zz-del-1.jpg", "e2e/media/lib/pics/zz-del-2.jpg"];
+  fs.copyFileSync("e2e/media/lib/videos/Night Drive.mkv", video.replace(".mp4", ".mkv"));
+  const mkv = video.replace(".mp4", ".mkv");
+  fs.copyFileSync("e2e/media/lib/pics/photo5.jpg", pics[0]);
+  fs.copyFileSync("e2e/media/lib/pics/photo6.jpg", pics[1]);
+  try {
+    await page.waitForTimeout(1500);
+    await page.goto("/admin/libraries");
+    await page.getByTestId("library").getByRole("button", { name: "Scan", exact: true }).click();
+    await expect(async () => {
+      await page.goto("/scenes?q=zz+Delete");
+      await expect(page.getByTestId("scene-card")).toHaveCount(1, { timeout: 3000 });
+    }).toPass({ timeout: 40_000 });
+
+    await page.getByTestId("scene-card").getByRole("link").first().click();
+    await expect(page.getByTestId("scene-title")).toHaveText("zz Delete Me");
+    // the edit dialog shows where the file lives
+    await page.getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByTestId("file-location")).toHaveText("/media/lib/videos/zz Delete Me.mkv");
+    await page.keyboard.press("Escape");
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page).toHaveURL(/\/scenes$/);
+    expect(fs.existsSync(mkv)).toBe(false);
+    await expect(page.getByTestId("total")).toHaveText("3 scenes");
+
+    await page.goto("/images?q=zz-del");
+    await expect(page.getByTestId("image-tile")).toHaveCount(2);
+    await page.getByRole("button", { name: "Select images" }).click();
+    await page.getByTestId("image-tile").nth(0).click();
+    await page.getByTestId("image-tile").nth(1).click();
+    page.once("dialog", (d) => d.accept());
+    await page.getByTestId("bulk-bar").getByRole("button", { name: "Delete files" }).click();
+    await expect(page.getByTestId("image-tile")).toHaveCount(0);
+    expect(pics.some((p) => fs.existsSync(p))).toBe(false);
+    expect(fs.existsSync("e2e/media/lib/pics/photo5.jpg")).toBe(true);
+  } finally {
+    for (const p of [mkv, ...pics]) fs.rmSync(p, { force: true });
+  }
 });
 
 test("content filters: a user hides a performer for themselves, then switches the filter off", async () => {

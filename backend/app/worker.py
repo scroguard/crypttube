@@ -16,6 +16,7 @@ import asyncpg
 from app import counts, generated, jobs, maintenance
 from app.config import Settings, get_settings
 from app.db import create_pool, migrate
+from app.deletion import DeleteError
 from app.media import ProbeError
 from app.scanner import ScanError, Scanner, ScanStats
 from app.watcher import LibraryWatcher, scan_dedupe_key
@@ -242,7 +243,15 @@ async def handle_maintenance(pool: asyncpg.Pool, settings: Settings, ctx: jobs.J
     return "; ".join(parts)
 
 
-HANDLERS = {"scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
+async def handle_delete_duplicates(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+    from app.api import duplicates
+    try:
+        return await duplicates.run_delete_extras(pool, ctx, payload["kind"])
+    except DeleteError as e:
+        raise ScanError(str(e)) from e
+
+
+HANDLERS = {"delete_duplicates": handle_delete_duplicates, "scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
             maintenance.CLEANUP_KIND: handle_cleanup, maintenance.JOB_KIND: handle_maintenance}
 
 SCHEDULE_CHECK_SECONDS = 60

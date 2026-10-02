@@ -8,7 +8,7 @@ services:
         INSTALL_DEV: "1"
     volumes:
       - ./backend:/app
-      - ${MEDIA_ROOT:-./media}:/media:ro
+      - ${MEDIA_ROOT:-./media}:/media:${MEDIA_MODE:-rw}
       - generated:/data/generated
       - uploads:/uploads
     ports:
@@ -22,7 +22,7 @@ services:
         INSTALL_DEV: "1"
     volumes:
       - ./backend:/app
-      - ${MEDIA_ROOT:-./media}:/media:ro
+      - ${MEDIA_ROOT:-./media}:/media:${MEDIA_MODE:-rw}
       - generated:/data/generated
       - uploads:/uploads
     command: ["watchfiles", "--filter", "python", "python -m app.worker", "app"]

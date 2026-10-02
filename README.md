@@ -57,7 +57,10 @@ production build in a separate compose project (`goon-e2e`) with its own databas
 never touches your data. Screenshots land in `frontend/test-results/screens/`.
 Behind HTTPS (reverse proxy with TLS), set `COOKIE_SECURE=true`.
 
-Media is mounted **read-only** at `/media`. Everything the app writes lives in three
+Media is mounted at `/media`. The app never changes or moves a file there; it deletes one
+only when an admin asks (Delete buttons, duplicate removal), which needs the mount to be
+writable (`MEDIA_MODE=rw`, the default) and `PUID` to have permission. `MEDIA_MODE=ro`
+makes deletion impossible. Everything the app writes lives in three
 Docker volumes: `pgdata` (database), `uploads` (users' own libraries) and `generated`
 (thumbnails, sprites, performer/studio/tag images, at `/data/generated`). Back up all
 three; `generated` is rebuildable from the media except uploaded entity images. The database has no published port, and the API
@@ -302,10 +305,15 @@ or network storage, lower the two concurrency values.
 Admin → Duplicates lists files with identical content under different names (scenes and
 images in global libraries; zip members and users' own libraries are not compared). It
 uses the fingerprint stored at index time (size + hash of the first and last 64 KiB), so
-it costs no disk reads. The media store is read-only, so the app deletes nothing:
-"Combine details" gives every copy the tags, performers and other details of the others,
-"Download list of extra copies" gives the paths to delete on the server, and
-Maintenance → Clean up then removes their entries.
+it costs no disk reads. "Combine details" gives every copy the tags, performers and other
+details of the others. "Delete" removes one copy, "Delete all extra copies" (a background
+job) removes all but the first-indexed copy of every set. Before any copy is deleted its
+details are combined into the ones that stay and it is compared byte for byte with one of
+them; a file that only shares the fingerprint is kept.
+
+Admins can also delete any scene, image or gallery in a global library from its page or
+from a selection (file, database entries and generated content go together). Users'
+own libraries are theirs to manage.
 
 ## Maintenance
 
@@ -350,7 +358,7 @@ Automated components must never be able to trigger each other indefinitely.
 Every new automated behaviour must preserve these rules:
 
 1. **Watcher output never re-enters watcher input.** The file watcher observes only
-   configured library paths under `/media`, which is mounted read-only. All generated
+   configured library paths under `/media`, where the app writes nothing (it only deletes, on an admin's request). All generated
    artifacts go to `/data/generated`, which is never a library path (enforced at
    library-path validation time: no library may be inside or contain the generated dir).
 2. **Events are debounced and deduplicated.** Filesystem events are coalesced over a

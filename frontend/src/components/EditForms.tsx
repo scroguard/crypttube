@@ -18,6 +18,18 @@ interface ContentLike {
   studio: Ref | null;
   performers: Ref[];
   tags: Ref[];
+  // Where it lives on disk (only sent to people allowed to edit it).
+  file?: { path?: string; zip_path?: string | null };
+  folder_path?: string | null;
+  zip_path?: string | null;
+}
+
+/** "archive.zip → member.jpg" for zip members, otherwise the plain path. */
+function locationOf(item: ContentLike): string | null {
+  const zip = item.file?.zip_path ?? item.zip_path;
+  const path = item.file?.path ?? item.folder_path;
+  if (zip && item.file?.path) return `${zip} → ${item.file.path}`;
+  return path ?? zip ?? null;
 }
 
 /** Edit dialog for scenes, galleries and images (fields shown depend on the kind). */
@@ -33,6 +45,7 @@ export function ContentEditModal({ kind, item, onClose }: {
   const [performers, setPerformers] = useState(ids(item.performers));
   const [tags, setTags] = useState(ids(item.tags));
   const save = useWrite((body: object) => api(`/${kind}/${item.id}`, { method: "PATCH", json: body }));
+  const location = locationOf(item);
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -47,6 +60,12 @@ export function ContentEditModal({ kind, item, onClose }: {
   return (
     <Modal title={`Edit ${kind.slice(0, -1).replace("gallerie", "gallery")}`} onClose={onClose} wide>
       <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
+        {location && (
+          <div className="sm:col-span-2">
+            <span className="label">{kind === "galleries" ? "Location" : "File"}</span>
+            <code className="block select-all break-all rounded-md bg-zinc-950 px-3 py-2 text-xs text-zinc-300" data-testid="file-location">{location}</code>
+          </div>
+        )}
         <div className="sm:col-span-2"><Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field></div>
         {kind !== "images" && <Field label="Release date"><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>}
         <Field label="Studio"><EntityPicker kind="studios" single value={studio} onChange={setStudio} onCreate={creator("studios")} /></Field>

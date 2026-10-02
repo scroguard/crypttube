@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 
-from app.api import (browse, duplicates, edit, entities, filters, groups, health, home, jobs, libraries, maintenance, media,
+from app.api import (browse, delete, duplicates, edit, entities, filters, groups, health, home, jobs, libraries, maintenance, media,
                      my_libraries, session, stash, users)
 from app.auth import require_admin, require_user
 from app.config import get_settings
@@ -40,7 +40,7 @@ ROUTES = [
     ((browse.router, entities.router, groups.router, media.router, edit.read_router, edit.router,
       my_libraries.router, home.router, filters.router),
      [Depends(require_user)]),
-    ((libraries.router, jobs.router, users.router, stash.router, maintenance.router, duplicates.router), [Depends(require_admin)]),
+    ((libraries.router, jobs.router, users.router, stash.router, maintenance.router, duplicates.router, delete.router), [Depends(require_admin)]),
 ]
 for routers, deps in ROUTES:
     for r in routers:

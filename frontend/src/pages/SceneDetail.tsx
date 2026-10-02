@@ -1,10 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { api } from "../api/client";
 import { useDetail, useWrite } from "../api/hooks";
 import type { Playback, SceneDetail as Scene } from "../api/types";
 import Chips from "../components/Chips";
+import DeleteMediaButton from "../components/DeleteMedia";
 import { ContentEditModal } from "../components/EditForms";
 import EntityPicker, { creator } from "../components/EntityPicker";
 import VideoPlayer from "../components/VideoPlayer";
@@ -16,6 +17,7 @@ export default function SceneDetail() {
   const scene = useDetail<Scene>(`/scenes/${id}`);
   const playback = useDetail<Playback>(`/scenes/${id}/playback`);
   const [editing, setEditing] = useState(false);
+  const navigate = useNavigate();
   const rate = useWrite((rating: number | null) => api(`/scenes/${id}`, { method: "PATCH", json: { rating } }));
   const assign = useWrite((body: object) => api(`/scenes/${id}`, { method: "PATCH", json: body }));
   const qc = useQueryClient();
@@ -72,6 +74,7 @@ export default function SceneDetail() {
             {rebuilding ? "Rebuilding previews…" : "Rebuild previews"}
           </button>
         )}
+        <DeleteMediaButton kind="scenes" ids={[id]} onDeleted={() => navigate("/scenes", { replace: true })} />
       </div>
       {regenerate.isError && <ErrorBox error={regenerate.error} className="mt-2" />}
 

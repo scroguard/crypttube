@@ -28,6 +28,8 @@ export default function Duplicates() {
     getNextPageParam: (last, pages) => (last.has_more ? pages.length * PAGE : undefined),
   });
   const combine = useWrite((id: number | null) => api<{ groups: number }>("/duplicates/combine", { json: { kind, id } }));
+  const remove = useWrite((id: number) => api("/duplicates/delete", { json: { kind, id } }));
+  const removeAll = useWrite(() => api<{ job_id: number }>("/duplicates/delete-extras", { json: { kind } }));
   const summary = list.data?.pages[0]?.summary;
   const groups = list.data?.pages.flatMap((p) => p.groups) ?? [];
   const s = summary?.[kind];
@@ -42,9 +44,8 @@ export default function Duplicates() {
       <h1 className="mb-1 text-xl font-semibold">Duplicates</h1>
       <p className="mb-4 text-sm text-zinc-400">
         Files with identical content under different names, found by the fingerprint taken when they were indexed.
-        The media store is read-only, so nothing is deleted here: combine the details so no copy holds anything the
-        others lack, download the list of extra copies, delete those on the server, then run
-        {" "}<Link to="/admin/maintenance" className="text-accent hover:underline">Maintenance → Clean up</Link>.
+        Deleting a copy first gives its tags, performers and other details to the copies that stay, and compares
+        the files byte for byte; a file that isn't truly identical is never deleted. Deletion is permanent.
       </p>
       <Tabs tabs={tabs} value={kind} onChange={setKind} />
       {list.isPending ? <Spinner /> : list.isError ? <ErrorBox error={list.error} /> : (
@@ -61,13 +62,22 @@ export default function Duplicates() {
                         onClick={() => confirm(`Combine the details of all ${s.groups} sets? Every copy gets the tags and performers of the others; empty fields are filled in.`) && combine.mutate(null)}>
                   Combine details for all
                 </button>
-                <a className="btn-primary" href={buildUrl("/duplicates/extra-copies.txt", { kind })} download>
+                <a className="btn-ghost" href={buildUrl("/duplicates/extra-copies.txt", { kind })} download>
                   Download list of extra copies
                 </a>
+                <button className="btn-danger" disabled={removeAll.isPending}
+                        onClick={() => confirm(`Delete all ${s.extra_copies} extra copies from disk? One copy of each set is kept (the one marked "Suggested to keep"). This cannot be undone.`) && removeAll.mutate(undefined)}>
+                  Delete all extra copies…
+                </button>
               </>
             )}
           </div>
-          {combine.error && <ErrorBox error={combine.error} className="mb-3" />}
+          {(combine.error || remove.error || removeAll.error) && <ErrorBox error={combine.error || remove.error || removeAll.error} className="mb-3" />}
+          {removeAll.isSuccess && (
+            <p className="mb-3 text-sm text-emerald-300" role="status">
+              Deleting in the background. Follow it under <Link to="/admin/jobs" className="underline">Jobs</Link>, then reload this page.
+            </p>
+          )}
           <ul className="space-y-4">
             {groups.map((g) => (
               <li key={`${g.oshash}-${g.size}`} className="card p-4" data-testid="duplicate-group">
@@ -106,6 +116,10 @@ export default function Duplicates() {
                             i.tags.length ? `${i.tags.length} tags` : null].filter(Boolean).join(" · ")}
                         </div>
                       </div>
+                      <button className="btn-danger shrink-0 py-1" disabled={remove.isPending} aria-label={`Delete ${i.path}`}
+                              onClick={() => confirm(`Delete this copy from disk?\n\n${i.path}\n\nIts details are kept on the other ${g.items.length > 2 ? "copies" : "copy"}. This cannot be undone.`) && remove.mutate(i.id)}>
+                        Delete
+                      </button>
                     </li>
                   ))}
                 </ul>
