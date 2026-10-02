@@ -33,6 +33,11 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
   useEscape(!!selected, () => setMode(false));   // Esc leaves select mode
   // "/images" takes the filters as they are; a gallery's list is selected by gallery id.
   const idsQuery: Query = path === "/images" ? query : { gallery_id: Number(path.split("/")[2]) };
+  // Adds to what is already selected, so pages can be gone through one by one.
+  const selectShown = () => {
+    setSelected((s) => new Set([...(s ?? []), ...list.items.filter((i) => (i as { can_edit?: boolean }).can_edit !== false).map((i) => i.id)]));
+    setNote(null);
+  };
   async function selectAllMatching() {
     const r = await fetchMatchingIds("images", idsQuery);
     setSelected(new Set(r.ids));
@@ -44,10 +49,16 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
         <div className="mb-2 flex items-center justify-end gap-2">
           {note && <span className="text-xs text-amber-400">{note}</span>}
           {selected && (
+          <>
+            <button className="btn-ghost" onClick={selectShown}
+                    title={`Add every image ${list.paging ? "on this page" : "shown so far"} to the selection`}>
+              {list.paging ? "Select this page" : "Select all shown"}
+            </button>
             <button className="btn-ghost" onClick={selectAllMatching} title="Select every image in this list, including ones not loaded yet">
               Select all matching
             </button>
-          )}
+          </>
+        )}
           <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => setMode(!selected)}>
             {selected ? "Done selecting" : "Select images"}
           </button>
@@ -60,7 +71,7 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
                     )} />
       {selected && selected.size > 0 && (
         <BulkBar kind="images" ids={[...selected]} onDone={() => setSelected(new Set())}
-                 onSelectAll={() => setSelected(new Set(list.items.map((i) => i.id)))} />
+                 onSelectAll={selectShown} />
       )}
       {/* In paged mode the lightbox steps through the current page only. */}
       {open !== null && (

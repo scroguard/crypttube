@@ -298,6 +298,17 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await expect(page.getByTestId("lightbox-counter")).toHaveText("1 / 10");
   await page.keyboard.press("Escape");
 
+  // "Select this page" takes just what is on screen, and adds up across pages
+  await page.getByRole("button", { name: "Select images" }).click();
+  await page.getByRole("button", { name: "Select this page" }).click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("10 selected");
+  await page.getByRole("button", { name: "Next ›" }).first().click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(5);
+  await page.getByRole("button", { name: "Select this page" }).click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("15 selected");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+
   // the choice is remembered, and applies to other lists too
   await page.reload();
   await expect(page.getByLabel("Items per page")).toHaveValue("10");

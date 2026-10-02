@@ -31,7 +31,7 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
       <div className="mx-auto flex max-w-[1920px] flex-wrap items-end gap-3">
         <div className="text-sm">
           <strong>{ids.length.toLocaleString()}</strong> selected
-          <button className="ml-2 text-xs text-zinc-400 underline" onClick={onSelectAll}>select all loaded</button>
+          <button className="ml-2 text-xs text-zinc-400 underline" onClick={onSelectAll}>select all shown</button>
           <button className="ml-2 text-xs text-zinc-400 underline" onClick={onDone}>clear</button>
         </div>
         <div className="w-64"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} placeholder="Tags…" /></div>

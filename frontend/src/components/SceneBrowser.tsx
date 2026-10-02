@@ -44,6 +44,11 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
 
   const [note, setNote] = useState<string | null>(null);
   useEscape(!!selected, () => { setSelected(null); setNote(null); });   // Esc leaves select mode
+  // Adds to what is already selected, so pages can be gone through one by one.
+  const selectShown = () => {
+    setSelected((s) => new Set([...(s ?? []), ...list.items.filter((i) => (i as { can_edit?: boolean }).can_edit !== false).map((i) => i.id)]));
+    setNote(null);
+  };
   async function selectAllMatching() {
     const r = await fetchMatchingIds("scenes", query);
     setSelected(new Set(r.ids));
@@ -74,9 +79,15 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
           </button>
         )}
         {selected && (
-          <button className="btn-ghost" onClick={selectAllMatching} title="Select every scene that matches the current search and filters">
+          <>
+          <button className="btn-ghost" onClick={selectShown}
+                    title={`Add every scene ${list.paging ? "on this page" : "shown so far"} to the selection`}>
+              {list.paging ? "Select this page" : "Select all shown"}
+            </button>
+            <button className="btn-ghost" onClick={selectAllMatching} title="Select every scene that matches the current search and filters">
             Select all matching
           </button>
+          </>
         )}
         {note && <span className="text-xs text-amber-400">{note}</span>}
         {!grouped && <PageSizeSelect />}
@@ -152,7 +163,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
                       render={(s) => <SceneCard scene={s} selected={selected?.has(s.id)} onToggle={selected ? toggle : undefined} />} />
       )}
       {selected && selected.size > 0 && (
-        <BulkBar kind="scenes" ids={[...selected]} onDone={() => setSelected(new Set())} onSelectAll={() => setSelected(new Set(list.items.map((s) => s.id)))} />
+        <BulkBar kind="scenes" ids={[...selected]} onDone={() => setSelected(new Set())} onSelectAll={selectShown} />
       )}
     </div>
   );
