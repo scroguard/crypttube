@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useDetail } from "../api/hooks";
 import type { ImageDetail, ImageItem } from "../api/types";
+import { formatBytes } from "../lib/format";
 import { releaseFocus } from "../lib/useEscape";
 import { ContentEditModal } from "./EditForms";
 
@@ -117,6 +118,15 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
                   className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-2xl text-white hover:bg-black/80">›</button>
         )}
       </div>
+      {detail && detail.id === image.id && detail.file?.path && (
+        <div className="flex flex-wrap items-center gap-x-3 px-4 py-1.5 text-xs text-zinc-400" data-testid="lightbox-file">
+          <span className="uppercase tracking-wide text-zinc-500">File</span>
+          <span className="select-all break-all font-mono">
+            {detail.file.zip_path ? `${detail.file.zip_path} → ${detail.file.path}` : detail.file.path}
+          </span>
+          <span>{formatBytes(detail.file.size)}</span>
+        </div>
+      )}
       {editing && detail && <ContentEditModal kind="images" item={detail} onClose={() => setEditing(false)} />}
     </div>
   );

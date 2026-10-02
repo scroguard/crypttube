@@ -210,6 +210,7 @@ test("gallery lightbox navigation", async () => {
   await expect(page.getByTestId("image-tile")).toHaveCount(12);
   await page.screenshot({ path: `${SHOTS}/08-gallery.png` });
   await page.getByTestId("image-tile").first().click();
+  await expect(page.getByTestId("lightbox-file")).toContainText("/media/lib/");   // where the file lives
   const box = page.getByTestId("lightbox");
   await expect(box).toBeVisible();
   await expect(page.getByTestId("lightbox-counter")).toHaveText("1 / 12");
