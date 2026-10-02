@@ -297,6 +297,16 @@ strong server raise those together with `SCAN_PROBE_CONCURRENCY` (files read at 
 default 4) and `GENERATE_CONCURRENCY` (scenes getting previews at once, default 2); on slow
 or network storage, lower the two concurrency values.
 
+## Duplicates
+
+Admin → Duplicates lists files with identical content under different names (scenes and
+images in global libraries; zip members and users' own libraries are not compared). It
+uses the fingerprint stored at index time (size + hash of the first and last 64 KiB), so
+it costs no disk reads. The media store is read-only, so the app deletes nothing:
+"Combine details" gives every copy the tags, performers and other details of the others,
+"Download list of extra copies" gives the paths to delete on the server, and
+Maintenance → Clean up then removes their entries.
+
 ## Maintenance
 
 Admin → Maintenance.

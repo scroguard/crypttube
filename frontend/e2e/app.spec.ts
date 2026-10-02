@@ -859,3 +859,48 @@ test("maintenance: check, clean up media deleted outside the app, run routine ma
     fs.rmSync(extra, { force: true });
   }
 });
+
+test("duplicates: same file under another name is found, details combined, list downloaded", async () => {
+  const copy = "e2e/media/lib/videos/Beach Day (copy).mp4";
+  fs.copyFileSync("e2e/media/lib/videos/Beach Day.mp4", copy);
+  try {
+    await page.waitForTimeout(1500);   // let the copy settle before it is scanned
+    await page.goto("/admin/libraries");
+    await page.getByTestId("library").getByRole("button", { name: "Scan", exact: true }).click();
+    await adminNav("Duplicates").click();
+    await expect(async () => {
+      await page.reload();
+      await expect(page.getByTestId("duplicate-group")).toHaveCount(1, { timeout: 3000 });
+    }).toPass({ timeout: 40_000 });
+    const group = page.getByTestId("duplicate-group");
+    await expect(group.getByTestId("duplicate-item")).toHaveCount(2);
+    await expect(group).toContainText("/media/lib/videos/Beach Day (copy).mp4");
+    await expect(page.getByTestId("duplicates-summary")).toContainText("1 sets of duplicates · 1 extra copies");
+    await expect(group).toContainText("Details match");
+    // rate one copy only: now the copies differ
+    const href = await group.getByRole("link").first().getAttribute("href");
+    const r = await page.request.patch(`/api${href}`, { data: { rating: 80 }, headers: { "X-Requested-With": "e2e" } });
+    expect(r.ok()).toBeTruthy();
+    await page.reload();
+    await expect(group).toContainText("Details differ");
+    await page.screenshot({ path: `${SHOTS}/20-duplicates.png` });
+    await group.getByRole("button", { name: "Combine details" }).click();
+    await expect(group).toContainText("Details match");
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("link", { name: "Download list of extra copies" }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("duplicate-scenes.txt");
+    const text = fs.readFileSync(await download.path(), "utf8");
+    expect(text.trim().split("\n")).toHaveLength(1);
+    expect(text).toContain("/media/lib/videos/Beach Day");
+  } finally {
+    fs.rmSync(copy, { force: true });
+  }
+  // clean up after ourselves so the library is back to three scenes
+  await page.goto("/admin/maintenance");
+  page.once("dialog", (d) => d.accept());
+  await page.getByTestId("cleanup").getByRole("button", { name: "Clean up now…" }).click();
+  await expect(page.getByTestId("cleanup-report")).toContainText("Removed 1 scenes", { timeout: 30_000 });
+});

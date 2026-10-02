@@ -9,6 +9,7 @@ export default function AdminNav() {
       <NavLink to="/admin/jobs" className={cls}>Jobs</NavLink>
       <NavLink to="/admin/users" className={cls}>Users</NavLink>
       <NavLink to="/admin/import" className={cls}>Import</NavLink>
+      <NavLink to="/admin/duplicates" className={cls}>Duplicates</NavLink>
       <NavLink to="/admin/maintenance" className={cls}>Maintenance</NavLink>
     </nav>
   );
