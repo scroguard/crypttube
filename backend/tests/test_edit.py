@@ -208,3 +208,28 @@ async def test_performer_image_in_lists(client, seed):
 async def test_entity_routes_do_not_shadow_others(client, seed):
     assert (await client.get("/api/scenes/1/image")).status_code == 404
     assert (await client.delete("/api/scenes/1")).status_code == 405
+
+
+async def test_assigned_summary_for_a_selection(app, client, seed, login_as):
+    ids = [r["id"] for r in await app.state.pool.fetch("SELECT id FROM scenes ORDER BY id")]
+    a, b, c = ids[:3]
+    ann = (await client.post("/api/performers", json={"name": "Assigned Ann"})).json()["id"]
+    bea = (await client.post("/api/performers", json={"name": "Assigned Bea"})).json()["id"]
+    tag = (await client.post("/api/tags", json={"name": "Assigned Tag"})).json()["id"]
+    await client.post("/api/scenes/bulk", json={"ids": [a, b, c], "performers": {"mode": "set", "ids": [ann]},
+                                                "tags": {"mode": "set", "ids": []}})
+    await client.post("/api/scenes/bulk", json={"ids": [a], "performers": {"mode": "add", "ids": [bea]},
+                                                "tags": {"mode": "add", "ids": [tag]}})
+    r = await client.post("/api/scenes/assigned", json={"ids": [a, b, c]})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"tags": [{"id": tag, "name": "Assigned Tag", "count": 1}],
+                        "performers": [{"id": ann, "name": "Assigned Ann", "count": 3},
+                                       {"id": bea, "name": "Assigned Bea", "count": 1}]}
+    assert (await client.post("/api/scenes/assigned", json={"ids": [b]})).json()["performers"] == [
+        {"id": ann, "name": "Assigned Ann", "count": 1}]
+    # a viewer for whom Bea is hidden sees neither her nor the scene she is in
+    vera = await login_as("vera-assigned", "viewer")
+    await client.put(f"/api/users/{vera.user_id}/restrictions", json={"performer_ids": [bea]})
+    assert (await vera.post("/api/scenes/assigned", json={"ids": [a, b, c]})).json()["performers"] == [
+        {"id": ann, "name": "Assigned Ann", "count": 2}]
+    assert (await client.post("/api/scenes/assigned", json={"ids": []})).status_code == 422

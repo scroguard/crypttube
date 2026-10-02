@@ -309,6 +309,26 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
 
+  // the bulk bar shows what a selection already has, and can remove it
+  await page.getByRole("button", { name: "Select images" }).click();
+  await page.getByRole("button", { name: "Select this page" }).click();
+  const bar = page.getByTestId("bulk-bar");
+  await bar.getByLabel("Tags…").pressSequentially("Paged Tag");
+  await bar.getByRole("option", { name: /Create/ }).click();
+  await bar.getByRole("button", { name: "Add tags" }).click();
+  await expect(bar.getByTestId("assigned-tags")).toContainText("Paged Tag");
+  await expect(bar.getByTestId("assigned-tags")).toContainText("all");
+  await page.getByTestId("image-tile").first().click();          // deselect one
+  await expect(bar).toContainText("9 selected");
+  await page.screenshot({ path: `${SHOTS}/09b-assigned.png` });
+  await bar.getByRole("button", { name: "Remove Paged Tag from the selection" }).click();
+  await expect(bar.getByTestId("assigned-tags")).toHaveCount(0);
+  await page.getByTestId("image-tile").first().click();          // the deselected one kept its tag
+  await expect(bar.getByTestId("assigned-tags")).toContainText("1/10");
+  await bar.getByRole("button", { name: "Remove Paged Tag from the selection" }).click();
+  await expect(bar.getByTestId("assigned-tags")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
   // the choice is remembered, and applies to other lists too
   await page.reload();
   await expect(page.getByLabel("Items per page")).toHaveValue("10");

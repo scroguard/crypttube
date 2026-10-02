@@ -256,6 +256,42 @@ for _k in KINDS:
                          summary=f"Bulk edit {_k}")
 
 
+class Selection(Body):
+    ids: list[int] = Field(min_length=1, max_length=10_000)
+
+
+async def assigned(kind_path: str, body: Selection, request: Request, acl: Acl) -> dict:
+    """What a selection already has: each tag and performer on any of the items, with how
+    many of the items carry it. Lets the bulk bar show (and remove) existing assignments."""
+    kind, _ = KINDS[kind_path]
+    out: dict = {}
+    for key, col, table, entity in (("tags", "tag_ids", "tags", "tag"), ("performers", "performer_ids", "performers", "performer")):
+        q = Q()
+        ids = q.p(body.ids)
+        content = " AND ".join([f"c.id = ANY({ids}::bigint[])", *visible(acl, kind, "c", q)])
+        ent = " AND ".join(["e.id = x.id", *visible(acl, entity, "e", q)])
+        rows = await request.app.state.pool.fetch(
+            f"""SELECT e.id, e.name, x.n AS count
+                FROM (SELECT unnest(c.{col}) AS id, count(*) AS n FROM {kind_path} c WHERE {content} GROUP BY 1) x
+                JOIN {table} e ON {ent}
+                ORDER BY x.n DESC, e.name COLLATE natural_sort""", *q.args)
+        out[key] = [dict(r) for r in rows]
+    return out
+
+
+def _assigned_route(kind_path: str):
+    async def route(body: Selection, request: Request, acl: Acl = Depends(get_acl)) -> dict:
+        return await assigned(kind_path, body, request, acl)
+    route.__name__ = f"assigned_{kind_path}"
+    return route
+
+
+for _k in KINDS:
+    # POST only because a selection can be thousands of ids; it changes nothing.
+    read_router.add_api_route(f"/{_k}/assigned", _assigned_route(_k), methods=["POST"],
+                              summary=f"Tags and performers already on a selection of {_k}")
+
+
 # ---------------------------------------------------------------------------
 # Playback state
 # ---------------------------------------------------------------------------
