@@ -968,9 +968,10 @@ test("duplicates: same file under another name is found, details combined, list 
     expect(text.trim().split("\n")).toHaveLength(1);
     expect(text).toContain("/media/lib/videos/Beach Day");
 
-    // delete the extra copy: the file goes, the original stays (with the combined details)
+    // each copy has its own Delete button; the set has one that removes all but one copy
+    await expect(group.getByRole("button", { name: "Delete /media/lib/videos/Beach Day (copy).mp4" })).toBeVisible();
     page.once("dialog", (d) => d.accept());
-    await group.getByRole("button", { name: "Delete /media/lib/videos/Beach Day (copy).mp4" }).click();
+    await group.getByRole("button", { name: "Delete 1 extra copy" }).click();
     await expect(page.getByTestId("duplicate-group")).toHaveCount(0);
     expect(fs.existsSync(copy)).toBe(false);
     expect(fs.existsSync("e2e/media/lib/videos/Beach Day.mp4")).toBe(true);

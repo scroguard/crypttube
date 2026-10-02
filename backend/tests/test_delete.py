@@ -157,3 +157,32 @@ async def test_delete_duplicate_copies(app, client, indexed):
     assert r.status_code == 409 and "only copy" in r.json()["detail"]
 
     assert (await client.post("/api/duplicates/delete-extras", json={"kind": "scene"})).status_code == 202
+
+
+async def test_delete_all_extra_copies_of_one_set(app, client, indexed):
+    root = indexed["root"]
+    (root / "other").mkdir()
+    for name in ("b.mp4", "c.mp4", "d.mp4"):
+        shutil.copy(root / "videos" / "h264.mp4", root / "other" / name)
+    shutil.copy(root / "videos" / "vp9.webm", root / "other" / "vp9 copy.webm")   # another set
+    await rescan(app)
+    groups = (await client.get("/api/duplicates")).json()["groups"]
+    assert sorted(len(g["items"]) for g in groups) == [2, 4]
+    four = next(g for g in groups if len(g["items"]) == 4)
+    keeper = next(i for i in four["items"] if i["keep"])
+    extra = next(i for i in four["items"] if not i["keep"])
+    await client.patch(f"/api/scenes/{extra['id']}", json={"rating": 40})
+
+    # asked through any copy of the set; the suggested keeper is the one that stays
+    r = await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": extra["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"deleted": 3, "bytes": 3 * four["size"], "kept": 0, "reason": None}
+    assert [os.path.exists(i["path"]) for i in four["items"]] == [i["keep"] for i in four["items"]]
+    assert (await client.get(f"/api/scenes/{keeper['id']}")).json()["rating"] == 40
+    # the other set is untouched
+    left = (await client.get("/api/duplicates")).json()["groups"]
+    assert len(left) == 1 and len(left[0]["items"]) == 2
+    assert (root / "other" / "vp9 copy.webm").exists()
+    assert (await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": 999999})).status_code == 404
+    again = await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": keeper["id"]})
+    assert again.json()["deleted"] == 0       # nothing left to delete in that set

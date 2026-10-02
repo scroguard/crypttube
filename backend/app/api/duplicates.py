@@ -187,6 +187,33 @@ async def delete_copy(body: DeleteCopy, request: Request) -> dict:
         raise HTTPException(409, str(e)) from e
 
 
+@router.post("/delete-set")
+async def delete_set(body: DeleteCopy, request: Request) -> dict:
+    """Delete every extra copy in the set that `id` belongs to, keeping the first-indexed
+    one ("Suggested to keep"). Copies not byte-identical to the keeper are left alone."""
+    pool = request.app.state.pool
+    table = TABLE[body.kind]
+    rows = await pool.fetch(
+        f"""SELECT c.id FROM {CANDIDATES.format(table=table)} AND (f.oshash, f.size) =
+                (SELECT f2.oshash, f2.size FROM files f2 JOIN {table} c2 ON c2.file_id = f2.id WHERE c2.id = $1)
+            ORDER BY f.id""", body.id)
+    if not rows:
+        raise HTTPException(404, "not found")
+    keeper, extras = rows[0]["id"], [r["id"] for r in rows[1:]]
+    deleted = freed = 0
+    kept: list[str] = []
+    for content_id in extras:
+        try:
+            result = await delete_extra_copy(pool, body.kind, content_id, keeper)
+            deleted += 1
+            freed += result["bytes"]
+        except DeleteError as e:
+            raise HTTPException(409, str(e)) from e
+        except HTTPException as e:
+            kept.append(str(e.detail))
+    return {"deleted": deleted, "bytes": freed, "kept": len(kept), "reason": kept[0] if kept else None}
+
+
 class DeleteExtras(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Kind

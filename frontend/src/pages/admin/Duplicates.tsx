@@ -29,6 +29,11 @@ export default function Duplicates() {
   });
   const combine = useWrite((id: number | null) => api<{ groups: number }>("/duplicates/combine", { json: { kind, id } }));
   const remove = useWrite((id: number) => api("/duplicates/delete", { json: { kind, id } }));
+  const removeSet = useWrite(async (id: number) => {
+    const r = await api<{ deleted: number; kept: number; reason: string | null }>("/duplicates/delete-set", { json: { kind, id } });
+    if (r.kept) throw new Error(`${r.deleted} deleted, ${r.kept} kept: ${r.reason}`);
+    return r;
+  });
   const removeAll = useWrite(() => api<{ job_id: number }>("/duplicates/delete-extras", { json: { kind } }));
   const summary = list.data?.pages[0]?.summary;
   const groups = list.data?.pages.flatMap((p) => p.groups) ?? [];
@@ -72,7 +77,7 @@ export default function Duplicates() {
               </>
             )}
           </div>
-          {(combine.error || remove.error || removeAll.error) && <ErrorBox error={combine.error || remove.error || removeAll.error} className="mb-3" />}
+          {(combine.error || remove.error || removeSet.error || removeAll.error) && <ErrorBox error={combine.error || remove.error || removeSet.error || removeAll.error} className="mb-3" />}
           {removeAll.isSuccess && (
             <p className="mb-3 text-sm text-emerald-300" role="status">
               Deleting in the background. Follow it under <Link to="/admin/jobs" className="underline">Jobs</Link>, then reload this page.
@@ -85,6 +90,10 @@ export default function Duplicates() {
                   <span className="font-medium">{g.items.length} copies</span>
                   <span className="text-zinc-400">{formatBytes(g.size)} each</span>
                   <span className="mr-auto" />
+                  <button className="btn-danger py-1" disabled={removeSet.isPending}
+                          onClick={() => confirm(`Delete ${g.items.length - 1} of these ${g.items.length} copies from disk? The one marked "Suggested to keep" stays, with the details of all of them. This cannot be undone.`) && removeSet.mutate(g.items[0].id)}>
+                    {removeSet.isPending && removeSet.variables === g.items[0].id ? "Deleting…" : `Delete ${g.items.length - 1} extra ${g.items.length === 2 ? "copy" : "copies"}`}
+                  </button>
                   {g.in_sync ? <span className="text-xs text-emerald-400">Details match</span> : (
                     <>
                       <span className="text-xs text-amber-300">Details differ</span>
