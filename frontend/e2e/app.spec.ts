@@ -934,3 +934,28 @@ test("content filters: a user hides a performer for themselves, then switches th
   await nav("Scenes").click();
   await expect(page.getByTestId("total")).toHaveText("3 scenes");
 });
+
+test("content filters: only show one performer's content", async () => {
+  await page.goto("/account");
+  const filters = page.getByTestId("content-filters");
+  await filters.getByRole("button", { name: "Remove Alice" }).click();     // no longer hidden
+  await filters.getByLabel("Apply my filters").check();
+  await filters.getByLabel("Add a performer to show…").pressSequentially("Ali");
+  await filters.getByRole("option", { name: "Alice" }).click();
+  await filters.getByRole("button", { name: "Save filters" }).click();
+  await expect(filters.getByRole("status")).toHaveText("Filters saved.");
+  await page.screenshot({ path: `${SHOTS}/22-only-show.png` });
+
+  await nav("Scenes").click();
+  await expect(page.getByTestId("scene-card").first()).toBeVisible();
+  await expect(page.getByTestId("total")).not.toHaveText("3 scenes");
+  for (const card of await page.getByTestId("scene-card").all()) await expect(card).toContainText("Alice");
+
+  // clear it again
+  await page.goto("/account");
+  await filters.getByRole("button", { name: "Remove Alice" }).click();
+  await filters.getByRole("button", { name: "Save filters" }).click();
+  await expect(filters.getByRole("status")).toHaveText("Filters saved.");
+  await nav("Scenes").click();
+  await expect(page.getByTestId("total")).toHaveText("3 scenes");
+});

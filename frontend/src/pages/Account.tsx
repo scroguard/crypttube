@@ -65,48 +65,66 @@ export default function Account() {
   );
 }
 
-interface FilterState { enabled: boolean; tags: { id: number; name: string }[]; performers: { id: number; name: string }[] }
+type Named = { id: number; name: string };
+interface FilterState { enabled: boolean; tags: Named[]; performers: Named[]; only_tags: Named[]; only_performers: Named[] }
+const LISTS = ["only_tags", "only_performers", "tags", "performers"] as const;
+type ListKey = (typeof LISTS)[number];
+const EMPTY: Record<ListKey, number[]> = { only_tags: [], only_performers: [], tags: [], performers: [] };
 
-/** Tags and performers this user doesn't want to see, anywhere in the app. */
+/** What this user wants to see: "only show" and "hide" lists of tags and performers. */
 function ContentFilters() {
   const q = useQuery({ queryKey: ["my-filters"], queryFn: () => api<FilterState>("/me/filters") });
   const [enabled, setEnabled] = useState(true);
-  const [tags, setTags] = useState<number[]>([]);
-  const [performers, setPerformers] = useState<number[]>([]);
+  const [ids, setIds] = useState(EMPTY);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
     if (!q.data) return;
     setEnabled(q.data.enabled);
-    setTags(q.data.tags.map((t) => t.id));
-    setPerformers(q.data.performers.map((p) => p.id));
+    setIds(Object.fromEntries(LISTS.map((k) => [k, q.data[k].map((x) => x.id)])) as Record<ListKey, number[]>);
   }, [q.data]);
-  const tagNames = useMemo(() => new Map(q.data?.tags.map((t) => [t.id, t.name])), [q.data]);
-  const performerNames = useMemo(() => new Map(q.data?.performers.map((p) => [p.id, p.name])), [q.data]);
+  const names = useMemo(() => ({
+    tags: new Map([...(q.data?.tags ?? []), ...(q.data?.only_tags ?? [])].map((t) => [t.id, t.name])),
+    performers: new Map([...(q.data?.performers ?? []), ...(q.data?.only_performers ?? [])].map((p) => [p.id, p.name])),
+  }), [q.data]);
   const save = useWrite((body: object) => api<FilterState>("/me/filters", { method: "PUT", json: body }));
-  const same = (a: number[], b: { id: number }[]) => a.length === b.length && b.every((x) => a.includes(x.id));
-  const dirty = !!q.data && (enabled !== q.data.enabled || !same(tags, q.data.tags) || !same(performers, q.data.performers));
+  const same = (a: number[], b: Named[]) => a.length === b.length && b.every((x) => a.includes(x.id));
+  const dirty = !!q.data && (enabled !== q.data.enabled || LISTS.some((k) => !same(ids[k], q.data[k])));
+  const picker = (key: ListKey, placeholder: string) => {
+    const kind = key.endsWith("tags") ? "tags" : "performers";
+    return (
+      <EntityPicker kind={kind} value={ids[key]} knownNames={names[kind]} placeholder={placeholder}
+                    onChange={(v) => { setIds({ ...ids, [key]: v }); setSaved(false); }} />
+    );
+  };
   return (
     <section className="card p-5" data-testid="content-filters">
       <h2 className="mb-1 font-semibold">Content filters</h2>
       <p className="mb-4 text-sm text-zinc-400">
-        Choose tags and performers you don't want to see. Anything with those tags (including the tags under them)
-        or featuring those performers disappears from every page for you only. Switch the filters off to see
+        Shape what you see, for you only. Tags include the tags under them. Switch the filters off to see
         everything again without losing your choices.
       </p>
       {q.isError && <ErrorBox error={q.error} />}
       <div className="space-y-3">
         <Toggle checked={enabled} onChange={(v) => { setEnabled(v); setSaved(false); }} label="Apply my filters" />
-        <Field label="Hide these tags">
-          <EntityPicker kind="tags" value={tags} onChange={(v) => { setTags(v); setSaved(false); }} knownNames={tagNames} placeholder="Add a tag to hide…" />
-        </Field>
-        <Field label="Hide these performers">
-          <EntityPicker kind="performers" value={performers} onChange={(v) => { setPerformers(v); setSaved(false); }} knownNames={performerNames} placeholder="Add a performer to hide…" />
-        </Field>
+        <h3 className="pt-2 text-sm font-medium">Only show</h3>
+        <p className="text-xs text-zinc-500">
+          If you choose anything here, you only see scenes, galleries and images that have at least one of these
+          tags or performers. Leave both empty to see everything.
+        </p>
+        <Field label="Only these tags">{picker("only_tags", "Add a tag to show…")}</Field>
+        <Field label="Only these performers">{picker("only_performers", "Add a performer to show…")}</Field>
+        <h3 className="pt-2 text-sm font-medium">Hide</h3>
+        <p className="text-xs text-zinc-500">Anything with these tags or featuring these performers disappears, even if it matches "Only show".</p>
+        <Field label="Hide these tags">{picker("tags", "Add a tag to hide…")}</Field>
+        <Field label="Hide these performers">{picker("performers", "Add a performer to hide…")}</Field>
         {saved && !dirty && <p className="text-sm text-emerald-400" role="status">Filters saved.</p>}
         {save.error && <ErrorBox error={save.error} />}
         <div className="flex justify-end">
           <button className="btn-primary" disabled={!dirty || save.isPending}
-                  onClick={() => save.mutate({ enabled, tag_ids: tags, performer_ids: performers }, { onSuccess: () => setSaved(true) })}>
+                  onClick={() => save.mutate({
+                    enabled, tag_ids: ids.tags, performer_ids: ids.performers,
+                    only_tag_ids: ids.only_tags, only_performer_ids: ids.only_performers,
+                  }, { onSuccess: () => setSaved(true) })}>
             {save.isPending ? "Saving…" : "Save filters"}
           </button>
         </div>

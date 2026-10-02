@@ -471,10 +471,15 @@ async def merge_tags(tag_id: int, body: TagMerge, request: Request, acl: Acl = D
             raise HTTPException(404, "some source tags do not exist")
         for table, fk in (("scene_tags", "scene_id"), ("gallery_tags", "gallery_id"),
                           ("image_tags", "image_id"), ("performer_tags", "performer_id"),
-                          ("user_hidden_tags", "user_id"), ("user_filter_tags", "user_id")):
+                          ("user_hidden_tags", "user_id")):
             await conn.execute(
                 f"""INSERT INTO {table} ({fk}, tag_id) SELECT {fk}, $1 FROM {table}
                     WHERE tag_id = ANY($2::bigint[]) ON CONFLICT DO NOTHING""", tag_id, sources)
+        await conn.execute(
+            """INSERT INTO user_filter_tags (user_id, tag_id, show_only)
+               SELECT DISTINCT ON (user_id) user_id, $1, show_only FROM user_filter_tags
+               WHERE tag_id = ANY($2::bigint[]) ORDER BY user_id, show_only
+               ON CONFLICT DO NOTHING""", tag_id, sources)
         # Children of the sources become children of the target, unless that would
         # create a cycle (a child that is also an ancestor of the target).
         await conn.execute(

@@ -26,14 +26,15 @@ async def test_filters_hide_content_for_that_user_only(app, client, indexed, log
     ids = await setup(app, client, indexed)
     s = indexed["scenes"]
     vera, other = await login_as("vera", "viewer"), await login_as("otto", "viewer")
-    assert (await vera.get("/api/me/filters")).json() == {"enabled": True, "tags": [], "performers": []}
+    assert (await vera.get("/api/me/filters")).json() == {
+        "enabled": True, "tags": [], "performers": [], "only_tags": [], "only_performers": []}
     assert await scene_ids(vera) == set(s.values())
 
     # a parent tag: hides what is tagged with the tags under it
     r = await vera.put("/api/me/filters", json={"tag_ids": [ids["outdoor"]], "performer_ids": [ids["bob"]]})
     assert r.status_code == 200, r.text
     assert r.json() == {"enabled": True, "tags": [{"id": ids["outdoor"], "name": "Outdoor"}],
-                        "performers": [{"id": ids["bob"], "name": "Bob"}]}
+                        "performers": [{"id": ids["bob"], "name": "Bob"}], "only_tags": [], "only_performers": []}
     assert await scene_ids(vera) == {s["vp9"]}
     assert (await vera.get(f"/api/scenes/{s['h264']}")).status_code == 404
     assert (await vera.get(f"/api/scenes/{s['h264']}/stream")).status_code == 404
@@ -100,3 +101,53 @@ async def test_filters_follow_deleted_and_merged_tags(app, client, indexed, logi
 
 async def test_requires_sign_in(anon):
     assert (await anon.get("/api/me/filters")).status_code == 401
+
+
+async def test_only_show(app, client, indexed, login_as):
+    ids = await setup(app, client, indexed)
+    s = indexed["scenes"]
+    vera, other = await login_as("vera", "viewer"), await login_as("otto", "viewer")
+
+    # a parent tag covers the tags under it
+    r = await vera.put("/api/me/filters", json={"only_tag_ids": [ids["outdoor"]]})
+    assert r.status_code == 200 and r.json()["only_tags"] == [{"id": ids["outdoor"], "name": "Outdoor"}]
+    assert await scene_ids(vera) == {s["h264"]}
+    assert (await vera.get(f"/api/scenes/{s['hevc']}")).status_code == 404
+    assert (await vera.get(f"/api/scenes/{s['hevc']}/stream")).status_code == 404
+    assert (await vera.get("/api/images")).json()["items"] == []
+    # tags and performers stay listed; their counts reflect what is shown
+    perf = {p["name"]: p["scene_count"] for p in (await vera.get("/api/performers")).json()["items"]}
+    assert perf == {"Ann": 1, "Bob": 0}
+    assert await scene_ids(other) == set(s.values())
+
+    # a tag OR a performer is enough
+    await vera.put("/api/me/filters", json={"only_tag_ids": [ids["beach"]], "only_performer_ids": [ids["bob"]]})
+    assert await scene_ids(vera) == {s["h264"], s["hevc"]}
+    # hiding still wins over showing
+    await vera.put("/api/me/filters", json={"only_performer_ids": [ids["ann"], ids["bob"]], "tag_ids": [ids["beach"]]})
+    assert await scene_ids(vera) == {s["hevc"]}
+    # not both at once for the same thing
+    r = await vera.put("/api/me/filters", json={"only_performer_ids": [ids["ann"]], "performer_ids": [ids["ann"]]})
+    assert r.status_code == 422
+    # switched off: everything again
+    await vera.put("/api/me/filters", json={"enabled": False, "only_performer_ids": [ids["bob"]]})
+    assert await scene_ids(vera) == set(s.values())
+    assert (await vera.get("/api/me/filters")).json()["only_performers"] == [{"id": ids["bob"], "name": "Bob"}]
+
+
+async def test_only_show_galleries_keep_their_images(app, client, indexed, login_as):
+    ids = await setup(app, client, indexed)
+    vera = await login_as("vera", "viewer")
+    galleries = (await client.get("/api/galleries")).json()["items"]
+    tagged, untagged = galleries[0], galleries[1]
+    await client.patch(f"/api/galleries/{tagged['id']}", json={"performer_ids": [ids["ann"]]})
+    one = next(iter(indexed["images"].values()))
+    await client.patch(f"/api/images/{one}", json={"performer_ids": [ids["bob"]]})
+    await vera.put("/api/me/filters", json={"only_performer_ids": [ids["ann"]]})
+    assert [g["id"] for g in (await vera.get("/api/galleries")).json()["items"]] == [tagged["id"]]
+    inside = (await vera.get(f"/api/galleries/{tagged['id']}/images")).json()["items"]
+    assert len(inside) == tagged["image_count"] > 0
+    assert (await vera.get(f"/api/galleries/{untagged['id']}")).status_code == 404
+    # an image matching by itself
+    await vera.put("/api/me/filters", json={"only_performer_ids": [ids["bob"]]})
+    assert [i["id"] for i in (await vera.get("/api/images")).json()["items"]] == [one]

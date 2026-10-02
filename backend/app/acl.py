@@ -9,7 +9,9 @@ Three layers, all enforced by `visible()`:
      tag count as hidden performers
    Admins are exempt from these.
    A user's own filters (user_filter_*, set on their account page) are applied the same
-   way, for every role including admins, while they have them switched on.
+   way, for every role including admins, while they have them switched on. They can
+   also choose the opposite: "only show" tags/performers, in which case content must
+   carry at least one of them (tags, performers and studios themselves stay listed).
 2. Library visibility (0008_user_libraries.sql): content of another user's library is
    visible only if that library is shared with the viewer or with everyone. This
    applies to admins too: private means private.
@@ -34,13 +36,18 @@ class Acl:
     performers: list[int] = field(default_factory=list)
     user_id: int | None = None
     libraries: list[int] = field(default_factory=list)  # user libraries hidden from this viewer
+    # The viewer's own "only show me" choice: when either is set, content must carry one
+    # of these tags or feature one of these performers.
+    only_tags: list[int] = field(default_factory=list)
+    only_performers: list[int] = field(default_factory=list)
     # Capabilities (not part of what is visible): editor/admin role, and upload right.
     editor: bool = False
     can_upload: bool = False
 
     @property
     def unrestricted(self) -> bool:
-        return not (self.tags or self.studios or self.performers or self.libraries)
+        return not (self.tags or self.studios or self.performers or self.libraries
+                    or self.only_tags or self.only_performers)
 
     @property
     def counts_viewer(self) -> int:
@@ -49,7 +56,8 @@ class Acl:
 
     def signature(self) -> tuple:
         """Viewers with equal signatures see exactly the same content."""
-        return tuple(self.tags), tuple(self.studios), tuple(self.performers), tuple(self.libraries)
+        return (tuple(self.tags), tuple(self.studios), tuple(self.performers), tuple(self.libraries),
+                tuple(self.only_tags), tuple(self.only_performers))
 
 
 # Internal view that sees everything (maintenance jobs, tests). Never given to a request.
@@ -76,9 +84,13 @@ async def load_acl(db: asyncpg.Pool | asyncpg.Connection, user_id: int, *, deny_
              ht(id) AS (
                (SELECT tag_id FROM user_hidden_tags WHERE user_id = $1 AND $2::boolean
                 UNION
-                SELECT tag_id FROM user_filter_tags, mine WHERE user_id = $1 AND mine.on)
+                SELECT tag_id FROM user_filter_tags, mine WHERE user_id = $1 AND mine.on AND NOT show_only)
                UNION
                SELECT tr.child_id FROM tag_relations tr JOIN ht ON tr.parent_id = ht.id),
+             ot(id) AS (
+               SELECT tag_id FROM user_filter_tags, mine WHERE user_id = $1 AND mine.on AND show_only
+               UNION
+               SELECT tr.child_id FROM tag_relations tr JOIN ot ON tr.parent_id = ot.id),
              hs(id) AS (
                SELECT studio_id FROM user_hidden_studios WHERE user_id = $1 AND $2::boolean
                UNION
@@ -87,13 +99,28 @@ async def load_acl(db: asyncpg.Pool | asyncpg.Connection, user_id: int, *, deny_
                   ARRAY(SELECT id FROM hs ORDER BY id) AS studios,
                   ARRAY(SELECT performer_id FROM user_hidden_performers WHERE user_id = $1 AND $2::boolean
                         UNION
-                        SELECT performer_id FROM user_filter_performers, mine WHERE user_id = $1 AND mine.on
+                        SELECT performer_id FROM user_filter_performers, mine
+                        WHERE user_id = $1 AND mine.on AND NOT show_only
                         UNION
                         SELECT performer_id FROM performer_tags WHERE tag_id IN (SELECT id FROM ht)
-                        ORDER BY 1) AS performers""",
+                        ORDER BY 1) AS performers,
+                  ARRAY(SELECT id FROM ot ORDER BY id) AS only_tags,
+                  ARRAY(SELECT performer_id FROM user_filter_performers, mine
+                        WHERE user_id = $1 AND mine.on AND show_only ORDER BY 1) AS only_performers""",
         user_id, deny_rules, filters,
     )
-    return Acl(list(row["tags"]), list(row["studios"]), list(row["performers"]), user_id, libraries)
+    return Acl(list(row["tags"]), list(row["studios"]), list(row["performers"]), user_id, libraries,
+               list(row["only_tags"]), list(row["only_performers"]))
+
+
+def _only_clause(acl: Acl, alias: str, q: Q) -> str | None:
+    """`alias` carries one of the viewer's "only show" tags or performers."""
+    parts = []
+    if acl.only_tags:
+        parts.append(f"{alias}.tag_ids && {q.p(acl.only_tags, 'acl_only_tags')}::bigint[]")
+    if acl.only_performers:
+        parts.append(f"{alias}.performer_ids && {q.p(acl.only_performers, 'acl_only_performers')}::bigint[]")
+    return f"({' OR '.join(parts)})" if parts else None
 
 
 def _content_clauses(acl: Acl, alias: str, q: Q) -> list[str]:
@@ -129,9 +156,16 @@ def visible(acl: Acl, kind: str, alias: str, q: Q) -> list[str]:
         out = [f"{alias}.id <> ALL({q.p(hidden, f'acl_{kind}s')}::bigint[])"] if hidden else []
         return out + _personal_clause(acl, kind, alias, q)
     if kind in ("scene", "gallery"):
-        return _content_clauses(acl, alias, q)
+        only = _only_clause(acl, alias, q)
+        return _content_clauses(acl, alias, q) + ([only] if only else [])
     if kind == "image":
         out = _content_clauses(acl, alias, q)
+        only = _only_clause(acl, alias, q)
+        if only:
+            # An image also counts when a gallery it belongs to matches, so a chosen
+            # gallery never opens empty.
+            out.append(f"""({only} OR EXISTS (SELECT 1 FROM gallery_images gi JOIN galleries g ON g.id = gi.gallery_id
+                           WHERE gi.image_id = {alias}.id AND {_only_clause(acl, "g", q)}))""")
         gallery = _content_clauses(acl, "g", q)
         if gallery:
             out.append(f"""NOT EXISTS (SELECT 1 FROM gallery_images gi JOIN galleries g ON g.id = gi.gallery_id

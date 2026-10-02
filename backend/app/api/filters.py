@@ -5,7 +5,7 @@ under it and everything tagged with them, and a filtered performer hides the con
 appear in. Unlike restrictions, the user sets these and can switch them off at any time.
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import counts
@@ -25,6 +25,9 @@ class Filters(BaseModel):
     enabled: bool = True
     tag_ids: list[int] = Field(default=[], max_length=2000)
     performer_ids: list[int] = Field(default=[], max_length=2000)
+    # The opposite: when any of these are set, only content with one of them is shown.
+    only_tag_ids: list[int] = Field(default=[], max_length=2000)
+    only_performer_ids: list[int] = Field(default=[], max_length=2000)
 
 
 async def _base_acl(pool, user: User):
@@ -41,9 +44,10 @@ async def _current(pool, user: User) -> dict:
         q = Q()
         conds = [f"x.user_id = {q.p(user.id)}", *visible(acl, kind, "e", q)]
         rows = await pool.fetch(
-            f"""SELECT e.id, e.name FROM {link} x JOIN {table} e ON e.id = x.{col}
+            f"""SELECT e.id, e.name, x.show_only FROM {link} x JOIN {table} e ON e.id = x.{col}
                 WHERE {' AND '.join(conds)} ORDER BY e.name COLLATE natural_sort""", *q.args)
-        out[table] = [dict(r) for r in rows]
+        out[table] = [{"id": r["id"], "name": r["name"]} for r in rows if not r["show_only"]]
+        out[f"only_{table}"] = [{"id": r["id"], "name": r["name"]} for r in rows if r["show_only"]]
     return out
 
 
@@ -56,18 +60,22 @@ async def get_filters(request: Request, user: User = Depends(require_user)) -> d
 async def set_filters(body: Filters, request: Request, user: User = Depends(require_user)) -> dict:
     pool = request.app.state.pool
     acl = await _base_acl(pool, user)
-    await require_visible(pool, acl, "tag", body.tag_ids)
-    await require_visible(pool, acl, "performer", body.performer_ids)
+    if set(body.tag_ids) & set(body.only_tag_ids) or set(body.performer_ids) & set(body.only_performer_ids):
+        raise HTTPException(422, "the same tag or performer can't be both hidden and shown exclusively")
+    await require_visible(pool, acl, "tag", body.tag_ids + body.only_tag_ids)
+    await require_visible(pool, acl, "performer", body.performer_ids + body.only_performer_ids)
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
             """INSERT INTO user_settings (user_id, filters_enabled) VALUES ($1, $2)
                ON CONFLICT (user_id) DO UPDATE SET filters_enabled = EXCLUDED.filters_enabled, updated_at = now()""",
             user.id, body.enabled)
-        for (_kind, _table, link, col), ids in zip(KINDS, (body.tag_ids, body.performer_ids)):
+        for (_kind, _table, link, col), hide, only in zip(
+                KINDS, (body.tag_ids, body.performer_ids), (body.only_tag_ids, body.only_performer_ids)):
             await conn.execute(f"DELETE FROM {link} WHERE user_id = $1", user.id)
-            await conn.execute(
-                f"INSERT INTO {link} (user_id, {col}) SELECT $1, unnest($2::bigint[]) ON CONFLICT DO NOTHING",
-                user.id, ids)
+            for ids, flag in ((hide, False), (only, True)):
+                await conn.execute(
+                    f"""INSERT INTO {link} (user_id, {col}, show_only) SELECT $1, unnest($2::bigint[]), $3
+                        ON CONFLICT DO NOTHING""", user.id, ids, flag)
     # Counts shown next to tags/performers are cached per viewer.
     await counts.refresh_viewer(pool, user.id, not user.is_admin)
     return await _current(pool, user)

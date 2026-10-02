@@ -340,7 +340,9 @@ every list/detail query; hidden items 404 and don't appear in counts.
 Each user can also set their own **content filters** on the Account page: tags and
 performers they don't want to see. These are applied exactly like restrictions (a tag
 covers the tags under it), for that user only and for every role, and can be switched off
-without losing the selection.
+without losing the selection. The opposite is there too: with "Only show" tags or
+performers chosen, a user sees only scenes, galleries and images that have at least one
+of them (hiding wins when both apply).
 
 ## Design invariants: no feedback loops
 
