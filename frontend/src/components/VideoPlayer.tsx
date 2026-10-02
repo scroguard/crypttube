@@ -26,6 +26,11 @@ function saveResume(sceneId: number, time: number | null, keepalive = false) {
   }).catch(() => undefined);
 }
 
+type WebkitDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };
+type WebkitElement = HTMLElement & { webkitRequestFullscreen?: () => void };
+type WebkitVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+const fullscreenElement = () => document.fullscreenElement ?? (document as WebkitDocument).webkitFullscreenElement ?? null;
+
 export default function VideoPlayer({ sceneId, playback, poster, resumeTime }: {
   sceneId: number; playback: Playback; poster: string; resumeTime: number | null;
 }) {
@@ -89,9 +94,13 @@ export default function VideoPlayer({ sceneId, playback, poster, resumeTime }: {
   }, [sceneId]);
 
   useEffect(() => {
-    const onFs = () => setFullscreen(document.fullscreenElement === container.current);
+    const onFs = () => setFullscreen(fullscreenElement() === container.current);
     document.addEventListener("fullscreenchange", onFs);
-    return () => document.removeEventListener("fullscreenchange", onFs);
+    document.addEventListener("webkitfullscreenchange", onFs);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFs);
+      document.removeEventListener("webkitfullscreenchange", onFs);
+    };
   }, []);
 
   // Auto-hide controls while playing.
@@ -122,8 +131,22 @@ export default function VideoPlayer({ sceneId, playback, poster, resumeTime }: {
   }, []);
 
   const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else container.current?.requestFullscreen().catch(() => undefined);
+    // Phones differ: iPhone Safari has no fullscreen for page elements at all, only its
+    // own video player (webkitEnterFullscreen on the <video>); older iPad Safari has the
+    // prefixed API. Use whichever exists, the standard one first.
+    const doc = document as WebkitDocument;
+    const box = container.current as WebkitElement | null;
+    const v = video.current as WebkitVideo | null;
+    if (fullscreenElement()) {
+      if (document.exitFullscreen) document.exitFullscreen().catch(() => undefined);
+      else doc.webkitExitFullscreen?.();
+    } else if (box?.requestFullscreen) {
+      box.requestFullscreen().catch(() => v?.webkitEnterFullscreen?.());
+    } else if (box?.webkitRequestFullscreen) {
+      box.webkitRequestFullscreen();
+    } else {
+      v?.webkitEnterFullscreen?.();
+    }
   }, []);
 
   function choose(next: Source) {

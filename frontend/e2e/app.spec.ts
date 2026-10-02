@@ -1007,3 +1007,23 @@ test("content filters: only show one performer's content", async () => {
   await nav("Scenes").click();
   await expect(page.getByTestId("total")).toHaveText("3 scenes");
 });
+
+test("fullscreen on phones: falls back to the browser's own video fullscreen", async () => {
+  await nav("Scenes").click();
+  await page.getByTestId("scene-card").getByRole("link").first().click();
+  const player = page.getByTestId("player");
+  await expect(player).toBeVisible();
+  // iPhone Safari: no element fullscreen at all, only webkitEnterFullscreen on the video
+  await page.evaluate(() => {
+    const w = window as unknown as { __nativeFs: number };
+    w.__nativeFs = 0;
+    for (const name of ["requestFullscreen", "webkitRequestFullscreen", "webkitRequestFullScreen"]) {
+      Object.defineProperty(Element.prototype, name, { value: undefined, configurable: true });
+    }
+    (HTMLVideoElement.prototype as unknown as { webkitEnterFullscreen: () => void }).webkitEnterFullscreen = () => { w.__nativeFs += 1; };
+  });
+  await player.hover();
+  await player.getByRole("button", { name: "Fullscreen" }).click();
+  expect(await page.evaluate(() => (window as unknown as { __nativeFs: number }).__nativeFs)).toBe(1);
+  await page.reload();   // drop the stubs
+});
