@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import type { Query } from "../api/client";
 import { useInfiniteList, useMe } from "../api/hooks";
 import type { ImageItem } from "../api/types";
@@ -19,6 +19,11 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
   const [open, setOpen] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number> | null>(selecting ? new Set() : null);
   const [note, setNote] = useState<string | null>(null);
+  // Follow the parent's select mode without remounting (which would lose the current page).
+  useEffect(() => {
+    if (selecting === undefined) return;
+    setSelected((s) => (selecting ? s ?? new Set() : null));
+  }, [selecting]);
   const toggle = useCallback((id: number) => setSelected((s) => {
     const next = new Set(s);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -69,6 +74,20 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
                       <ImageTile image={img} onOpen={() => setOpen(i)}
                                  selected={selected?.has(img.id)} onToggle={selected ? toggle : undefined} />
                     )} />
+      {/* The same selection buttons below a page, so they're at hand after scrolling down. */}
+      {canCreate && list.paging && list.items.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-2" data-testid="select-bottom">
+          <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => setMode(!selected)}>
+            {selected ? "Done selecting" : "Select images"}
+          </button>
+          {selected && (
+            <>
+              <button className="btn-ghost" onClick={selectShown}>Select this page</button>
+              <button className="btn-ghost" onClick={selectAllMatching}>Select all matching</button>
+            </>
+          )}
+        </div>
+      )}
       {selected && selected.size > 0 && (
         <BulkBar kind="images" ids={[...selected]} onDone={() => setSelected(new Set())}
                  onSelectAll={selectShown} />

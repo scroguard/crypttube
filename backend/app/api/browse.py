@@ -33,8 +33,11 @@ ThumbWidth = Literal[160, 320, 640, 1280]
 
 class ListParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    limit: int = Field(60, ge=1, le=200)
+    limit: int = Field(60, ge=1, le=1000)
     cursor: str | None = None
+    # Jump straight to a page (rows to skip from the start). Scrolling uses the cursor,
+    # which stays fast at any depth; an offset costs a scan of the rows it skips.
+    offset: int = Field(0, ge=0, le=50_000_000)
     desc: bool = True
     with_total: bool = False
     thumb_w: int = 640
@@ -302,7 +305,7 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
         enrich=lambda q: _scene_enrich(q, acl),
     )
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
-                          cursor=f.cursor, limit=f.limit, with_total=f.with_total)
+                          cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
     for it in page.items:
         finish_scene(it, f.thumb_w)
     return page_response(page)
@@ -432,7 +435,7 @@ async def list_galleries(request: Request, f: Annotated[GalleryFilter, Query()],
         sorts=GALLERY_SORTS, where=where, enrich=enrich,
     )
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
-                          cursor=f.cursor, limit=f.limit, with_total=f.with_total)
+                          cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
     for it in page.items:
         fid, mt, rev = it.pop("cover_file_id"), it.pop("cover_mod_time"), it.pop("cover_rev")
         it["cover_url"] = image_urls(it["cover_image_id"], fid, mt, f.thumb_w, rev)["thumbnail_url"] if fid else None
@@ -520,7 +523,7 @@ async def list_images(request: Request, f: Annotated[ImageFilter, Query()],
         where=lambda q: [IMAGE_PRESENT, *content_where(q, f, "image", "i", acl)],
     )
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
-                          cursor=f.cursor, limit=f.limit, with_total=f.with_total)
+                          cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
     return _image_items(page, f.thumb_w)
 
 
@@ -567,7 +570,7 @@ async def gallery_images(gallery_id: int, request: Request, f: Annotated[Gallery
         sorts={"position": Sort("gi.position", "integer")}, where=where,
     )
     page = await paginate(pool, lq, sort="position", desc=f.desc, cursor=f.cursor,
-                          limit=f.limit, with_total=f.with_total)
+                          offset=f.offset, limit=f.limit, with_total=f.with_total)
     return _image_items(page, f.thumb_w)
 
 

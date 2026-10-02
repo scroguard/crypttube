@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { VirtuosoGrid, type GridStateSnapshot } from "react-virtuoso";
 import type { Paging } from "../api/hooks";
@@ -62,16 +62,33 @@ export default function InfiniteGrid<T extends { id: number }>({
 }
 
 function Pager({ paging }: { paging: Paging }) {
+  const [typed, setTyped] = useState<string | null>(null);   // null = showing the current page
   if (!paging.hasPrev && !paging.hasNext) return null;
+  const jump = () => {
+    const n = Number(typed);
+    if (typed !== null && Number.isFinite(n) && n >= 1) paging.goTo(n - 1);
+    setTyped(null);
+  };
   return (
-    <nav className="my-3 flex items-center justify-center gap-3 text-sm" aria-label="Pages" data-testid="pager">
-      <button className="btn-ghost" disabled={!paging.hasPrev || paging.busy} onClick={paging.prev}>‹ Previous</button>
-      <span className="tabular-nums text-zinc-400" data-testid="page-indicator">
-        Page {paging.page + 1}{paging.pageCount ? ` of ${paging.pageCount}` : ""}
-      </span>
-      <button className="btn-ghost" disabled={!paging.hasNext || paging.busy} onClick={paging.next}>
-        {paging.busy ? "Loading…" : "Next ›"}
-      </button>
+    <nav className="my-3 flex flex-wrap items-center justify-center gap-2 text-sm" aria-label="Pages" data-testid="pager">
+      <button className="btn-ghost" disabled={!paging.hasPrev} onClick={paging.first} aria-label="First page">« First</button>
+      <button className="btn-ghost" disabled={!paging.hasPrev} onClick={paging.prev}>‹ Previous</button>
+      <form className="flex items-center gap-2 tabular-nums text-zinc-400" data-testid="page-indicator"
+            onSubmit={(e) => { e.preventDefault(); jump(); }}>
+        Page
+        <input className="input w-20 py-1 text-center" inputMode="numeric" aria-label="Page number"
+               value={typed ?? String(paging.page + 1)} onFocus={(e) => e.target.select()}
+               onChange={(e) => setTyped(e.target.value.replace(/\D/g, ""))} onBlur={jump} />
+        {paging.pageCount ? `of ${paging.pageCount.toLocaleString()}` : ""}
+      </form>
+      <button className="btn-ghost" disabled={!paging.hasNext} onClick={paging.next}>Next ›</button>
+      <button className="btn-ghost" disabled={!paging.hasNext || paging.pageCount === null} onClick={paging.last} aria-label="Last page">Last »</button>
+      {paging.from > 0 && (
+        <span className="tabular-nums text-zinc-400" data-testid="page-range">
+          {paging.from.toLocaleString()}–{paging.to.toLocaleString()}
+          {paging.total !== null && ` of ${paging.total.toLocaleString()}`}
+        </span>
+      )}
     </nav>
   );
 }

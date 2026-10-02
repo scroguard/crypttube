@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
-export const PAGE_SIZES = [10, 20, 30, 50, 100, 200] as const;
+export const PAGE_SIZES = [10, 20, 30, 50, 100, 200, 500, 1000] as const;
 const KEY = "list.pageSize";
 const listeners = new Set<() => void>();
 

@@ -143,7 +143,7 @@ async def test_cursor_validation(client, seed):
     assert r.status_code == 422 and "different sort" in r.text
     assert (await client.get("/api/scenes", params={"cursor": "garbage!"})).status_code == 422
     assert (await client.get("/api/scenes", params={"sort": "nope"})).status_code == 422
-    assert (await client.get("/api/scenes", params={"limit": 500})).status_code == 422
+    assert (await client.get("/api/scenes", params={"limit": 5000})).status_code == 422
     assert (await client.get("/api/scenes", params={"bogus": 1})).status_code == 422
 
 
@@ -587,3 +587,23 @@ async def test_select_all_is_capped(app, client, seed, monkeypatch):
     monkeypatch.setattr(browse, "SELECT_ALL_LIMIT", 5)
     body = (await client.get("/api/ids/scenes")).json()
     assert len(body["ids"]) == 5 and body["truncated"] is True
+
+
+async def test_offset_jumps_to_a_page(client, seed):
+    """Paged browsing can jump to any page; it lines up exactly with cursor paging."""
+    walked, cursor = [], None
+    while True:
+        r = (await client.get("/api/scenes", params={"limit": 7, "sort": "title", "desc": False, "cursor": cursor})).json()
+        walked.append([s["id"] for s in r["items"]])
+        cursor = r["next_cursor"]
+        if not cursor:
+            break
+    for n, expected in enumerate(walked):
+        r = (await client.get("/api/scenes", params={"limit": 7, "sort": "title", "desc": False, "offset": n * 7})).json()
+        assert [s["id"] for s in r["items"]] == expected
+        assert (r["next_cursor"] is None) == (n == len(walked) - 1)
+    past = (await client.get("/api/scenes", params={"limit": 7, "offset": 7000})).json()
+    assert past["items"] == [] and past["next_cursor"] is None
+    assert (await client.get("/api/scenes", params={"limit": 1000})).status_code == 200
+    assert (await client.get("/api/scenes", params={"limit": 1001})).status_code == 422
+    assert (await client.get("/api/performers", params={"limit": 1, "offset": 1})).json()["items"][0]["name"]

@@ -141,7 +141,7 @@ def _identical(a: str, b: str) -> bool:
         return False
 
 
-async def delete_extra_copy(pool, kind: str, content_id: int) -> dict:
+async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | None = None) -> dict:
     """Delete one copy of a duplicated file. First its details are combined into the
     other copies, and it is compared byte for byte with one that stays: the fingerprint
     only looks at the ends of a file, and a deletion must not rest on that alone."""
@@ -157,7 +157,13 @@ async def delete_extra_copy(pool, kind: str, content_id: int) -> dict:
         raise HTTPException(404, "not found")
     if not others:
         raise HTTPException(409, "this is the only copy left")
-    if not await asyncio.to_thread(_identical, target["path"], others[0]["path"]):
+    # It must be byte-identical to a copy that stays (any one: a set can also contain a
+    # different file that merely shares the fingerprint).
+    # The job names the copy it keeps, so "Suggested to keep" is always the survivor.
+    for other in [o for o in others if keeper_id is None or o["id"] == keeper_id]:
+        if await asyncio.to_thread(_identical, target["path"], other["path"]):
+            break
+    else:
         raise HTTPException(409, "the files are not identical byte for byte; nothing was deleted")
     async with pool.acquire() as conn, conn.transaction():
         await _combine(conn, kind, [r["id"] for r in rows])
@@ -197,13 +203,13 @@ async def run_delete_extras(pool, ctx, kind: str) -> str:
     rows = await pool.fetch(
         f"""SELECT array_agg(c.id ORDER BY f.id) AS ids FROM {CANDIDATES.format(table=TABLE[kind])}
             GROUP BY f.oshash, f.size HAVING count(*) > 1""")
-    extras = [i for r in rows for i in r["ids"][1:]]
+    extras = [(i, r["ids"][0]) for r in rows for i in r["ids"][1:]]
     deleted = freed = different = failed = 0
-    for n, content_id in enumerate(extras, start=1):
+    for n, (content_id, keeper_id) in enumerate(extras, start=1):
         if await ctx.cancelled():
             break
         try:
-            result = await delete_extra_copy(pool, kind, content_id)
+            result = await delete_extra_copy(pool, kind, content_id, keeper_id)
             deleted += 1
             freed += result["bytes"]
         except HTTPException as e:

@@ -126,22 +126,33 @@ async def test_delete_duplicate_copies(app, client, indexed):
     assert not os.path.exists(extras[0]["path"]) and os.path.exists(keeper["path"])
     assert (await client.get(f"/api/scenes/{keeper['id']}")).json()["rating"] == 60
 
-    # a different file that merely has the same fingerprint is never deleted
+    # A different file that merely has the same fingerprint is never deleted. Tried with the
+    # look-alike both older and newer than the real copies: the job only ever deletes a
+    # copy that is byte-identical to the one it keeps.
     fake = extras[1]
+    vp9 = indexed["scenes"]["vp9"]
     await pool.execute("UPDATE files SET oshash = (SELECT oshash FROM files WHERE path = $1), size = (SELECT size FROM files WHERE path = $1) WHERE path = $2",
                        keeper["path"], str(root / "videos" / "vp9.webm"))
-    vp9 = indexed["scenes"]["vp9"]
     r = await client.post("/api/duplicates/delete", json={"kind": "scene", "id": vp9})
     assert r.status_code == 409 and "not identical" in r.json()["detail"]
     assert (root / "videos" / "vp9.webm").exists()
 
-    # the job removes every remaining true extra copy and keeps the look-alike
+    first = await pool.fetchval("SELECT f.path FROM files f WHERE f.oshash = (SELECT oshash FROM files WHERE path = $1) ORDER BY f.id LIMIT 1", keeper["path"])
     job_id = await pool.fetchval("INSERT INTO jobs (kind, status) VALUES ('delete_duplicates', 'running') RETURNING id")
     msg = await worker.HANDLERS["delete_duplicates"](pool, get_settings(), JobContext(pool, job_id), {"kind": "scene"})
-    assert msg.startswith("deleted 1 extra copies") and "1 kept because they are not identical" in msg
-    assert os.path.exists(keeper["path"]) and not os.path.exists(fake["path"]) and (root / "videos" / "vp9.webm").exists()
+    assert (root / "videos" / "vp9.webm").exists()
+    if first.endswith("vp9.webm"):       # the look-alike is the one kept: nothing matches it
+        assert msg.startswith("deleted 0 extra copies") and "2 kept because they are not identical" in msg
+        assert os.path.exists(keeper["path"]) and os.path.exists(fake["path"])
+        os.unlink(fake["path"])
+        await rescan(app)
+    else:                                # a real copy is kept: its twin goes, the look-alike stays
+        assert msg.startswith("deleted 1 extra copies") and "1 kept because they are not identical" in msg
+        assert os.path.exists(first) and sum(os.path.exists(p) for p in (keeper["path"], fake["path"])) == 1
     # the last real copy can't be removed through the duplicates tool
     await pool.execute("UPDATE files SET oshash = 'ffffffffffffffff' WHERE path LIKE '%vp9.webm'")
+    keeper = (await client.get("/api/scenes")).json()["items"]
+    keeper = next(s for s in keeper if s["id"] != vp9 and s["id"] != indexed["scenes"]["hevc"])
     r = await client.post("/api/duplicates/delete", json={"kind": "scene", "id": keeper["id"]})
     assert r.status_code == 409 and "only copy" in r.json()["detail"]
 

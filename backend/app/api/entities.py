@@ -106,7 +106,7 @@ async def list_performers(request: Request, f: Annotated[PerformerFilter, Query(
         sorts=PERFORMER_SORTS, where=where, enrich=enrich,
     )
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
-                          cursor=f.cursor, limit=f.limit, with_total=f.with_total)
+                          cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
     for it in page.items:
         it["image_url"] = entity_image_url("performers", it["id"], it.pop("image_path"), it.pop("updated_at"))
     return page_response(page)
@@ -197,7 +197,7 @@ async def list_studios(request: Request, f: Annotated[StudioFilter, Query()],
                    select="st.id, st.name, st.parent_id, st.rating, st.image_path, st.updated_at",
                    sorts=STUDIO_SORTS, where=where, enrich=enrich)
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
-                          cursor=f.cursor, limit=f.limit, with_total=f.with_total)
+                          cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
     for it in page.items:
         it["image_url"] = entity_image_url("studios", it["id"], it.pop("image_path"), it.pop("updated_at"))
         del it["parent_id"]
@@ -266,7 +266,7 @@ async def list_tags(request: Request, f: Annotated[TagFilter, Query()],
                    select="t.id, t.name, t.description, t.image_path, t.updated_at",
                    sorts=TAG_SORTS, where=where, enrich=enrich)
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
-                          cursor=f.cursor, limit=f.limit, with_total=f.with_total)
+                          cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
     for it in page.items:
         it["image_url"] = entity_image_url("tags", it["id"], it.pop("image_path"), it.pop("updated_at"))
     return page_response(page)

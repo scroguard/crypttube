@@ -44,7 +44,7 @@ export default function Images() {
                                      <ImageTile image={img} onOpen={() => setBox({ items: section, index: i })} />
                                    )} />
       ) : (
-        <ImageBrowser key={selecting ? "select" : "browse"} path="/images" query={query}
+        <ImageBrowser path="/images" query={query}
                       selecting={selecting} onSelecting={setSelecting} />
       )}
       {box && (

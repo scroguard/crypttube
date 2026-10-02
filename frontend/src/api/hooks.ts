@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { usePageSize } from "../lib/pageSize";
 import { api, type Query } from "./client";
@@ -22,21 +22,29 @@ export function useMe() {
 
 export interface Paging {
   page: number;              // 0-based
-  pageCount: number | null;  // known when the list was asked for its total
+  pageCount: number | null;  // null until the total is known
   hasPrev: boolean;
   hasNext: boolean;
   busy: boolean;
   prev: () => void;
   next: () => void;
+  first: () => void;
+  last: () => void;
+  goTo: (page: number) => void;   // 0-based; clamped to the valid range
+  /** 1-based positions of the first and last item shown, and how many there are in all. */
+  from: number;
+  to: number;
+  total: number | null;
 }
 
 /**
- * Cursor-paginated list. With the "items per page" preference unset it accumulates
- * pages for continuous scrolling; with a page size chosen it exposes one page at a time
- * (`paging`), fetching the next cursor page on demand and keeping visited pages cached.
+ * A list from the API. With the "items per page" preference unset it accumulates
+ * cursor pages for continuous scrolling. With a page size chosen it shows one page at a
+ * time (`paging`), and any page can be opened directly (first, last, by number).
  */
 export function useInfiniteList<T>(path: string, query: Query, { limit = 60, enabled = true, withTotal = false } = {}) {
   const pageSize = usePageSize();
+  const paged = pageSize !== null;
   const size = pageSize ?? limit;
   const q = useInfiniteQuery({
     queryKey: ["list", path, query, size, withTotal],
@@ -48,35 +56,65 @@ export function useInfiniteList<T>(path: string, query: Query, { limit = 60, ena
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
-    enabled,
+    enabled: enabled && !paged,
   });
-  const pages = q.data?.pages ?? [];
-  const total = pages[0]?.total ?? null;
 
   // Current page index, reset whenever the list itself (filters, sort, size) changes.
   const listKey = JSON.stringify([path, query, size]);
   const [pos, setPos] = useState({ key: listKey, page: 0 });
-  const page = pos.key === listKey ? Math.min(pos.page, Math.max(pages.length - 1, 0)) : 0;
   if (pos.key !== listKey) setPos({ key: listKey, page: 0 });
+  const wanted = pos.key === listKey ? pos.page : 0;
 
+  // Paged mode: the first page also carries the total (for the page count); any other
+  // page is fetched by its offset, so there's no need to walk there page by page.
+  const firstPage = useQuery({
+    queryKey: ["list", path, query, size, "page", 0],
+    queryFn: ({ signal }) => api<Page<T>>(path, { query: { ...query, limit: size, with_total: true }, signal }),
+    enabled: enabled && paged,
+  });
+  const pagedTotal = firstPage.data?.total ?? null;
+  const pageCount = pagedTotal !== null ? Math.max(1, Math.ceil(pagedTotal / size)) : null;
+  const page = pageCount !== null ? Math.min(wanted, pageCount - 1) : wanted;
+  const laterPage = useQuery({
+    queryKey: ["list", path, query, size, "page", page],
+    queryFn: ({ signal }) => api<Page<T>>(path, { query: { ...query, limit: size, offset: page * size }, signal }),
+    enabled: enabled && paged && page > 0,
+    placeholderData: keepPreviousData,
+  });
+
+  if (!paged) {
+    const pages = q.data?.pages ?? [];
+    return { ...q, items: pages.flatMap((p) => p.items), total: pages[0]?.total ?? null, paging: null as Paging | null };
+  }
+  const active = page > 0 ? laterPage : firstPage;
   const go = (n: number) => {
-    setPos({ key: listKey, page: n });
+    const max = pageCount !== null ? pageCount - 1 : n;
+    setPos({ key: listKey, page: Math.max(0, Math.min(Math.floor(n) || 0, max)) });
     window.scrollTo({ top: 0 });
   };
-  const paging: Paging | null = pageSize === null ? null : {
+  // While the next page loads the previous one stays on screen: describe what is shown.
+  const shown = active.isPlaceholderData ? 0 : active.data?.items.length ?? 0;
+  const paging: Paging = {
     page,
-    pageCount: total !== null ? Math.max(1, Math.ceil(total / size)) : null,
+    pageCount,
     hasPrev: page > 0,
-    hasNext: page < pages.length - 1 || q.hasNextPage,
-    busy: q.isFetchingNextPage,
+    hasNext: pageCount !== null ? page < pageCount - 1 : !!active.data?.next_cursor,
+    busy: active.isFetching,
     prev: () => go(page - 1),
-    next: async () => {
-      if (page >= pages.length - 1) await q.fetchNextPage();
-      go(page + 1);
-    },
+    next: () => go(page + 1),
+    first: () => go(0),
+    last: () => pageCount !== null && go(pageCount - 1),
+    goTo: go,
+    from: shown ? page * size + 1 : 0,
+    to: page * size + shown,
+    total: pagedTotal,
   };
-  const items = paging ? pages[page]?.items ?? [] : pages.flatMap((p) => p.items);
-  return { ...q, items, total, paging };
+  return {
+    ...q,
+    isPending: active.isPending, isError: active.isError, error: active.error,
+    hasNextPage: false, isFetchingNextPage: false,
+    items: active.data?.items ?? [], total: pagedTotal, paging: paging as Paging | null,
+  };
 }
 
 export function useDetail<T>(path: string | null) {

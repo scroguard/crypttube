@@ -162,6 +162,20 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
         <InfiniteGrid list={list} empty="No scenes match."
                       render={(s) => <SceneCard scene={s} selected={selected?.has(s.id)} onToggle={selected ? toggle : undefined} />} />
       )}
+      {/* The same selection buttons below a page, so they're at hand after scrolling down. */}
+      {canCreate && !grouped && list.paging && list.items.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-2" data-testid="select-bottom">
+          <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => { releaseFocus(); setSelected((s) => (s ? null : new Set())); setNote(null); }}>
+            {selected ? "Done selecting" : "Select"}
+          </button>
+          {selected && (
+            <>
+              <button className="btn-ghost" onClick={selectShown}>Select this page</button>
+              <button className="btn-ghost" onClick={selectAllMatching}>Select all matching</button>
+            </>
+          )}
+        </div>
+      )}
       {selected && selected.size > 0 && (
         <BulkBar kind="scenes" ids={[...selected]} onDone={() => setSelected(new Set())} onSelectAll={selectShown} />
       )}

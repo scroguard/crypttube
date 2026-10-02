@@ -282,16 +282,40 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
 
   await page.getByLabel("Items per page").selectOption("10");
   await expect(page.getByTestId("image-tile")).toHaveCount(10);
-  await expect(page.getByTestId("page-indicator").first()).toHaveText("Page 1 of 2");
+  const pageBox = page.getByLabel("Page number").first();
+  await expect(pageBox).toHaveValue("1");
+  await expect(page.getByTestId("page-indicator").first()).toContainText("of 2");
+  await expect(page.getByTestId("page-range").first()).toHaveText("1–10 of 15");
   await expect(page.getByRole("button", { name: "‹ Previous" }).first()).toBeDisabled();
   await page.screenshot({ path: `${SHOTS}/09a-paged.png` });
 
   await page.getByRole("button", { name: "Next ›" }).first().click();
   await expect(page.getByTestId("image-tile")).toHaveCount(5);
-  await expect(page.getByTestId("page-indicator").first()).toHaveText("Page 2 of 2");
+  await expect(pageBox).toHaveValue("2");
+  await expect(page.getByTestId("page-range").first()).toHaveText("11–15 of 15");
+  await expect(page.getByTestId("page-range")).toHaveCount(2);   // above and below the list
   await expect(page.getByRole("button", { name: "Next ›" }).first()).toBeDisabled();
   await page.getByRole("button", { name: "‹ Previous" }).first().click();
   await expect(page.getByTestId("image-tile")).toHaveCount(10);
+
+  // straight to the last and first page, or to a typed page number
+  await page.getByRole("button", { name: "Last page" }).first().click();
+  await expect(pageBox).toHaveValue("2");
+  await expect(page.getByTestId("image-tile")).toHaveCount(5);
+  await expect(page.getByRole("button", { name: "Last page" }).first()).toBeDisabled();
+  await page.getByRole("button", { name: "First page" }).first().click();
+  await expect(pageBox).toHaveValue("1");
+  await expect(page.getByTestId("image-tile")).toHaveCount(10);
+  await pageBox.fill("2");
+  await pageBox.press("Enter");
+  await expect(page.getByTestId("image-tile")).toHaveCount(5);
+  await pageBox.fill("99");                       // beyond the end: lands on the last page
+  await pageBox.press("Enter");
+  await expect(pageBox).toHaveValue("2");
+  await pageBox.fill("1");
+  await pageBox.press("Enter");
+  await expect(page.getByTestId("image-tile")).toHaveCount(10);
+  await expect(page.getByLabel("Items per page").locator("option")).toContainText(["500 per page", "1000 per page"]);
 
   // the lightbox steps through the current page
   await page.getByTestId("image-tile").first().click();
@@ -299,19 +323,35 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await page.keyboard.press("Escape");
 
   // "Select this page" takes just what is on screen, and adds up across pages
-  await page.getByRole("button", { name: "Select images" }).click();
-  await page.getByRole("button", { name: "Select this page" }).click();
+  await page.getByRole("button", { name: "Select images" }).first().click();
+  await page.getByRole("button", { name: "Select this page" }).first().click();
   await expect(page.getByTestId("bulk-bar")).toContainText("10 selected");
   await page.getByRole("button", { name: "Next ›" }).first().click();
   await expect(page.getByTestId("image-tile")).toHaveCount(5);
-  await page.getByRole("button", { name: "Select this page" }).click();
+  await page.getByRole("button", { name: "Select this page" }).first().click();
   await expect(page.getByTestId("bulk-bar")).toContainText("15 selected");
+  // the same buttons sit below the page as well
+  const below = page.getByTestId("select-bottom");
+  await expect(below.getByRole("button", { name: "Select this page" })).toBeVisible();
+  await expect(below.getByRole("button", { name: "Select all matching" })).toBeVisible();
+  await below.getByRole("button", { name: "Done selecting" }).click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await below.getByRole("button", { name: "Select images" }).click();
+  await below.getByRole("button", { name: "Select this page" }).click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("5 selected");   // still on page 2
+  // the selection bar never covers the bottom page navigation: scrolled to the end, the
+  // pager sits fully above it
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const pagerBox = await page.getByTestId("pager").last().boundingBox();
+  const barBox = await page.getByTestId("bulk-bar").boundingBox();
+  expect(pagerBox!.y + pagerBox!.height).toBeLessThanOrEqual(barBox!.y);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
 
   // the bulk bar shows what a selection already has, and can remove it
-  await page.getByRole("button", { name: "Select images" }).click();
-  await page.getByRole("button", { name: "Select this page" }).click();
+  await page.getByRole("button", { name: "Select images" }).first().click();
+  await page.getByRole("button", { name: "Select this page" }).first().click();
   const bar = page.getByTestId("bulk-bar");
   await bar.getByLabel("Tags…").pressSequentially("Paged Tag");
   await bar.getByRole("option", { name: /Create/ }).click();
@@ -319,12 +359,12 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await expect(bar.getByTestId("assigned-tags")).toContainText("Paged Tag");
   await expect(bar.getByTestId("assigned-tags")).toContainText("all");
   await page.getByTestId("image-tile").first().click();          // deselect one
-  await expect(bar).toContainText("9 selected");
+  await expect(bar).toContainText("4 selected");
   await page.screenshot({ path: `${SHOTS}/09b-assigned.png` });
   await bar.getByRole("button", { name: "Remove Paged Tag from the selection" }).click();
   await expect(bar.getByTestId("assigned-tags")).toHaveCount(0);
   await page.getByTestId("image-tile").first().click();          // the deselected one kept its tag
-  await expect(bar.getByTestId("assigned-tags")).toContainText("1/10");
+  await expect(bar.getByTestId("assigned-tags")).toContainText("1/5");
   await bar.getByRole("button", { name: "Remove Paged Tag from the selection" }).click();
   await expect(bar.getByTestId("assigned-tags")).toHaveCount(0);
   await page.keyboard.press("Escape");

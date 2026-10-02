@@ -83,7 +83,7 @@ def _where_sql(conds: list[str]) -> str:
 
 
 async def paginate(pool: asyncpg.Pool, lq: ListQuery, *, sort: str, desc: bool,
-                   cursor: str | None, limit: int, with_total: bool = False) -> Page:
+                   cursor: str | None, limit: int, with_total: bool = False, offset: int = 0) -> Page:
     if sort not in lq.sorts:
         raise HTTPException(422, f"sort must be one of {sorted(lq.sorts)}")
     s = lq.sorts[sort]
@@ -109,7 +109,7 @@ async def paginate(pool: asyncpg.Pool, lq: ListQuery, *, sort: str, desc: bool,
             FROM {lq.from_}
             {_where_sql(where)}
             ORDER BY {key_expr} {direction}, {lq.alias}.id {direction}
-            LIMIT {q.p(limit + 1)}
+            LIMIT {q.p(limit + 1)} OFFSET {q.p(0 if cursor else offset)}
         )
         SELECT p.* {cols}
         FROM p {joins}

@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { api, type Query } from "../api/client";
 import { useWrite } from "../api/hooks";
 import DeleteMediaButton from "./DeleteMedia";
@@ -59,7 +59,7 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
           <span key={a.id} className={`chip ${key === "performers" ? "bg-accent/20 text-rose-200" : ""}`}
                 title={a.count === ids.length ? "On every selected item" : `On ${a.count} of the ${ids.length} selected items`}>
             {a.name}
-            <span className="text-zinc-400">{a.count === ids.length ? "all" : `${a.count}/${ids.length}`}</span>
+            <span className="text-zinc-400">{a.count >= ids.length ? "all" : `${a.count}/${ids.length}`}</span>
             <button type="button" className="text-zinc-400 hover:text-white" disabled={write.isPending}
                     aria-label={`Remove ${a.name} from the selection`}
                     onClick={() => run({ [key]: { mode: "remove", ids: [a.id] } })}>×</button>
@@ -70,8 +70,24 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
     );
   };
 
+  // The bar is fixed over the bottom of the window. Reserve the same height at the end of
+  // the page, so what is down there (the bottom page navigation) can be scrolled clear of it.
+  const bar = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const measure = () => setHeight(el.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-700 bg-zinc-900/95 p-3 backdrop-blur" data-testid="bulk-bar">
+    <>
+    <div style={{ height: height + 16 }} aria-hidden data-testid="bulk-bar-spacer" />
+    <div ref={bar} className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-700 bg-zinc-900/95 p-3 backdrop-blur" data-testid="bulk-bar">
       {(assigned.data?.tags.length || assigned.data?.performers.length) ? (
         <div className="mx-auto mb-2 flex max-h-24 max-w-[1920px] flex-wrap items-center gap-x-5 gap-y-1.5 overflow-y-auto" data-testid="assigned">
           <span className="text-xs text-zinc-400">Already assigned (× removes it from the selection):</span>
@@ -103,5 +119,6 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
         {write.isError && <ErrorBox error={write.error} />}
       </div>
     </div>
+    </>
   );
 }
