@@ -904,3 +904,33 @@ test("duplicates: same file under another name is found, details combined, list 
   await page.getByTestId("cleanup").getByRole("button", { name: "Clean up now…" }).click();
   await expect(page.getByTestId("cleanup-report")).toContainText("Removed 1 scenes", { timeout: 30_000 });
 });
+
+test("content filters: a user hides a performer for themselves, then switches the filter off", async () => {
+  await nav("Performers").click();
+  await expect(page.getByTestId("performer-card").filter({ hasText: "Alice" })).toBeVisible();
+  await nav("Scenes").click();
+  await expect(page.getByTestId("total")).toHaveText("3 scenes");
+
+  await page.goto("/account");
+  const filters = page.getByTestId("content-filters");
+  await filters.getByLabel("Add a performer to hide…").pressSequentially("Ali");
+  await filters.getByRole("option", { name: "Alice" }).click();
+  await filters.getByRole("button", { name: "Save filters" }).click();
+  await expect(filters.getByRole("status")).toHaveText("Filters saved.");
+  await page.screenshot({ path: `${SHOTS}/21-content-filters.png` });
+
+  await nav("Performers").click();
+  await expect(page.getByTestId("performer-card").first()).toBeVisible();
+  await expect(page.getByTestId("performer-card").filter({ hasText: "Alice" })).toHaveCount(0);
+  await nav("Scenes").click();
+  await expect(page.getByTestId("total")).not.toHaveText("3 scenes");
+
+  // the choice is still listed by name after a reload, and can be switched off
+  await page.goto("/account");
+  await expect(filters.getByRole("button", { name: "Remove Alice" })).toBeVisible();
+  await filters.getByLabel("Apply my filters").uncheck();
+  await filters.getByRole("button", { name: "Save filters" }).click();
+  await expect(filters.getByRole("status")).toHaveText("Filters saved.");
+  await nav("Scenes").click();
+  await expect(page.getByTestId("total")).toHaveText("3 scenes");
+});

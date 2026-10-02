@@ -61,3 +61,17 @@ async def refresh(pool: asyncpg.Pool) -> int:
                 *q.args,
             )
     return len(users)
+
+
+async def refresh_viewer(pool: asyncpg.Pool, user_id: int, deny_rules: bool) -> None:
+    """Recompute one user's counts right away (after they change their own filters), so
+    the next page they open is already consistent."""
+    acl = await load_acl(pool, user_id, deny_rules=deny_rules)
+    q = Q()
+    v = q.p(user_id)
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("DELETE FROM entity_counts WHERE viewer = $1", user_id)
+        await conn.execute(
+            f"""WITH c AS MATERIALIZED ({_counts_sql(acl, q)})
+                INSERT INTO entity_counts (viewer, kind, entity_id, scenes, galleries, images)
+                SELECT {v}::bigint, c.* FROM c""", *q.args)

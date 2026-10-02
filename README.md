@@ -337,6 +337,11 @@ Per-user deny rules (`user_hidden_tags/studios/performers`) are expanded once pe
 request (sub-tags, child studios, performers carrying a hidden tag) and enforced inside
 every list/detail query; hidden items 404 and don't appear in counts.
 
+Each user can also set their own **content filters** on the Account page: tags and
+performers they don't want to see. These are applied exactly like restrictions (a tag
+covers the tags under it), for that user only and for every role, and can be switched off
+without losing the selection.
+
 ## Design invariants: no feedback loops
 
 Automated components must never be able to trigger each other indefinitely.

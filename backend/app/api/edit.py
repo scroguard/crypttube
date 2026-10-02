@@ -471,7 +471,7 @@ async def merge_tags(tag_id: int, body: TagMerge, request: Request, acl: Acl = D
             raise HTTPException(404, "some source tags do not exist")
         for table, fk in (("scene_tags", "scene_id"), ("gallery_tags", "gallery_id"),
                           ("image_tags", "image_id"), ("performer_tags", "performer_id"),
-                          ("user_hidden_tags", "user_id")):
+                          ("user_hidden_tags", "user_id"), ("user_filter_tags", "user_id")):
             await conn.execute(
                 f"""INSERT INTO {table} ({fk}, tag_id) SELECT {fk}, $1 FROM {table}
                     WHERE tag_id = ANY($2::bigint[]) ON CONFLICT DO NOTHING""", tag_id, sources)

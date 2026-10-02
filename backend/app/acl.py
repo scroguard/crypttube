@@ -8,6 +8,8 @@ Three layers, all enforced by `visible()`:
    - a hidden performer hides content featuring them; performers carrying a hidden
      tag count as hidden performers
    Admins are exempt from these.
+   A user's own filters (user_filter_*, set on their account page) are applied the same
+   way, for every role including admins, while they have them switched on.
 2. Library visibility (0008_user_libraries.sql): content of another user's library is
    visible only if that library is shared with the viewer or with everyone. This
    applies to admins too: private means private.
@@ -62,28 +64,34 @@ HIDDEN_LIBRARIES_SQL = """
     ORDER BY l.id"""
 
 
-async def load_acl(db: asyncpg.Pool | asyncpg.Connection, user_id: int, *, deny_rules: bool = True) -> Acl:
-    """`deny_rules=False` for admins: they skip layer 1 but not library privacy."""
+async def load_acl(db: asyncpg.Pool | asyncpg.Connection, user_id: int, *, deny_rules: bool = True,
+                   filters: bool = True) -> Acl:
+    """`deny_rules=False` for admins: they skip layer 1 but not library privacy.
+    `filters=False` leaves out the user's own filters (to show them what they chose)."""
     libraries = [r["id"] for r in await db.fetch(HIDDEN_LIBRARIES_SQL, user_id)]
-    if not deny_rules:
-        return Acl(user_id=user_id, libraries=libraries)
     row = await db.fetchrow(
         """WITH RECURSIVE
+             mine AS (SELECT $3::boolean AND coalesce(
+                        (SELECT filters_enabled FROM user_settings WHERE user_id = $1), true) AS on),
              ht(id) AS (
-               SELECT tag_id FROM user_hidden_tags WHERE user_id = $1
+               (SELECT tag_id FROM user_hidden_tags WHERE user_id = $1 AND $2::boolean
+                UNION
+                SELECT tag_id FROM user_filter_tags, mine WHERE user_id = $1 AND mine.on)
                UNION
                SELECT tr.child_id FROM tag_relations tr JOIN ht ON tr.parent_id = ht.id),
              hs(id) AS (
-               SELECT studio_id FROM user_hidden_studios WHERE user_id = $1
+               SELECT studio_id FROM user_hidden_studios WHERE user_id = $1 AND $2::boolean
                UNION
                SELECT s.id FROM studios s JOIN hs ON s.parent_id = hs.id)
            SELECT ARRAY(SELECT id FROM ht ORDER BY id) AS tags,
                   ARRAY(SELECT id FROM hs ORDER BY id) AS studios,
-                  ARRAY(SELECT performer_id FROM user_hidden_performers WHERE user_id = $1
+                  ARRAY(SELECT performer_id FROM user_hidden_performers WHERE user_id = $1 AND $2::boolean
+                        UNION
+                        SELECT performer_id FROM user_filter_performers, mine WHERE user_id = $1 AND mine.on
                         UNION
                         SELECT performer_id FROM performer_tags WHERE tag_id IN (SELECT id FROM ht)
                         ORDER BY 1) AS performers""",
-        user_id,
+        user_id, deny_rules, filters,
     )
     return Acl(list(row["tags"]), list(row["studios"]), list(row["performers"]), user_id, libraries)
 

@@ -26,7 +26,7 @@ export function useNames(kind: EntityKind, ids: number[]): Map<number, string> {
  * Multi (or single) select with type-ahead search against the list API. Editors can
  * create a missing tag/performer/studio inline.
  */
-export default function EntityPicker({ kind, value, onChange, single = false, placeholder, onCreate, linked = false }: {
+export default function EntityPicker({ kind, value, onChange, single = false, placeholder, onCreate, linked = false, knownNames }: {
   kind: EntityKind;
   value: number[];
   onChange: (ids: number[]) => void;
@@ -35,13 +35,17 @@ export default function EntityPicker({ kind, value, onChange, single = false, pl
   onCreate?: (name: string) => Promise<number>;
   /** Make the selected names links to their pages (for pickers shown inline on a page). */
   linked?: boolean;
+  /** Names the caller already has, for ids whose pages can't be fetched (e.g. filtered out). */
+  knownNames?: Map<number, string>;
 }) {
   const [text, setText] = useState("");
   const [debounced, setDebounced] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);
-  const names = useNames(kind, value);
+  const picked = useRef(new Map<number, string>());
+  const names = useNames(kind, value.filter((id) => !knownNames?.has(id) && !picked.current.has(id)));
+  for (const source of [picked.current, knownNames]) source?.forEach((name, id) => names.set(id, name));
   // Open the list upward when there's no room below (e.g. in the bulk bar pinned to the
   // bottom of the window), so suggestions are never off-screen.
   const [dropUp, setDropUp] = useState(false);
@@ -73,6 +77,8 @@ export default function EntityPicker({ kind, value, onChange, single = false, pl
   const canCreate = !!onCreate && debounced.length > 0 && !exact;
 
   function pick(id: number) {
+    const option = search.data?.items.find((o) => o.id === id);
+    if (option) picked.current.set(id, option.name);
     onChange(single ? [id] : [...value, id]);
     setText("");
     setActive(0);
