@@ -349,6 +349,26 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
 
+  // click and drag across the grid: everything the box touches is selected
+  await page.getByRole("button", { name: "Select images" }).first().click();
+  const tiles = page.getByTestId("image-tile");
+  const a = (await tiles.nth(0).boundingBox())!;
+  const b = (await tiles.nth(2).boundingBox())!;      // same row: the first three
+  await page.mouse.move(a.x + 10, a.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 });
+  await expect(page.getByTestId("marquee")).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/09c-drag-select.png` });
+  await page.mouse.up();
+  await expect(page.getByTestId("marquee")).toHaveCount(0);
+  await expect(page.getByTestId("bulk-bar")).toContainText("3 selected");
+  for (const n of [0, 1, 2]) await expect(tiles.nth(n)).toHaveAttribute("aria-pressed", "true");
+  await expect(tiles.nth(3)).toHaveAttribute("aria-pressed", "false");
+  // a plain click still toggles one
+  await tiles.nth(3).click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("4 selected");
+  await page.keyboard.press("Escape");
+
   // the bulk bar shows what a selection already has, and can remove it
   await page.getByRole("button", { name: "Select images" }).first().click();
   await page.getByRole("button", { name: "Select this page" }).first().click();

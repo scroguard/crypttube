@@ -11,6 +11,7 @@ import GroupedBrowser, { ViewToggle } from "./GroupedBrowser";
 import InfiniteGrid, { LAYOUTS } from "./InfiniteGrid";
 import { releaseFocus, useEscape } from "../lib/useEscape";
 import { useBrowseView } from "../lib/viewPref";
+import { useMarquee } from "../lib/useMarquee";
 import BulkBar, { fetchMatchingIds } from "./BulkBar";
 import { Field } from "./ui";
 
@@ -56,6 +57,8 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
   }
   const active = ["tags", "xtags", "performers", "unassigned", "studios", "res", "rating", "organized", "played", "missing"]
     .filter((k) => f[k] !== undefined).length;
+  // Click and drag to select a whole area at once.
+  const marquee = useMarquee(!!selected, (ids) => setSelected((s) => new Set([...(s ?? []), ...ids])));
   const toggle = useCallback((id: number) => setSelected((s) => {
     const next = new Set(s);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -64,6 +67,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
 
   return (
     <div>
+      {marquee.overlay}
       <Toolbar>
         <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search titles or folders…" />
         <SortControl sorts={SORTS} sort={f.sort as string} desc={f.desc as boolean}
@@ -160,7 +164,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
                                    renderItem={(s) => <SceneCard scene={s} />} />
       ) : (
         <InfiniteGrid list={list} empty="No scenes match."
-                      render={(s) => <SceneCard scene={s} selected={selected?.has(s.id)} onToggle={selected ? toggle : undefined} />} />
+                      render={(s) => <SceneCard scene={s} selected={selected?.has(s.id) || marquee.preview.has(s.id)} onToggle={selected ? toggle : undefined} />} />
       )}
       {/* The same selection buttons below a page, so they're at hand after scrolling down. */}
       {canCreate && !grouped && list.paging && list.items.length > 0 && (

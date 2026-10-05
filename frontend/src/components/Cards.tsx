@@ -70,7 +70,7 @@ export const SceneCard = memo(function SceneCard({ scene, selected, onToggle }: 
   const res = resolutionLabel(scene.height);
   const progress = scene.resume_time && scene.duration ? Math.min(1, scene.resume_time / scene.duration) : 0;
   return (
-    <div className="group" data-testid="scene-card">
+    <div className="group" data-testid="scene-card" data-select-id={onToggle ? scene.id : undefined}>
       <Link to={`/scenes/${scene.id}`} onClick={(e) => { if (onToggle) { e.preventDefault(); onToggle(scene.id); } }}>
         <div ref={box} {...handlers}
              className={`relative aspect-video overflow-hidden rounded-lg bg-zinc-900 ring-2 ${selected ? "ring-accent" : "ring-transparent"}`}>
@@ -129,6 +129,7 @@ export const ImageTile = memo(function ImageTile({ image, onOpen, selected, onTo
 }) {
   return (
     <button onClick={() => (onToggle ? onToggle(image.id) : onOpen())} data-testid="image-tile" aria-pressed={onToggle ? !!selected : undefined}
+            data-select-id={onToggle ? image.id : undefined}
             className={`relative block aspect-square w-full overflow-hidden rounded-md bg-zinc-900 ring-2 focus:outline-none focus:ring-accent ${selected ? "ring-accent" : "ring-transparent"}`}>
       <img src={image.thumbnail_url} alt={image.title ?? ""} loading="lazy" decoding="async"
            className="h-full w-full object-cover transition-transform duration-200 hover:scale-[1.03]" />

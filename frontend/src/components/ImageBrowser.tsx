@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect } from "react";
 import type { Query } from "../api/client";
 import { useInfiniteList, useMe } from "../api/hooks";
 import type { ImageItem } from "../api/types";
+import { useMarquee } from "../lib/useMarquee";
 import BulkBar, { fetchMatchingIds } from "./BulkBar";
 import { ImageTile } from "./Cards";
 import InfiniteGrid from "./InfiniteGrid";
@@ -24,6 +25,8 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
     if (selecting === undefined) return;
     setSelected((s) => (selecting ? s ?? new Set() : null));
   }, [selecting]);
+  // Click and drag to select a whole area at once.
+  const marquee = useMarquee(!!selected, (ids) => setSelected((s) => new Set([...(s ?? []), ...ids])));
   const toggle = useCallback((id: number) => setSelected((s) => {
     const next = new Set(s);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -50,6 +53,7 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
   }
   return (
     <>
+      {marquee.overlay}
       {canCreate && (list.items.length > 0 || selected) && (
         <div className="mb-2 flex items-center justify-end gap-2">
           {note && <span className="text-xs text-amber-400">{note}</span>}
@@ -72,7 +76,7 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
       <InfiniteGrid list={list} layout="square" empty="No images."
                     render={(img, i) => (
                       <ImageTile image={img} onOpen={() => setOpen(i)}
-                                 selected={selected?.has(img.id)} onToggle={selected ? toggle : undefined} />
+                                 selected={selected?.has(img.id) || marquee.preview.has(img.id)} onToggle={selected ? toggle : undefined} />
                     )} />
       {/* The same selection buttons below a page, so they're at hand after scrolling down. */}
       {canCreate && list.paging && list.items.length > 0 && (

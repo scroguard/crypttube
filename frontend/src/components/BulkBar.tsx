@@ -87,7 +87,7 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
   return (
     <>
     <div style={{ height: height + 16 }} aria-hidden data-testid="bulk-bar-spacer" />
-    <div ref={bar} className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-700 bg-zinc-900/95 p-3 backdrop-blur" data-testid="bulk-bar">
+    <div ref={bar} className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-700 bg-zinc-900/95 p-3 backdrop-blur" data-testid="bulk-bar" data-no-marquee>
       {(assigned.data?.tags.length || assigned.data?.performers.length) ? (
         <div className="mx-auto mb-2 flex max-h-24 max-w-[1920px] flex-wrap items-center gap-x-5 gap-y-1.5 overflow-y-auto" data-testid="assigned">
           <span className="text-xs text-zinc-400">Already assigned (× removes it from the selection):</span>
