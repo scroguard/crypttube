@@ -451,6 +451,15 @@ test("assign performers to images (bulk + lightbox) and to a scene (inline)", as
   await expect(page.getByTestId("lightbox-meta")).toContainText("Alice");
   await page.getByTestId("lightbox").getByRole("button", { name: "Edit" }).click();
   const dialog = page.getByRole("dialog", { name: "Edit image" });
+  // make this image Alice's picture, straight from the image's edit dialog
+  await dialog.getByRole("button", { name: "Set as Alice's picture" }).click();
+  await expect(dialog.getByRole("button", { name: "✓ Alice's picture" })).toBeVisible();
+  const alice = await page.getByTestId("lightbox-meta").getByRole("link", { name: "Alice" }).getAttribute("href");
+  const pic = await page.request.get(`/api${alice}/image`);
+  expect(pic.ok()).toBeTruthy();
+  expect(pic.headers()["content-type"]).toBe("image/webp");
+  // (a later test starts Alice without a picture)
+  expect((await page.request.delete(`/api${alice}/image`, { headers: { "X-Requested-With": "e2e" } })).ok()).toBeTruthy();
   await dialog.getByLabel("Add tags…").pressSequentially("Portrait", { delay: 15 });
   await dialog.getByRole("option", { name: "Create “Portrait”" }).click();
   await page.keyboard.press("ArrowRight"); // typing keys must not flip to the next image
