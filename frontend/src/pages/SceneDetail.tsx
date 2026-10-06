@@ -102,6 +102,10 @@ export default function SceneDetail() {
                 <EntityPicker kind="tags" linked value={s.tags.map((t) => t.id)} onCreate={creator("tags")}
                               placeholder="Add tags…" onChange={(ids) => assign.mutate({ tag_ids: ids })} />
               </Field>
+              <Field label="Studio">
+                <EntityPicker kind="studios" single linked value={s.studio ? [s.studio.id] : []} onCreate={creator("studios")}
+                              placeholder="Set studio…" onChange={(ids) => assign.mutate({ studio_id: ids[0] ?? null })} />
+              </Field>
               {assign.isError && <ErrorBox error={assign.error} className="sm:col-span-2" />}
             </div>
           ) : (

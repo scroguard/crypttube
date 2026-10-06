@@ -387,6 +387,15 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await expect(bar.getByTestId("assigned-tags")).toContainText("1/5");
   await bar.getByRole("button", { name: "Remove Paged Tag from the selection" }).click();
   await expect(bar.getByTestId("assigned-tags")).toHaveCount(0);
+
+  // a studio, the same way: set it on the selection, see it, take it off again
+  await bar.getByLabel("Studio…").pressSequentially("Bulk Studio");
+  await bar.getByRole("option", { name: /Create/ }).click();
+  await bar.getByRole("button", { name: "Set studio" }).click();
+  await expect(bar.getByTestId("assigned-studios")).toContainText("Bulk Studio");
+  await expect(bar.getByTestId("assigned-studios")).toContainText("all");
+  await bar.getByRole("button", { name: "Remove Bulk Studio from the selection" }).click();
+  await expect(bar.getByTestId("assigned-studios")).toHaveCount(0);
   await page.keyboard.press("Escape");
 
   // the choice is remembered, and applies to other lists too

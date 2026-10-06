@@ -222,9 +222,10 @@ async def test_assigned_summary_for_a_selection(app, client, seed, login_as):
                                                 "tags": {"mode": "add", "ids": [tag]}})
     r = await client.post("/api/scenes/assigned", json={"ids": [a, b, c]})
     assert r.status_code == 200, r.text
-    assert r.json() == {"tags": [{"id": tag, "name": "Assigned Tag", "count": 1}],
-                        "performers": [{"id": ann, "name": "Assigned Ann", "count": 3},
-                                       {"id": bea, "name": "Assigned Bea", "count": 1}]}
+    body = r.json()
+    assert body["tags"] == [{"id": tag, "name": "Assigned Tag", "count": 1}]
+    assert body["performers"] == [{"id": ann, "name": "Assigned Ann", "count": 3},
+                                  {"id": bea, "name": "Assigned Bea", "count": 1}]
     assert (await client.post("/api/scenes/assigned", json={"ids": [b]})).json()["performers"] == [
         {"id": ann, "name": "Assigned Ann", "count": 1}]
     # a viewer for whom Bea is hidden sees neither her nor the scene she is in
@@ -233,3 +234,17 @@ async def test_assigned_summary_for_a_selection(app, client, seed, login_as):
     assert (await vera.post("/api/scenes/assigned", json={"ids": [a, b, c]})).json()["performers"] == [
         {"id": ann, "name": "Assigned Ann", "count": 2}]
     assert (await client.post("/api/scenes/assigned", json={"ids": []})).status_code == 422
+
+
+async def test_bulk_studio_set_and_clear(app, client, seed):
+    ids = [r["id"] for r in await app.state.pool.fetch("SELECT id FROM scenes ORDER BY id")][:3]
+    one = (await client.post("/api/studios", json={"name": "Bulk One"})).json()["id"]
+    two = (await client.post("/api/studios", json={"name": "Bulk Two"})).json()["id"]
+    assert (await client.post("/api/scenes/bulk", json={"ids": ids, "set": {"studio_id": one}})).status_code == 200
+    await client.post("/api/scenes/bulk", json={"ids": ids[:1], "set": {"studio_id": two}})
+    studios = (await client.post("/api/scenes/assigned", json={"ids": ids})).json()["studios"]
+    assert studios == [{"id": one, "name": "Bulk One", "count": 2}, {"id": two, "name": "Bulk Two", "count": 1}]
+    # clearing one studio leaves items with another studio alone
+    await client.post("/api/scenes/bulk", json={"ids": ids, "clear_studio_ids": [one]})
+    got = [(await client.get(f"/api/scenes/{i}")).json()["studio"] for i in ids]
+    assert got[0]["name"] == "Bulk Two" and got[1] is None and got[2] is None

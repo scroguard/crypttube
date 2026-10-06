@@ -196,6 +196,8 @@ class BulkEdit(Body):
     set: BulkSet | None = None
     tags: LinkEdit | None = None
     performers: LinkEdit | None = None
+    # Take these studios off the items that have them (others keep theirs).
+    clear_studio_ids: list[int] | None = None
 
 
 async def _bulk_links(conn, table: str, fk: str, col: str, owners: list[int], edit: LinkEdit) -> None:
@@ -235,6 +237,10 @@ async def bulk_edit(kind_path: str, body: BulkEdit, request: Request, acl: Acl) 
         if fields:
             sets = ", ".join(f"{k} = ${i}" for i, k in enumerate(fields, start=2))
             await conn.execute(f"UPDATE {kind_path} SET {sets} WHERE id = ANY($1::bigint[])", ids, *fields.values())
+        if body.clear_studio_ids:
+            await conn.execute(
+                f"UPDATE {kind_path} SET studio_id = NULL WHERE id = ANY($1::bigint[]) AND studio_id = ANY($2::bigint[])",
+                ids, body.clear_studio_ids)
         if body.tags:
             await _bulk_links(conn, f"{kind}_tags", f"{kind}_id", "tag_id", ids, body.tags)
         if body.performers:
@@ -276,6 +282,17 @@ async def assigned(kind_path: str, body: Selection, request: Request, acl: Acl) 
                 JOIN {table} e ON {ent}
                 ORDER BY x.n DESC, e.name COLLATE natural_sort""", *q.args)
         out[key] = [dict(r) for r in rows]
+    q = Q()
+    ids = q.p(body.ids)
+    content = " AND ".join([f"c.id = ANY({ids}::bigint[])", *visible(acl, kind, "c", q)])
+    ent = " AND ".join(["e.id = x.id", *visible(acl, "studio", "e", q)])
+    rows = await request.app.state.pool.fetch(
+        f"""SELECT e.id, e.name, x.n AS count
+            FROM (SELECT c.studio_id AS id, count(*) AS n FROM {kind_path} c
+                  WHERE {content} AND c.studio_id IS NOT NULL GROUP BY 1) x
+            JOIN studios e ON {ent}
+            ORDER BY x.n DESC, e.name COLLATE natural_sort""", *q.args)
+    out["studios"] = [dict(r) for r in rows]
     return out
 
 
