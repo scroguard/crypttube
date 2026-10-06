@@ -391,6 +391,12 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   // a studio, the same way: set it on the selection, see it, take it off again
   await bar.getByLabel("Studio…").pressSequentially("Bulk Studio");
   await bar.getByRole("option", { name: /Create/ }).click();
+  // the picker and its buttons stay together on one line
+  const studioGroup = bar.getByRole("group", { name: "Studio" });
+  const pickerBox = (await studioGroup.getByLabel("Studio…").boundingBox())!;
+  const setBox = (await studioGroup.getByRole("button", { name: "Set studio" }).boundingBox())!;
+  expect(Math.abs(pickerBox.y + pickerBox.height - (setBox.y + setBox.height))).toBeLessThan(12);
+  await page.screenshot({ path: `${SHOTS}/09d-bulk-studio.png` });
   await bar.getByRole("button", { name: "Set studio" }).click();
   await expect(bar.getByTestId("assigned-studios")).toContainText("Bulk Studio");
   await expect(bar.getByTestId("assigned-studios")).toContainText("all");

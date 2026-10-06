@@ -104,16 +104,22 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
           <button className="ml-2 text-xs text-zinc-400 underline" onClick={onSelectAll}>select all shown</button>
           <button className="ml-2 text-xs text-zinc-400 underline" onClick={onDone}>clear</button>
         </div>
-        <div className="w-64"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} placeholder="Tags…" /></div>
-        <button className="btn-primary" disabled={!tags.length} onClick={() => run({ tags: { mode: "add", ids: tags } })}>Add tags</button>
-        <button className="btn-ghost" disabled={!tags.length} onClick={() => run({ tags: { mode: "remove", ids: tags } })}>Remove tags</button>
-        <div className="w-56"><EntityPicker kind="performers" value={performers} onChange={setPerformers} onCreate={creator("performers")} placeholder="Performers…" /></div>
-        <button className="btn-primary" disabled={!performers.length} onClick={() => run({ performers: { mode: "add", ids: performers } })}>Add performers</button>
-        <button className="btn-ghost" disabled={!performers.length} onClick={() => run({ performers: { mode: "remove", ids: performers } })}>Remove performers</button>
-        <div className="w-52"><EntityPicker kind="studios" single value={studio} onChange={setStudio} onCreate={creator("studios")} placeholder="Studio…" /></div>
-        <button className="btn-primary" disabled={!studio.length} onClick={() => run({ set: { studio_id: studio[0] } })}>Set studio</button>
-        <button className="btn-ghost" disabled={!assigned.data?.studios.length}
-                onClick={() => run({ clear_studio_ids: assigned.data!.studios.map((x) => x.id) })}>Clear studio</button>
+        <div className="flex items-end gap-2 max-sm:flex-wrap" role="group" aria-label="Tags">
+          <div className="w-64"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} placeholder="Tags…" /></div>
+          <button className="btn-primary" disabled={!tags.length} onClick={() => run({ tags: { mode: "add", ids: tags } })}>Add tags</button>
+          <button className="btn-ghost" disabled={!tags.length} onClick={() => run({ tags: { mode: "remove", ids: tags } })}>Remove tags</button>
+        </div>
+        <div className="flex items-end gap-2 max-sm:flex-wrap" role="group" aria-label="Performers">
+          <div className="w-56"><EntityPicker kind="performers" value={performers} onChange={setPerformers} onCreate={creator("performers")} placeholder="Performers…" /></div>
+          <button className="btn-primary" disabled={!performers.length} onClick={() => run({ performers: { mode: "add", ids: performers } })}>Add performers</button>
+          <button className="btn-ghost" disabled={!performers.length} onClick={() => run({ performers: { mode: "remove", ids: performers } })}>Remove performers</button>
+        </div>
+        <div className="flex items-end gap-2 max-sm:flex-wrap" role="group" aria-label="Studio">
+          <div className="w-52"><EntityPicker kind="studios" single value={studio} onChange={setStudio} onCreate={creator("studios")} placeholder="Studio…" /></div>
+          <button className="btn-primary" disabled={!studio.length} onClick={() => run({ set: { studio_id: studio[0] } })}>Set studio</button>
+          <button className="btn-ghost" disabled={!assigned.data?.studios.length}
+                  onClick={() => run({ clear_studio_ids: assigned.data!.studios.map((x) => x.id) })}>Clear studio</button>
+        </div>
         <select className="input w-auto" defaultValue="" onChange={(e) => e.target.value && run({ set: { rating: e.target.value === "none" ? null : +e.target.value } })} aria-label="Set rating">
           <option value="" disabled>Set rating…</option>
           {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n * 20}>{"★".repeat(n)}</option>)}
