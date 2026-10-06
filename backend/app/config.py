@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     # Allow "set image from URL" (the app's only outbound request, made on explicit request).
     url_image_fetch: bool = True
     max_transcodes: int = 2
-    generate_concurrency: int = 2
+    generate_concurrency: int = 2   # scenes one generate job works on at once
+    generate_jobs: int = 1          # generate jobs at once (default; admins can change it in the UI)
 
     def db_params(self, database: str | None = None) -> dict:
         """Keyword arguments for asyncpg.connect / create_pool; `database` overrides the db name."""

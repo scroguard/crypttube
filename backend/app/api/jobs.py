@@ -1,9 +1,9 @@
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from app import jobs
+from app import jobs, maintenance
 from app.config import get_settings
 
 router = APIRouter(tags=["jobs"])
@@ -37,6 +37,25 @@ async def list_jobs(
     )
     items = [_redact(dict(r)) for r in rows[:limit]]
     return {"items": items, "next": items[-1]["id"] if len(rows) > limit else None}
+
+
+class WorkerSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    generate_jobs: int = Field(ge=1, le=16)
+
+
+@router.get("/jobs/settings")
+async def worker_settings(request: Request) -> dict:
+    from app.worker import generate_jobs
+    return {"generate_jobs": await generate_jobs(request.app.state.pool, get_settings()), "max_generate_jobs": 16}
+
+
+@router.put("/jobs/settings")
+async def save_worker_settings(body: WorkerSettings, request: Request) -> dict:
+    pool = request.app.state.pool
+    await maintenance.set_state(pool, "worker_settings", body.model_dump())
+    await pool.execute(f"NOTIFY {jobs.NOTIFY_CHANNEL}")   # let the worker start more right away
+    return await worker_settings(request)
 
 
 @router.get("/jobs/{job_id}")

@@ -31,21 +31,33 @@ async def enqueue(
     return job_id
 
 
-async def claim(db: asyncpg.Pool | asyncpg.Connection) -> asyncpg.Record | None:
-    """Atomically take the oldest runnable job. Jobs whose dedupe_key is already
-    running wait, so the same scan never runs twice concurrently."""
+async def claim(db: asyncpg.Pool | asyncpg.Connection, *, kinds: list[str] | None = None,
+                exclude: list[str] | None = None) -> asyncpg.Record | None:
+    """Atomically take the oldest runnable job (optionally only of `kinds`, or of any kind
+    but `exclude`). Jobs whose dedupe_key is already running wait, so the same scan
+    never runs twice concurrently."""
     return await db.fetchrow(
         """UPDATE jobs SET status = 'running', started_at = now(), attempts = attempts + 1
            WHERE id = (
                SELECT j.id FROM jobs j
                WHERE j.status = 'queued' AND j.run_after <= now()
+                 AND ($1::text[] IS NULL OR j.kind = ANY($1::text[]))
+                 AND ($2::text[] IS NULL OR j.kind <> ALL($2::text[]))
                  AND (j.dedupe_key IS NULL OR NOT EXISTS (
                      SELECT 1 FROM jobs r WHERE r.status = 'running' AND r.dedupe_key = j.dedupe_key))
                ORDER BY j.run_after, j.id
                FOR UPDATE SKIP LOCKED
                LIMIT 1)
-           RETURNING id, kind, payload, attempts"""
+           RETURNING id, kind, payload, attempts""",
+        kinds, exclude,
     )
+
+
+async def runnable_exists(db, *, exclude: list[str]) -> bool:
+    """Is a job of some other kind than `exclude` waiting to run right now?"""
+    return await db.fetchval(
+        """SELECT EXISTS (SELECT 1 FROM jobs WHERE status = 'queued' AND run_after <= now()
+                          AND kind <> ALL($1::text[]))""", exclude)
 
 
 async def finish(db, job_id: int, message: str | None = None) -> None:

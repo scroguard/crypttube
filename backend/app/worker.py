@@ -185,6 +185,37 @@ async def _generate_image_thumbnails(pool: asyncpg.Pool, settings: Settings, ctx
     return made, failed
 
 
+SCENE_BATCH = 50      # scenes per generate job when work is split up
+IMAGE_BATCH = 500     # images per generate job
+
+
+async def _enqueue_batches(pool, scene_ids: list[int], image_ids: list[int], force: bool) -> int:
+    payloads = [{"scene_ids": scene_ids[i:i + SCENE_BATCH], "image_ids": [], **({"force": True} if force else {})}
+                for i in range(0, len(scene_ids), SCENE_BATCH)]
+    payloads += [{"scene_ids": [], "image_ids": image_ids[i:i + IMAGE_BATCH]}
+                 for i in range(0, len(image_ids), IMAGE_BATCH)]
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.executemany("INSERT INTO jobs (kind, payload) VALUES ('generate', $1)", [(p,) for p in payloads])
+        await conn.execute(f"NOTIFY {jobs.NOTIFY_CHANNEL}")
+    return len(payloads)
+
+
+async def _split_generate(pool, library_id: int | None, force: bool) -> int:
+    """Queue the work of a library-wide or global generate as batches. Returns 0 when it is
+    small enough for one job to do (then the caller just does it)."""
+    cond = "s.library_id = $1" if library_id is not None else "$1::bigint IS NULL"
+    scene_ids = [r["id"] for r in await pool.fetch(
+        f"""SELECT s.id FROM scenes s JOIN files f ON f.id = s.file_id
+            WHERE f.missing_since IS NULL AND {cond} ORDER BY s.id""", library_id)]
+    image_ids = [r["id"] for r in await pool.fetch(
+        f"""SELECT s.id FROM images s JOIN files f ON f.id = s.file_id LEFT JOIN files z ON z.id = f.zip_file_id
+            WHERE f.missing_since IS NULL AND (z.id IS NULL OR z.missing_since IS NULL) AND {cond}
+            ORDER BY s.id""", library_id)]
+    if len(scene_ids) <= SCENE_BATCH and len(image_ids) <= IMAGE_BATCH:
+        return 0
+    return await _enqueue_batches(pool, scene_ids, image_ids, force)
+
+
 async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
     """Screenshots and scrub sprites for the scenes in scope.
 
@@ -205,6 +236,17 @@ async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobC
             # Everything: also clears leftovers of files that no longer exist.
             await asyncio.to_thread(generated.wipe_rebuildable, root)
         await _reset_image_thumbnails(pool, root, library_id)
+
+    # A large scope is split into batch jobs, so several can run at once (see the
+    # "generate_jobs" setting). The clean-up for a forced rebuild has happened above.
+    if "scene_ids" not in payload and "image_ids" not in payload:
+        batches = await _split_generate(pool, library_id, force)
+        if batches:
+            return f"queued {batches} batches"
+    elif len(payload.get("scene_ids") or []) > SCENE_BATCH or len(payload.get("image_ids") or []) > IMAGE_BATCH:
+        # a big scan: hand its new files out in batches as well
+        n = await _enqueue_batches(pool, payload["scene_ids"], payload["image_ids"], force)
+        return f"queued {n} batches"
 
     conds, args = ["true"], []
     if scene_ids is not None:
@@ -344,16 +386,12 @@ async def schedule_loop(pool: asyncpg.Pool, stop: asyncio.Event) -> None:
             pass
 
 
-async def run_one(pool: asyncpg.Pool, settings: Settings) -> bool:
-    """Claim and run a single job. Returns False if the queue had nothing runnable."""
-    job = await jobs.claim(pool)
-    if job is None:
-        return False
+async def execute(pool: asyncpg.Pool, settings: Settings, job: asyncpg.Record) -> None:
     handler = HANDLERS.get(job["kind"])
     log.info("job %s (%s) started", job["id"], job["kind"])
     if handler is None:
         await jobs.fail(pool, job["id"], f"unknown job kind {job['kind']!r}")
-        return True
+        return
     ctx = jobs.JobContext(pool, job["id"])
     try:
         message = await handler(pool, settings, ctx, job["payload"])
@@ -366,22 +404,75 @@ async def run_one(pool: asyncpg.Pool, settings: Settings) -> bool:
     else:
         await jobs.finish(pool, job["id"], message)
         log.info("job %s finished: %s", job["id"], message)
+
+
+async def run_one(pool: asyncpg.Pool, settings: Settings) -> bool:
+    """Claim and run a single job, of any kind. Returns False if nothing was runnable."""
+    job = await jobs.claim(pool)
+    if job is None:
+        return False
+    await execute(pool, settings, job)
     return True
 
 
+# How jobs share the worker:
+# - generate jobs (previews, thumbnails) may run several at once (the admin setting);
+# - refresh_counts is a short database job that runs alongside anything;
+# - everything else (scans, cleanup, maintenance, duplicate removal) reads the disk hard
+#   and runs alone. A waiting one also goes first: no new generate job starts until it has
+#   had its turn, so new files get indexed promptly even during a long preview backlog.
+PARALLEL = "generate"
+LIGHT = counts.JOB_KIND
+WORKER_SETTINGS = "worker_settings"
+MAX_GENERATE_JOBS = 16
+
+
+async def generate_jobs(pool: asyncpg.Pool, settings: Settings) -> int:
+    stored = await maintenance.get_state(pool, WORKER_SETTINGS, {})
+    return max(1, min(MAX_GENERATE_JOBS, int(stored.get("generate_jobs", settings.generate_jobs))))
+
+
+async def claim_next(pool: asyncpg.Pool, settings: Settings, running: list[str]) -> asyncpg.Record | None:
+    """The next job that may start alongside those `running` (their kinds), if any."""
+    if LIGHT not in running and (job := await jobs.claim(pool, kinds=[LIGHT])):
+        return job
+    if any(k not in (PARALLEL, LIGHT) for k in running):
+        return None                                   # something exclusive is running
+    gen_running = running.count(PARALLEL)
+    if await jobs.runnable_exists(pool, exclude=[PARALLEL, LIGHT]):
+        # an exclusive job is waiting: let the generate jobs finish, then run it alone
+        return await jobs.claim(pool, exclude=[PARALLEL, LIGHT]) if gen_running == 0 else None
+    if gen_running < await generate_jobs(pool, settings):
+        return await jobs.claim(pool, kinds=[PARALLEL])
+    return None
+
+
 async def job_loop(pool, settings, wake: asyncio.Event, stop: asyncio.Event) -> None:
+    running: dict[asyncio.Task, str] = {}
+
+    def done(task: asyncio.Task) -> None:
+        running.pop(task, None)
+        wake.set()
+
     while not stop.is_set():
         wake.clear()
         try:
-            if await run_one(pool, settings):
-                continue
-        except (OSError, asyncpg.PostgresConnectionError):
+            while job := await claim_next(pool, settings, list(running.values())):
+                task = asyncio.create_task(execute(pool, settings, job))
+                running[task] = job["kind"]
+                task.add_done_callback(done)
+        except (OSError, asyncpg.PostgresError):
             log.exception("job loop database error; retrying")
-        # Nothing runnable: sleep until NOTIFY, stop, or a periodic check for delayed jobs.
+        # Sleep until a job finishes, a NOTIFY arrives, stop, or a periodic check for
+        # delayed jobs.
         waiters = [asyncio.ensure_future(wake.wait()), asyncio.ensure_future(stop.wait())]
         await asyncio.wait(waiters, timeout=5, return_when=asyncio.FIRST_COMPLETED)
         for w in waiters:
             w.cancel()
+    # Shutting down: give running jobs a moment; anything unfinished is picked up again
+    # (recover_stale) when the worker restarts.
+    if running:
+        await asyncio.wait(list(running), timeout=20)
 
 
 async def main() -> None:
@@ -394,9 +485,9 @@ async def main() -> None:
     except OSError:
         pass
     asyncio.get_running_loop().set_default_executor(
-        ThreadPoolExecutor(max_workers=settings.scan_probe_concurrency + 4, thread_name_prefix="io"))
+        ThreadPoolExecutor(max_workers=settings.scan_probe_concurrency + 8, thread_name_prefix="io"))
     settings.generated_dir.mkdir(parents=True, exist_ok=True)
-    pool = await create_pool(settings.db_params(), 2, settings.scan_probe_concurrency + 4)
+    pool = await create_pool(settings.db_params(), 2, settings.scan_probe_concurrency + 4 + MAX_GENERATE_JOBS)
     await migrate(pool)
     await jobs.recover_stale(pool)
     await jobs.prune(pool)

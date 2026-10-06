@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { useWrite } from "../../api/hooks";
 import type { Job, Page } from "../../api/types";
@@ -22,6 +23,7 @@ export default function Jobs() {
     <div className="mx-auto max-w-5xl">
       <AdminNav />
       <h1 className="mb-4 text-xl font-semibold">Jobs</h1>
+      <WorkerSettings />
       {jobs.isPending ? <Spinner /> : jobs.isError ? <ErrorBox error={jobs.error} /> : (
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
@@ -60,5 +62,37 @@ export default function Jobs() {
         </div>
       )}
     </div>
+  );
+}
+
+/** How many preview-generation jobs may run at once (scans always run alone). */
+function WorkerSettings() {
+  const q = useQuery({
+    queryKey: ["worker-settings"],
+    queryFn: () => api<{ generate_jobs: number; max_generate_jobs: number }>("/jobs/settings"),
+  });
+  const [value, setValue] = useState(1);
+  useEffect(() => { if (q.data) setValue(q.data.generate_jobs); }, [q.data]);
+  const save = useWrite((n: number) => api("/jobs/settings", { method: "PUT", json: { generate_jobs: n } }));
+  if (!q.data) return null;
+  return (
+    <section className="card mb-4 flex flex-wrap items-center gap-3 p-4 text-sm" data-testid="worker-settings">
+      <label className="flex items-center gap-2">
+        Run up to
+        <select className="input w-auto" aria-label="Preview jobs at once" value={value}
+                onChange={(e) => setValue(Number(e.target.value))}>
+          {Array.from({ length: q.data.max_generate_jobs }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        preview jobs at once
+      </label>
+      <button className="btn-primary py-1" disabled={value === q.data.generate_jobs || save.isPending}
+              onClick={() => save.mutate(value)}>Save</button>
+      <p className="w-full text-xs text-zinc-500">
+        Thumbnails and scrub previews are made in batches; more at once finishes sooner but uses more CPU. Scans and
+        other disk-heavy jobs always run on their own. The worker's CPU limit (WORKER_CPUS, default 2) still applies,
+        so raise it too on a strong server.
+      </p>
+      {save.isError && <ErrorBox error={save.error} />}
+    </section>
   );
 }

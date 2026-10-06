@@ -50,6 +50,18 @@ test("first run: create the admin account", async () => {
   await expect(page.getByText("No scenes match.")).toBeVisible();
 });
 
+test("admin sets how many preview jobs run at once", async () => {
+  await nav("Admin").click();
+  await adminNav("Jobs").click();
+  const box = page.getByTestId("worker-settings");
+  await expect(box.getByLabel("Preview jobs at once")).toHaveValue("1");
+  await box.getByLabel("Preview jobs at once").selectOption("3");
+  await box.getByRole("button", { name: "Save" }).click();
+  await expect(box.getByRole("button", { name: "Save" })).toBeDisabled();
+  await page.reload();
+  await expect(box.getByLabel("Preview jobs at once")).toHaveValue("3");
+});
+
 test("admin adds a library and it gets indexed", async () => {
   await nav("Admin").click();
   // pick the folder with the browser rather than typing it

@@ -315,6 +315,11 @@ Admins can also delete any scene, image or gallery in a global library from its 
 from a selection (file, database entries and generated content go together). Users'
 own libraries are theirs to manage.
 
+Jobs share the worker like this: scans (and cleanup, nightly maintenance and duplicate
+removal) read the disk hard and always run on their own; preview generation runs as
+batches, several at once, up to the number set on Admin → Jobs (default 1). A waiting scan
+goes first: no new preview batch starts until it has run.
+
 ## Maintenance
 
 Admin → Maintenance.
