@@ -53,6 +53,8 @@ class ScanStats:
     errors: list[str] = field(default_factory=list)
     # scenes whose content is new or changed, i.e. that need generated assets
     scene_ids: list[int] = field(default_factory=list)
+    # images that are new or changed, i.e. that need thumbnails
+    image_ids: list[int] = field(default_factory=list)
 
     def summary(self) -> str:
         parts = [f"{v} {k}" for k, v in vars(self).items() if isinstance(v, int) and v]
@@ -328,6 +330,7 @@ class Scanner:
                RETURNING id""",
             file_id, info.width, info.height, info.format, _stem(path),
         )
+        self.stats.image_ids.append(image_id)
         if gallery_id is None:
             return
         # A moved image leaves its old folder gallery.
@@ -399,6 +402,7 @@ class Scanner:
                    RETURNING id""",
                 member_file_id, m.info.width, m.info.height, m.info.format, _stem(m.path),
             )
+            self.stats.image_ids.append(image_id)
             await conn.execute(
                 "INSERT INTO gallery_images (gallery_id, image_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                 gallery_id, image_id,

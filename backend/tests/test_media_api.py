@@ -232,7 +232,7 @@ async def test_generate_job_builds_sprites(app, client, indexed):
         "INSERT INTO jobs (kind, payload, status) VALUES ('generate', '{\"missing\": true}', 'running') RETURNING id")
     settings = get_settings()
     msg = await worker.handle_generate(pool, settings, JobContext(pool, job_id), {"missing": True})
-    assert msg == "3 generated"
+    assert msg.split(";")[0] == "3 generated"   # (then "; N image thumbnails")
     # idempotent
     assert await worker.handle_generate(pool, settings, JobContext(pool, job_id), {"missing": True}) == "0 generated"
 

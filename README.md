@@ -155,7 +155,7 @@ this host; for files added from other machines, use **Scan** / **Scan folder…*
 | `GET /api/scenes/{id}/playback` | preferred modes (`direct` → `remux` → `transcode`), URLs, sprite VTT |
 | `GET /api/scenes/{id}/screenshot?w=&v=` | WebP, generated on demand if missing |
 | `GET /api/scenes/{id}/sprite.vtt`, `sprite.webp` | scrub previews (9×9 keyframe grid + WebVTT `#xywh`) |
-| `GET /api/images/{id}/thumbnail?w=&v=` | WebP, on demand, EXIF-rotated, never upscaled; works for zip members |
+| `GET /api/images/{id}/thumbnail?w=&v=` | WebP, EXIF-rotated, never upscaled; works for zip members. The sizes the grids use are made by the generate job after each scan; others on first request |
 | `GET /api/images/{id}/file` | original image |
 | `POST /api/generate` `{force?, library_id?}` | queue screenshots/sprites that are missing or unusable; `force` discards and rebuilds everything in scope (admin) |
 | `POST /api/scenes/{id}/regenerate` | rebuild one scene's assets (whoever may edit it) |

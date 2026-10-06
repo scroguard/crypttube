@@ -60,7 +60,7 @@ async def test_force_rebuild_replaces_bad_files_and_busts_caches(app, client, in
     assert not is_image((await client.get(old_url)).content)       # "generate missing" can't know
     assert await run_generate(app, {"missing": True}) == "0 generated"
 
-    assert await run_generate(app, {"force": True}) == "3 rebuilt"
+    assert (await run_generate(app, {"force": True})).split(";")[0] == "3 rebuilt"
     info = (await client.get(f"/api/scenes/{sid}/playback")).json()
     new_url = info["screenshot_url"]
     assert new_url != old_url and new_url.endswith(".1")            # revision in the version
@@ -107,7 +107,7 @@ async def test_force_rebuild_can_be_limited_to_a_library_or_scene(app, client, i
     await Scanner(pool, get_settings().generated_dir, settle_seconds=0).scan(lib2)
     await run_generate(app, {"missing": True})
 
-    assert await run_generate(app, {"force": True, "library_id": lib2}) == "1 rebuilt"
+    assert (await run_generate(app, {"force": True, "library_id": lib2})).split(";")[0] == "1 rebuilt"
     revs = dict(await pool.fetch("SELECT library_id, max(assets_rev) FROM scenes GROUP BY 1"))
     lib1 = next(k for k in revs if k != lib2)
     assert revs == {lib1: 0, lib2: 1}
@@ -125,7 +125,7 @@ async def test_failures_are_reported_with_reasons(app, client, indexed):
     (root / "videos" / "h265.mkv").write_bytes(b"corrupted on disk after indexing" * 10)
     msg = await run_generate(app, {"force": True})
     first, *details = msg.splitlines()
-    assert first == "2 rebuilt, 1 failed"
+    assert first.split(";")[0] == "2 rebuilt, 1 failed"
     assert len(details) == 1 and details[0].startswith(f"scene {indexed['scenes']['hevc']} (h265.mkv): ")
 
 
@@ -172,3 +172,28 @@ async def test_rebuild_endpoints_and_permissions(app, client, login_as, indexed)
     payloads = [p["payload"] for p in await pool.fetch("SELECT payload FROM jobs WHERE kind = 'generate' ORDER BY id")]
     assert payloads == [{"scene_ids": [sid], "force": True}, {"force": True, "library_id": lib}]
     assert (await client.post("/api/generate")).status_code == 202                    # plain "generate missing" still works
+
+
+async def test_thumbnails_are_ready_before_anyone_browses(app, client, clean, library_dir):
+    """A scan queues generation that also makes the grid thumbnails of every new image
+    and scene, so the first page view is served from files."""
+    from tests.test_user_libraries import drain
+    pool = app.state.pool
+    lid = await pool.fetchval("INSERT INTO library_paths (path) VALUES ($1) RETURNING id", str(library_dir))
+    await pool.execute("INSERT INTO jobs (kind, payload) VALUES ('scan', $1)", {"library_id": lid, "settle": 0})
+    await drain(app)
+    root = get_settings().generated_dir
+    images = await pool.fetch(
+        """SELECT i.id, f.id AS file_id, f.mod_time, EXISTS (SELECT 1 FROM galleries g WHERE g.cover_image_id = i.id) AS cover
+           FROM images i JOIN files f ON f.id = i.file_id""")
+    assert len(images) == 5          # 3 in pics/, 2 in archive.zip
+    for r in images:
+        version = generated.image_version(r["file_id"], r["mod_time"])
+        assert generated.usable(generated.thumbnail_path(root, "images", version, generated.IMAGE_GRID_WIDTH))
+        assert generated.usable(generated.thumbnail_path(root, "images", version, generated.COVER_WIDTH)) == r["cover"]
+    assert sum(r["cover"] for r in images) == 2
+    for r in await pool.fetch("SELECT f.oshash, f.id FROM scenes s JOIN files f ON f.id = s.file_id"):
+        version = generated.scene_version(r["oshash"], r["id"])
+        assert generated.usable(generated.thumbnail_path(root, "scenes", version, generated.SCENE_GRID_WIDTH))
+    # nothing more to do the second time
+    assert await run_generate(app, {"missing": True}) == "0 generated"

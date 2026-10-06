@@ -22,6 +22,11 @@ from PIL import Image, ImageOps
 from app.media import ProbeError, background
 
 THUMB_WIDTHS = (160, 320, 640, 1280)
+# The sizes the grids ask for, made ahead of time so browsing never waits on a resize:
+# scene cards and gallery covers use 640, image grids 320.
+SCENE_GRID_WIDTH = 640
+IMAGE_GRID_WIDTH = 320
+COVER_WIDTH = 640
 SCREENSHOT_WIDTH = 1280
 SPRITE_COLUMNS = 9
 SPRITE_MAX_FRAMES = 81

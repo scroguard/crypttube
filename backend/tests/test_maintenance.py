@@ -100,19 +100,20 @@ async def test_cleanup_dry_run_then_real(app, client, indexed):
     assert report["dry_run"] is True
     assert report["removed"] == {"scenes": 1, "images": 6, "galleries": 2, "files": 6,
                                  "still_on_disk": 0, "libraries_skipped": 0}
-    # screenshot + sprite + vtt + 1 thumbnail for the scene, 1 thumbnail per image
-    assert report["generated"]["scene_assets"]["files"] == 4
-    assert report["generated"]["image_thumbnails"]["files"] == 6
-    assert report["generated"]["files"] == 10 and report["generated"]["bytes"] > 0
+    # the scene's screenshot, sprite, vtt, card thumbnail and the 320 one asked for by warm();
+    # a grid thumbnail per image, plus a cover thumbnail for each gallery's cover
+    assert report["generated"]["scene_assets"]["files"] == 5
+    assert report["generated"]["image_thumbnails"]["files"] == 8
+    assert report["generated"]["files"] == 13 and report["generated"]["bytes"] > 0
     assert (await counts(app), generated_files()) == (before_counts, before_files)
     assert (await client.get("/api/maintenance")).json()["missing_files"] == 6
 
     # for real
     msg = await run_job(app, "cleanup", {"dry_run": False})
-    assert msg.startswith("removed 1 scenes, 6 images, 2 galleries and 10 generated files")
+    assert msg.startswith("removed 1 scenes, 6 images, 2 galleries and 13 generated files")
     assert await counts(app) == (2, 0, 0, 2)
     after = generated_files()
-    assert len(before_files - after) == 10 and after < before_files
+    assert len(before_files - after) == 13 and after < before_files
     # what is left belongs to the two remaining scenes, which still work
     for codec in ("hevc", "vp9"):
         assert (await client.get(f"/api/scenes/{indexed['scenes'][codec]}/screenshot")).status_code == 200

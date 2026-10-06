@@ -5,10 +5,12 @@ compete with the API process for the event loop.
 """
 
 import asyncio
+import io
 import logging
 import os
 import signal
 import traceback
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import asyncpg
@@ -63,8 +65,9 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
 
     # Scan -> generate / refresh_counts only; neither of those enqueues anything.
     scene_ids = [i for s in results for i in s.scene_ids]
-    if scene_ids:
-        await jobs.enqueue(pool, "generate", {"scene_ids": scene_ids})
+    image_ids = [i for s in results for i in s.image_ids]
+    if scene_ids or image_ids:
+        await jobs.enqueue(pool, "generate", {"scene_ids": scene_ids, "image_ids": image_ids})
     if any(s.summary() != "no changes" for s in results):
         await counts.request_refresh(pool)
 
@@ -86,7 +89,7 @@ MAX_REPORTED_ERRORS = 10
 async def _generate_candidates(pool: asyncpg.Pool, payload: dict):
     """Yield batches of scenes in scope: explicit ids, one library, or all (paged by id)."""
     conds, args = ["f.missing_since IS NULL"], []
-    if payload.get("scene_ids"):
+    if "scene_ids" in payload:
         args.append(payload["scene_ids"])
         conds.append(f"s.id = ANY(${len(args)}::bigint[])")
     if payload.get("library_id") is not None:
@@ -120,6 +123,68 @@ async def _reset_image_thumbnails(pool: asyncpg.Pool, root, library_id: int | No
     await pool.execute("UPDATE images SET assets_rev = assets_rev + 1 WHERE library_id = $1", library_id)
 
 
+def _image_thumbnails(root, row) -> int:
+    """Make the grid (and, for gallery covers, cover) thumbnails of one image that are
+    missing. Reads the original once. Returns how many were made."""
+    widths = [generated.IMAGE_GRID_WIDTH] + ([generated.COVER_WIDTH] if row["is_cover"] else [])
+    version = generated.image_version(row["file_id"], row["mod_time"])
+    todo = [(w, generated.thumbnail_path(root, "images", version, w)) for w in widths]
+    todo = [(w, p) for w, p in todo if not generated.usable(p)]
+    if not todo:
+        return 0
+    with generated.open_image_source(row["path"], row["zip_path"]) as src:
+        data = src.read()
+    for w, path in todo:
+        generated.make_thumbnail(io.BytesIO(data), w, path)
+    return len(todo)
+
+
+async def _generate_image_thumbnails(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext,
+                                     payload: dict) -> tuple[int, int]:
+    """Thumbnails for the images in scope, ahead of anyone looking at them: the images a
+    scan found (`image_ids`), one library, or everything. A job for given scenes only
+    (`scene_ids` without `image_ids`) does no images."""
+    if "image_ids" in payload:
+        conds, args = ["i.id = ANY($1::bigint[])"], [payload["image_ids"]]
+    elif "scene_ids" in payload:
+        return 0, 0
+    elif payload.get("library_id") is not None:
+        conds, args = ["i.library_id = $1"], [payload["library_id"]]
+    else:
+        conds, args = [], []
+    where = " AND ".join(["f.missing_since IS NULL", "(z.id IS NULL OR z.missing_since IS NULL)", *conds])
+    total = await pool.fetchval(
+        f"SELECT count(*) FROM images i JOIN files f ON f.id = i.file_id LEFT JOIN files z ON z.id = f.zip_file_id WHERE {where}",
+        *args)
+    if not total:
+        return 0, 0
+    root = settings.generated_dir
+    sem = asyncio.Semaphore(settings.scan_probe_concurrency)
+    made = failed = done = 0
+
+    async def one(row):
+        nonlocal made, failed
+        async with sem:
+            try:
+                made += await asyncio.to_thread(_image_thumbnails, root, row)
+            except (ProbeError, OSError, KeyError, zipfile.BadZipFile):
+                failed += 1
+
+    after = 0
+    while rows := await pool.fetch(
+            f"""SELECT i.id, f.id AS file_id, f.mod_time, f.path, z.path AS zip_path,
+                       EXISTS (SELECT 1 FROM galleries g WHERE g.cover_image_id = i.id) AS is_cover
+                FROM images i JOIN files f ON f.id = i.file_id LEFT JOIN files z ON z.id = f.zip_file_id
+                WHERE {where} AND i.id > ${len(args) + 1} ORDER BY i.id LIMIT {GENERATE_BATCH}""", *args, after):
+        if await ctx.cancelled():
+            break
+        await asyncio.gather(*(one(r) for r in rows))
+        done += len(rows)
+        after = rows[-1]["id"]
+        await ctx.progress(min(1.0, done / total), f"image thumbnails {done}/{total}")
+    return made, failed
+
+
 async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
     """Screenshots and scrub sprites for the scenes in scope.
 
@@ -142,7 +207,7 @@ async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobC
         await _reset_image_thumbnails(pool, root, library_id)
 
     conds, args = ["true"], []
-    if scene_ids:
+    if scene_ids is not None:
         args.append(scene_ids)
         conds.append("id = ANY($1::bigint[])")
     elif library_id is not None:
@@ -169,6 +234,11 @@ async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobC
                         root, row["path"], row["duration"], version,
                         url_ver=generated.url_version(version, rev), force=force and first):
                     made += 1
+                # the card thumbnail, so scene grids are served from a file from the start
+                card = generated.thumbnail_path(root, "scenes", version, generated.SCENE_GRID_WIDTH)
+                if not generated.usable(card):
+                    await asyncio.to_thread(generated.make_thumbnail, generated.screenshot_path(root, version),
+                                            generated.SCENE_GRID_WIDTH, card)
         except (ProbeError, OSError) as e:
             failed += 1
             # Don't put file names from users' private libraries into the admin's job list.
@@ -188,7 +258,10 @@ async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobC
         done += len(rows)
         await ctx.progress(min(1.0, done / max(total, 1)), f"{done}/{total} scenes")
 
+    thumbs, thumb_failed = await _generate_image_thumbnails(pool, settings, ctx, payload)
     summary = f"{made} {'rebuilt' if force else 'generated'}" + (f", {failed} failed" if failed else "")
+    if thumbs or thumb_failed:
+        summary += f"; {thumbs} image thumbnails" + (f" ({thumb_failed} unreadable)" if thumb_failed else "")
     if errors:
         more = failed - len(errors)
         summary += "\n" + "\n".join(errors) + (f"\n…and {more} more" if more > 0 else "")
