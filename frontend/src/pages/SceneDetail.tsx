@@ -60,6 +60,7 @@ export default function SceneDetail() {
       ) : (
         <div className="aspect-video rounded-lg bg-zinc-900" />
       )}
+      {playback.data?.notice && <p className="mt-2 text-xs text-zinc-400" data-testid="playback-notice">{playback.data.notice}</p>}
 
       <div className="mt-4 flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">

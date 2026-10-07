@@ -281,3 +281,58 @@ def test_generated_files_survive_a_puid_change(tmp_path):
     for d in (dest.parent, dest.parent.parent):
         assert stat.S_IMODE(d.stat().st_mode) == 0o777
     assert not [p for p in dest.parent.iterdir() if p.name.startswith(".tmp-")]
+
+
+async def test_leftover_drm_headers_are_hidden_when_serving(app, client, indexed):
+    """Firefox and iOS refuse an MP4 that still carries DRM init boxes (pssh) even though
+    the content isn't encrypted. The original is served with those boxes relabelled as
+    padding: same length, Range requests still work, nothing changes on disk."""
+    import struct
+    from app import media
+    root = indexed["root"]
+    sid = indexed["scenes"]["h264"]
+    src = root / "videos" / "h264.mp4"
+    clean = src.read_bytes()
+    # put two pssh boxes at the end of the moov (written after the media data, as in
+    # the downloaded files, so nothing else in the file moves)
+    def pssh(system: str) -> bytes:
+        body = b"\0\0\0\0" + bytes.fromhex(system) + struct.pack(">I", 2) + b"\x08\x01"
+        return struct.pack(">I", 8 + len(body)) + b"pssh" + body
+    extra = pssh("edef8ba979d64acea3c827dcd51d21ed") + pssh("9a04f07998404286ab92e65be0885f95")
+    off = 0
+    while True:
+        size, kind = struct.unpack(">I4s", clean[off:off + 8])
+        if kind == b"moov":
+            break
+        off += size
+    assert off + size == len(clean)
+    dirty = clean[:off] + struct.pack(">I", size + len(extra)) + clean[off + 4:] + extra
+    src.write_bytes(dirty)
+
+    protection = media.mp4_protection(str(src))
+    assert len(protection.pssh_types) == 2 and not protection.encrypted
+    expected = bytearray(dirty)
+    for at in protection.pssh_types:
+        expected[at:at + 4] = b"free"
+    expected = bytes(expected)
+    assert b"pssh" not in expected and len(expected) == len(dirty)
+
+    r = await client.get(f"/api/scenes/{sid}/stream")
+    assert r.status_code == 200 and r.content == expected and r.headers["accept-ranges"] == "bytes"
+    assert r.headers["content-length"] == str(len(dirty))
+    # ranges, including ones that cut through a relabelled box type
+    at = protection.pssh_types[0]
+    for header, lo, hi in ((f"bytes={at - 2}-{at + 1}", at - 2, at + 1), (f"bytes={at + 2}-", at + 2, len(dirty) - 1),
+                           ("bytes=-10", len(dirty) - 10, len(dirty) - 1), ("bytes=0-99", 0, 99)):
+        r = await client.get(f"/api/scenes/{sid}/stream", headers={"Range": header})
+        assert r.status_code == 206 and r.content == expected[lo:hi + 1], header
+        assert r.headers["content-range"] == f"bytes {lo}-{hi}/{len(dirty)}"
+    assert (await client.get(f"/api/scenes/{sid}/stream", headers={"Range": f"bytes={len(dirty)}-"})).status_code == 416
+    head = await client.head(f"/api/scenes/{sid}/stream")
+    assert head.status_code == 200 and head.headers["content-length"] == str(len(dirty)) and head.content == b""
+    # the file on disk is untouched, playback stays direct, and other files are served as before
+    assert src.read_bytes() == dirty
+    body = (await client.get(f"/api/scenes/{sid}/playback")).json()
+    assert body["modes"][0] == "direct" and body["notice"] is None
+    other = (await client.get(f"/api/scenes/{indexed['scenes']['vp9']}/stream", headers={"Range": "bytes=0-9"}))
+    assert other.status_code == 206 and other.content == (root / "videos" / "vp9.webm").read_bytes()[:10]

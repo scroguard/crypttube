@@ -59,7 +59,7 @@ describe("playback modes", () => {
     audio_codec: "aac",
     duration: 60,
     screenshot_url: "",
-    sprite_vtt_url: null,
+    sprite_vtt_url: null, notice: null,
   };
   it("skips modes the browser can't decode", () => {
     const noHevc = (t: string) => (t.includes("hvc1") ? "" : "maybe");

@@ -12,11 +12,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
+from starlette.concurrency import iterate_in_threadpool
 
 from app import generated, jobs, streaming
 from app.acl import Acl, visible
 from app.auth import get_acl
 from app.config import get_settings
+from app import media
 from app.media import ProbeError
 from app.sql import Q
 
@@ -100,10 +102,73 @@ async def _scene(request: Request, scene_id: int, acl: Acl):
 async def stream_direct(scene_id: int, request: Request, acl: Acl = Depends(get_acl)):
     """The original file, with HTTP Range support (206 Partial Content) for instant seeking."""
     s = await _scene(request, scene_id, acl)
+    protection = await asyncio.to_thread(media.mp4_protection, s["path"])
+    if protection.pssh_types:
+        # Leftover DRM headers on unencrypted content: serve the file with those boxes
+        # relabelled as padding, so every browser plays it directly. Same bytes otherwise.
+        return patched_file_response(request, s["path"], streaming.mime_type(s["path"]),
+                                     {o: b"free" for o in protection.pssh_types})
     return VideoFileResponse(
         s["path"], media_type=streaming.mime_type(s["path"]),
         headers={"Cache-Control": "private, no-transform"},
     )
+
+
+def _byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """(start, end inclusive) of a single `bytes=` range, or None for the whole file.
+    Raises 416 for one that can't be satisfied."""
+    if not header or not header.startswith("bytes=") or "," in header:
+        return None
+    first, _, last = header[6:].strip().partition("-")
+    try:
+        if first == "":
+            n = int(last)
+            start, end = max(0, size - n), size - 1
+        else:
+            start = int(first)
+            end = min(int(last), size - 1) if last else size - 1
+    except ValueError:
+        return None
+    if start >= size or start > end:
+        raise HTTPException(416, headers={"Content-Range": f"bytes */{size}"})
+    return start, end
+
+
+def patched_file_response(request: Request, path: str, media_type: str, patches: dict[int, bytes]) -> Response:
+    """A file served with some bytes replaced (same length), with Range support."""
+    st = os.stat(path)
+    etag = f'"p{st.st_mtime_ns:x}-{st.st_size:x}"'
+    headers = {"Accept-Ranges": "bytes", "ETag": etag, "Cache-Control": "private, no-transform"}
+    wanted = request.headers.get("range")
+    if_range = request.headers.get("if-range")
+    rng = _byte_range(wanted, st.st_size) if not if_range or if_range == etag else None
+    start, end = rng or (0, st.st_size - 1)
+    length = end - start + 1
+    headers["Content-Length"] = str(length)
+    if rng:
+        headers["Content-Range"] = f"bytes {start}-{end}/{st.st_size}"
+    status = 206 if rng else 200
+    if request.method == "HEAD":
+        return Response(status_code=status, headers=headers, media_type=media_type)
+
+    def chunks():
+        with open(path, "rb") as f:
+            f.seek(start)
+            pos, left = start, length
+            while left > 0:
+                data = f.read(min(VideoFileResponse.chunk_size, left))
+                if not data:
+                    return
+                for at, repl in patches.items():
+                    lo, hi = max(at, pos), min(at + len(repl), pos + len(data))
+                    if lo < hi:
+                        data = data[:lo - pos] + repl[lo - at:hi - at] + data[hi - pos:]
+                yield data
+                pos += len(data)
+                left -= len(data)
+
+    return StreamingResponse(iterate_in_threadpool(chunks()), status_code=status, headers=headers,
+                             media_type=media_type)
 
 
 @router.get("/scenes/{scene_id}/stream.mp4")
@@ -140,8 +205,13 @@ async def playback(scene_id: int, request: Request, acl: Acl = Depends(get_acl))
     version = generated.scene_version(s["oshash"], s["file_id"])
     urlv = generated.url_version(version, s["assets_rev"])
     sprite_img, sprite_vtt = generated.sprite_paths(get_settings().generated_dir, version)
+    modes = streaming.playback_modes(s["path"], s["video_codec"], s["audio_codec"])
+    notice = None
+    if (await asyncio.to_thread(media.mp4_protection, s["path"])).encrypted:
+        notice = "This video is encrypted (DRM). It can't be played without the keys it was protected with."
     return {
-        "modes": streaming.playback_modes(s["path"], s["video_codec"], s["audio_codec"]),
+        "modes": modes,
+        "notice": notice,
         "direct": {"url": f"{base}/stream", "mime_type": streaming.mime_type(s["path"])},
         "remux_url": f"{base}/stream.mp4?mode=remux",
         "transcode_url": f"{base}/stream.mp4?mode=transcode",

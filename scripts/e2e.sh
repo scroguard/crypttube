@@ -26,6 +26,14 @@ PY
   touch "$MEDIA/.done"
 fi
 
+# A video whose MP4 carries DRM headers left over from a download (the content itself is
+# not encrypted). Firefox refuses such files; it lives outside the main library.
+DRM=frontend/e2e/media/drm
+if [ ! -f "$DRM/Leftover Headers.mp4" ]; then
+  mkdir -p "$DRM"
+  python3 scripts/add_drm_headers.py "$MEDIA/videos/Beach Day.mp4" "$DRM/Leftover Headers.mp4"
+fi
+
 # A small Stash database and a studio picture, outside the library, for the import test.
 STASH=frontend/e2e/media/stash
 if [ ! -f "$STASH/stash-go.sqlite" ]; then

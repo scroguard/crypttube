@@ -209,7 +209,8 @@ export default function VideoPlayer({ sceneId, playback, poster, resumeTime }: {
       // Fall back to the next delivery mode, keeping the position.
       const next = modes[modes.indexOf(source.mode) + 1];
       if (next) {
-        const t = time;
+        // where the video actually is (the displayed time can lag behind or be a seek target)
+        const t = absTime();
         wantPlay.current = true;
         setOffset(next === "direct" ? 0 : t);
         setSource({ mode: next, height: null });

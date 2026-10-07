@@ -80,6 +80,8 @@ export interface Playback {
   duration: number | null;
   screenshot_url: string;
   sprite_vtt_url: string | null;
+  /** Set when the file needs special handling to play (shown under the player). */
+  notice: string | null;
 }
 
 export interface GalleryItem {

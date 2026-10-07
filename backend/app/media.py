@@ -55,6 +55,88 @@ class ProbeError(Exception):
     pass
 
 
+MP4_EXTS = frozenset(".mp4 .m4v .mov".split())
+MAX_MOOV = 256 * 1024 * 1024
+CONTAINERS = (b"moov", b"trak", b"mdia", b"minf", b"stbl", b"udta", b"edts", b"mvex")
+
+
+@dataclass(frozen=True)
+class Protection:
+    """DRM markings found in an MP4's header.
+
+    `pssh_types`: file offsets of the type field of each DRM init box (pssh). Files saved
+    from streaming sites often keep these although the content isn't encrypted, and
+    Firefox (and iOS) then refuse to play them. Served with those boxes relabelled as
+    'free' (padding, same size), the file plays everywhere.
+    `encrypted`: the tracks themselves are encrypted (encv/enca sample entries); no
+    browser can play those without the keys."""
+    pssh_types: tuple[int, ...] = ()
+    encrypted: bool = False
+
+
+def _read_protection(path: str) -> Protection:
+    with open(path, "rb") as f:
+        size = os.fstat(f.fileno()).st_size
+        off = 0
+        while off + 8 <= size:
+            f.seek(off)
+            box, kind = struct.unpack(">I4s", f.read(8))
+            header = 8
+            if box == 1:
+                box, header = struct.unpack(">Q", f.read(8))[0], 16
+            elif box == 0:
+                box = size - off
+            if box < header:
+                return Protection()                  # not a well-formed MP4 from here on
+            if kind == b"moov":
+                if box > MAX_MOOV:
+                    return Protection()
+                f.seek(off)
+                moov = f.read(box)
+                return Protection(tuple(off + o for o in _pssh_in(moov, 0, len(moov))),
+                                  any(t in moov for t in (b"encv", b"enca")))
+            off += box
+    return Protection()
+
+
+def _pssh_in(buf: bytes, start: int, end: int) -> list[int]:
+    """Offsets (within buf) of the type field of pssh boxes in buf[start:end], looking
+    inside the container boxes where they can appear."""
+    found, off = [], start
+    while off + 8 <= end:
+        box, kind = struct.unpack(">I4s", buf[off:off + 8])
+        header = 8
+        if box == 1 and off + 16 <= end:
+            box, header = struct.unpack(">Q", buf[off + 8:off + 16])[0], 16
+        if box < header or off + box > end:
+            break
+        if kind == b"pssh":
+            found.append(off + 4)
+        elif kind in CONTAINERS:
+            found += _pssh_in(buf, off + header, off + box)
+        off += box
+    return found
+
+
+@functools.lru_cache(maxsize=4096)
+def _protection_cached(path: str, size: int, mtime_ns: int) -> Protection:
+    try:
+        return _read_protection(path)
+    except (OSError, struct.error):
+        return Protection()
+
+
+def mp4_protection(path: str) -> Protection:
+    """Reads only box headers and the moov box; cached per file version."""
+    if os.path.splitext(path)[1].lower() not in MP4_EXTS:
+        return Protection()
+    try:
+        st = os.stat(path)
+    except OSError:
+        return Protection()
+    return _protection_cached(path, st.st_size, st.st_mtime_ns)
+
+
 @functools.cache
 def _background_prefix() -> tuple[str, ...]:
     prefix: list[str] = []
