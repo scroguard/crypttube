@@ -351,6 +351,21 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await below.getByRole("button", { name: "Select images" }).click();
   await below.getByRole("button", { name: "Select this page" }).click();
   await expect(page.getByTestId("bulk-bar")).toContainText("5 selected");   // still on page 2
+  // scrolled down, the site header, the toolbar and the selection buttons stay on screen
+  await page.setViewportSize({ width: 1440, height: 420 });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeInViewport();
+  await expect(page.getByTestId("toolbar")).toBeInViewport();
+  await expect(page.getByTestId("select-top").getByRole("button", { name: "Done selecting" })).toBeInViewport();
+  const headerBox = (await page.locator("header").boundingBox())!;
+  const toolbarBox = (await page.getByTestId("toolbar").boundingBox())!;
+  const selectBox = (await page.getByTestId("select-top").boundingBox())!;
+  expect(toolbarBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height - 1);   // stacked, not overlapping
+  expect(selectBox.y).toBeGreaterThanOrEqual(toolbarBox.y + toolbarBox.height - 1);
+  await page.screenshot({ path: `${SHOTS}/09e-sticky-toolbar.png` });
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   // the selection bar never covers the bottom page navigation: scrolled to the end, the
   // pager sits fully above it
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));

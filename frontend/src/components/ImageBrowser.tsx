@@ -55,7 +55,10 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
     <>
       {marquee.overlay}
       {canCreate && (list.items.length > 0 || selected) && (
-        <div className="mb-2 flex items-center justify-end gap-2">
+        // Sticks under the page's toolbar (or the site header where there is none), so
+        // "Done selecting" is always at hand.
+        <div className="sticky z-20 -mx-4 mb-2 flex items-center justify-end gap-2 bg-zinc-950/90 px-4 py-1.5 backdrop-blur"
+             style={{ top: "calc(3.5rem + var(--toolbar-h, 0px))" }} data-testid="select-top">
           {note && <span className="text-xs text-amber-400">{note}</span>}
           {selected && (
           <>
