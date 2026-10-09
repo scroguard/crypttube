@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect } from "react";
 import type { Query } from "../api/client";
-import { useInfiniteList, useMe } from "../api/hooks";
+import { useInfiniteList, useMe, usePreferences } from "../api/hooks";
 import type { ImageItem } from "../api/types";
 import { useMarquee } from "../lib/useMarquee";
 import BulkBar, { fetchMatchingIds } from "./BulkBar";
@@ -46,6 +46,14 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
     setSelected((s) => new Set([...(s ?? []), ...list.items.filter((i) => (i as { can_edit?: boolean }).can_edit !== false).map((i) => i.id)]));
     setNote(null);
   };
+  // A paged list starts each page with nothing selected, unless the user chose to keep
+  // the selection across pages (account page).
+  const keepAcrossPages = usePreferences().data?.keep_selection_across_pages ?? false;
+  const shownPage = list.paging?.page;
+  useEffect(() => {
+    if (!keepAcrossPages) setSelected((s) => (s && s.size ? new Set() : s));
+  }, [shownPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const deselectAll = () => { setSelected((s) => (s ? new Set() : s)); setNote(null); };
   async function selectAllMatching() {
     const r = await fetchMatchingIds("images", idsQuery);
     setSelected(new Set(r.ids));
@@ -69,6 +77,7 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
             <button className="btn-ghost" onClick={selectAllMatching} title="Select every image in this list, including ones not loaded yet">
               Select all matching
             </button>
+            <button className="btn-ghost" onClick={deselectAll} disabled={!selected?.size}>Deselect all</button>
           </>
         )}
           <button className={selected ? "btn-primary" : "btn-ghost"} onClick={() => setMode(!selected)}>
@@ -91,6 +100,7 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
             <>
               <button className="btn-ghost" onClick={selectShown}>Select this page</button>
               <button className="btn-ghost" onClick={selectAllMatching}>Select all matching</button>
+              <button className="btn-ghost" onClick={deselectAll} disabled={!selected?.size}>Deselect all</button>
             </>
           )}
         </div>

@@ -338,6 +338,27 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await page.getByRole("button", { name: "Select images" }).first().click();
   await page.getByRole("button", { name: "Select this page" }).first().click();
   await expect(page.getByTestId("bulk-bar")).toContainText("10 selected");
+  // moving to another page starts with nothing selected...
+  await page.getByRole("button", { name: "Next ›" }).first().click();
+  await expect(page.getByTestId("image-tile")).toHaveCount(5);
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await page.getByRole("button", { name: "Select this page" }).first().click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("5 selected");
+  // ...and "Deselect all" empties the selection while staying in select mode
+  await page.getByRole("button", { name: "Deselect all" }).first().click();
+  await expect(page.getByTestId("bulk-bar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Done selecting" }).first()).toBeVisible();
+
+  // with "keep my selection" switched on (account page), pages add up instead
+  await page.goto("/account");
+  const keep = page.getByTestId("selection-preferences").getByLabel("Keep my selection when I change pages");
+  await keep.check();
+  await expect(keep).toBeChecked();
+  await page.screenshot({ path: `${SHOTS}/09f-selection-preference.png` });
+  await nav("Images").click();
+  await page.getByRole("button", { name: "Select images" }).first().click();
+  await page.getByRole("button", { name: "Select this page" }).first().click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("10 selected");
   await page.getByRole("button", { name: "Next ›" }).first().click();
   await expect(page.getByTestId("image-tile")).toHaveCount(5);
   await page.getByRole("button", { name: "Select this page" }).first().click();
@@ -504,6 +525,7 @@ test("assign performers to images (bulk + lightbox) and to a scene (inline)", as
   expect((await page.request.delete(`/api${alice}/image`, { headers: { "X-Requested-With": "e2e" } })).ok()).toBeTruthy();
   await dialog.getByLabel("Add tags…").pressSequentially("Portrait", { delay: 15 });
   await dialog.getByRole("option", { name: "Create “Portrait”" }).click();
+  await expect(dialog.getByRole("button", { name: "Remove Portrait" })).toBeVisible();   // created and added
   await page.keyboard.press("ArrowRight"); // typing keys must not flip to the next image
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toBeHidden();

@@ -144,3 +144,10 @@ export function useLogout() {
     qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "auth" });
   };
 }
+
+export interface Preferences { keep_selection_across_pages: boolean }
+
+/** The signed-in user's own preferences (account page). */
+export function usePreferences() {
+  return useQuery({ queryKey: ["preferences"], queryFn: () => api<Preferences>("/me/preferences"), staleTime: 300_000 });
+}

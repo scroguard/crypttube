@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "../api/client";
-import { useLogout, useMe, useWrite } from "../api/hooks";
+import { useLogout, useMe, usePreferences, useWrite } from "../api/hooks";
 import type { SessionInfo } from "../api/types";
 import { FormButtons } from "../components/EditForms";
 import EntityPicker from "../components/EntityPicker";
@@ -41,6 +41,7 @@ export default function Account() {
           <FormButtons busy={change.isPending} error={change.error} label="Change password" />
         </form>
       </section>
+      <SelectionPreferences />
       <ContentFilters />
       <section className="card p-5">
         <div className="mb-3 flex items-center justify-between">
@@ -129,6 +130,32 @@ function ContentFilters() {
           </button>
         </div>
       </div>
+    </section>
+  );
+}
+
+/** How selecting items for bulk edits behaves. */
+function SelectionPreferences() {
+  const prefs = usePreferences();
+  // Local state, so the switch flips the moment it's clicked (the save follows).
+  const [keep, setKeep] = useState<boolean | null>(null);
+  const save = useWrite((value: boolean) =>
+    api("/me/preferences", { method: "PUT", json: { keep_selection_across_pages: value } }));
+  if (!prefs.data) return null;
+  const change = (value: boolean) => {
+    setKeep(value);
+    save.mutate(value);
+  };
+  return (
+    <section className="card p-5" data-testid="selection-preferences">
+      <h2 className="mb-1 font-semibold">Selecting</h2>
+      <p className="mb-3 text-sm text-zinc-400">
+        When a list is shown page by page (Items per page), moving to another page normally starts with nothing
+        selected. Switch this on to keep collecting items across pages instead.
+      </p>
+      <Toggle checked={keep ?? prefs.data.keep_selection_across_pages} onChange={change}
+              label="Keep my selection when I change pages" />
+      {save.isError && <ErrorBox error={save.error} className="mt-2" />}
     </section>
   );
 }

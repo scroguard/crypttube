@@ -135,3 +135,14 @@ async def test_continue_watching_is_per_user_and_ordered(app, client, login_as, 
     await client.put(f"/api/users/{viewer.user_id}/restrictions", json={"performer_ids": [seed["performers"]["Alice"]]})
     await counts.refresh(app.state.pool)
     assert (await viewer.get("/api/me/continue-watching")).json()["items"] == []   # scene 5 features Alice
+
+
+async def test_selection_preference(client, login_as, anon):
+    vera = await login_as("vera-prefs", "viewer")
+    assert (await vera.get("/api/me/preferences")).json() == {"keep_selection_across_pages": False}
+    r = await vera.put("/api/me/preferences", json={"keep_selection_across_pages": True})
+    assert r.status_code == 200 and r.json() == {"keep_selection_across_pages": True}
+    assert (await vera.get("/api/me/preferences")).json() == {"keep_selection_across_pages": True}
+    assert (await client.get("/api/me/preferences")).json()["keep_selection_across_pages"] is False   # per user
+    assert (await vera.put("/api/me/preferences", json={"bogus": 1})).status_code == 422
+    assert (await anon.get("/api/me/preferences")).status_code == 401
