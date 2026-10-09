@@ -573,7 +573,7 @@ async def test_ids_of_everything_matching(app, client, login_as, seed):
 
     # only what the caller may edit: a viewer can edit nothing in a global library
     viewer = await login_as("idsviewer", "viewer")
-    assert (await viewer.get("/api/ids/scenes")).json() == {"ids": [], "truncated": False}
+    assert (await viewer.get("/api/ids/scenes")).json() == {"ids": [], "truncated": False, "limit": 100_000}
     editor = await login_as("idseditor", "editor")
     assert len((await editor.get("/api/ids/scenes")).json()["ids"]) == len(present)
     # and the ids can be bulk-edited in one go

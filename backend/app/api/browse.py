@@ -311,7 +311,7 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
     return page_response(page)
 
 
-SELECT_ALL_LIMIT = 20_000
+SELECT_ALL_LIMIT = 100_000   # most items one "select all matching" picks
 
 
 def editable_clause(acl: Acl, alias: str, q: Q) -> str:
@@ -329,7 +329,7 @@ async def _matching_ids(pool, from_: str, alias: str, where: list[str], args: li
         f"SELECT {alias}.id FROM {from_} WHERE {' AND '.join(where)} ORDER BY {alias}.id LIMIT {SELECT_ALL_LIMIT + 1}",
         *args)
     ids = [r["id"] for r in rows[:SELECT_ALL_LIMIT]]
-    return {"ids": ids, "truncated": len(rows) > SELECT_ALL_LIMIT}
+    return {"ids": ids, "truncated": len(rows) > SELECT_ALL_LIMIT, "limit": SELECT_ALL_LIMIT}
 
 
 @router.get("/ids/scenes")

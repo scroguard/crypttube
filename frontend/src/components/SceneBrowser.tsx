@@ -61,7 +61,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
   async function selectAllMatching() {
     const r = await fetchMatchingIds("scenes", query);
     setSelected(new Set(r.ids));
-    setNote(r.truncated ? "Selected the first 20,000 matches." : r.ids.length ? null : "Nothing here that you can edit.");
+    setNote(r.truncated ? `Selected the first ${r.limit.toLocaleString()} matches.` : r.ids.length ? null : "Nothing here that you can edit.");
   }
   const active = ["tags", "xtags", "performers", "unassigned", "studios", "res", "rating", "organized", "played", "missing"]
     .filter((k) => f[k] !== undefined).length;

@@ -107,6 +107,7 @@ async def main(n: int, keep: bool) -> None:
                     ("jump to the last page (offset)", "/api/scenes", {"offset": n - 60}),
                     ("jump to the middle, by title", "/api/scenes", {"offset": n // 2, "sort": "title", "desc": False}),
                     ("1000 per page", "/api/scenes", {"limit": 1000}),
+                    ("select-all ids, everything (100k cap)", "/api/ids/scenes", {}),
                     ("grouped by performer, page 1", "/api/groups/scenes", {"limit": 20}),
                     ("grouped + tag filter", "/api/groups/scenes", {"limit": 20, "tag_ids": 3}),
                     ("grouped, sorted by title", "/api/groups/scenes", {"limit": 20, "sort": "title", "desc": False}),

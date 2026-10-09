@@ -12,7 +12,7 @@ interface Assigned { id: number; name: string; count: number }
 type AssignedKind = "tags" | "performers" | "studios";
 
 /** Fetch the ids of everything matching a list's filters that the user may edit. */
-export async function fetchMatchingIds(kind: "scenes" | "images", query: Query): Promise<{ ids: number[]; truncated: boolean }> {
+export async function fetchMatchingIds(kind: "scenes" | "images", query: Query): Promise<{ ids: number[]; truncated: boolean; limit: number }> {
   return api(`/ids/${kind}`, { query });
 }
 
@@ -23,9 +23,12 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
   const [tags, setTags] = useState<number[]>([]);
   const [performers, setPerformers] = useState<number[]>([]);
   // Large selections ("select all matching") go to the server in chunks.
+  const [done, setDone] = useState(0);   // items written so far, for the progress line
   const write = useWrite(async (body: object) => {
+    setDone(0);
     for (let i = 0; i < ids.length; i += CHUNK) {
       await api(`/${kind}/bulk`, { json: { ids: ids.slice(i, i + CHUNK), ...body } });
+      setDone(Math.min(ids.length, i + CHUNK));
     }
   });
   const [studio, setStudio] = useState<number[]>([]);
@@ -127,7 +130,11 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
         </select>
         <button className="btn-ghost" onClick={() => run({ set: { organized: true } })}>Mark organized</button>
         <DeleteMediaButton kind={kind} ids={ids} onDeleted={onDone} />
-        {write.isPending && <span className="text-sm text-zinc-400">Applying…</span>}
+        {write.isPending && (
+          <span className="text-sm text-zinc-400" role="status" data-testid="bulk-progress">
+            Applying…{ids.length > CHUNK && ` ${done.toLocaleString()} of ${ids.length.toLocaleString()}`}
+          </span>
+        )}
         {write.isSuccess && !write.isPending && <span className="text-sm text-emerald-400">Done</span>}
         {write.isError && <ErrorBox error={write.error} />}
       </div>
