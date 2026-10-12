@@ -3,6 +3,7 @@
 # so deploying compose.yaml alone (e.g. from a stack manager) always gets production.
 services:
   goonstreamer-api:
+    image: goonstreamer-backend:dev   # with test tools; never replaces the production tag
     build:
       args:
         INSTALL_DEV: "1"
@@ -17,6 +18,7 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]
 
   goonstreamer-worker:
+    image: goonstreamer-backend:dev   # with test tools; never replaces the production tag
     build:
       args:
         INSTALL_DEV: "1"

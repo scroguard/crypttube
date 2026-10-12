@@ -226,9 +226,44 @@ async def test_identical_compares_every_byte(tmp_path):
     data = bytes(range(256)) * 50_000
     a.write_bytes(data)
     b.write_bytes(data)
-    assert await duplicates.identical(str(a), str(b))
+    assert (await duplicates.identical(str(a), str(b))).same
     b.write_bytes(data[:-1] + b"x")                 # differs in the last byte only
-    assert not await duplicates.identical(str(a), str(b))
+    r = await duplicates.identical(str(a), str(b))
+    assert not r.same and r.reason == f"contents differ from byte {len(data) - 1:,}"
     b.write_bytes(data[:-1])                        # shorter
-    assert not await duplicates.identical(str(a), str(b))
-    assert not await duplicates.identical(str(a), str(tmp_path / "missing"))
+    assert "ends early" in (await duplicates.identical(str(a), str(b))).reason
+    r = await duplicates.identical(str(a), str(tmp_path / "missing"))
+    assert not r.same and r.reason.startswith("couldn't open") and "missing" in r.reason
+
+
+async def test_identical_copes_with_short_reads(tmp_path, monkeypatch):
+    """Network filesystems may return fewer bytes than asked without being at the end of
+    the file. Identical files must still compare equal."""
+    import builtins
+    import random
+    from app.api import duplicates
+    a, b = tmp_path / "a", tmp_path / "b"
+    data = random.Random(1).randbytes(3_000_000)
+    a.write_bytes(data)
+    b.write_bytes(data)
+    monkeypatch.setattr(duplicates, "COMPARE_CHUNK", 1 << 20)
+    real_open = builtins.open
+
+    class Short:
+        def __init__(self, f, seed):
+            self.f, self.rng = f, random.Random(seed)
+
+        def read(self, n=-1):           # like a network share: often less than asked
+            return self.f.read(max(1, min(n, self.rng.randint(1, 300_000))))
+
+        def close(self):
+            self.f.close()
+
+    seeds = iter(range(100))
+    monkeypatch.setattr(builtins, "open", lambda p, m="r", *x, **k: Short(real_open(p, m), next(seeds)) if str(p).startswith(str(tmp_path)) else real_open(p, m, *x, **k))
+    assert (await duplicates.identical(str(a), str(b))).same
+    b_data = bytearray(data)
+    b_data[2_500_000] ^= 1
+    real_open(b, "wb").write(bytes(b_data))
+    r = await duplicates.identical(str(a), str(b))
+    assert not r.same and r.reason == "contents differ from byte 2,500,000"

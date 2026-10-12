@@ -11,6 +11,7 @@ list of extra copies, delete those outside the app, then run Maintenance -> Clea
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -138,32 +139,70 @@ async def combine(body: Combine, request: Request) -> dict:
 COMPARE_CHUNK = 8 * 1024 * 1024
 
 
-async def identical(a: str, b: str, progress=None) -> bool:
+@dataclass(frozen=True)
+class Comparison:
+    same: bool
+    reason: str = ""      # why not: where the files differ, or what couldn't be read
+
+
+def _read_exactly(f, n: int) -> bytes:
+    """Read n bytes (fewer only at the end of the file). A single read may return less
+    than asked on network filesystems (SMB, NFS, FUSE) without being at the end."""
+    parts, got = [], 0
+    while got < n:
+        part = f.read(n - got)
+        if not part:
+            break
+        parts.append(part)
+        got += len(part)
+    return b"".join(parts)
+
+
+def _first_difference(x: bytes, y: bytes) -> int:
+    lo, hi = 0, min(len(x), len(y))
+    while lo < hi:                       # binary search over equal prefixes
+        mid = (lo + hi) // 2
+        if x[:mid + 1] == y[:mid + 1]:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+async def identical(a: str, b: str, progress=None) -> Comparison:
     """Byte-for-byte comparison, in large pieces: alternating small reads between two
     files makes a hard disk or a NAS seek back and forth constantly, which can turn a
     few seconds into hours. `progress(done_bytes)` is awaited after each piece."""
     def read_pair(fa, fb):
-        return fa.read(COMPARE_CHUNK), fb.read(COMPARE_CHUNK)
+        return _read_exactly(fa, COMPARE_CHUNK), _read_exactly(fb, COMPARE_CHUNK)
+
+    opened = []
     try:
-        fa, fb = await asyncio.to_thread(open, a, "rb"), await asyncio.to_thread(open, b, "rb")
-    except OSError:
-        return False
-    try:
+        for path in (a, b):
+            try:
+                opened.append(await asyncio.to_thread(open, path, "rb"))
+            except OSError as e:
+                return Comparison(False, f"couldn't open {path}: {e.strerror or e}")
+        fa, fb = opened
         done = 0
         while True:
-            x, y = await asyncio.to_thread(read_pair, fa, fb)
+            try:
+                x, y = await asyncio.to_thread(read_pair, fa, fb)
+            except OSError as e:
+                return Comparison(False, f"couldn't read after {done:,} bytes: {e.strerror or e}")
             if x != y:
-                return False
+                if len(x) != len(y):
+                    return Comparison(False, f"one file ends early ({done + min(len(x), len(y)):,} bytes)")
+                at = done + _first_difference(x, y)
+                return Comparison(False, f"contents differ from byte {at:,}")
             if not x:
-                return True
+                return Comparison(True)
             done += len(x)
             if progress:
                 await progress(done)
-    except OSError:
-        return False
     finally:
-        fa.close()
-        fb.close()
+        for f in opened:
+            f.close()
 
 
 async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | None = None, progress=None) -> dict:
@@ -185,11 +224,16 @@ async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | N
     # It must be byte-identical to a copy that stays (any one: a set can also contain a
     # different file that merely shares the fingerprint).
     # The job names the copy it keeps, so "Suggested to keep" is always the survivor.
+    reasons = []
     for other in [o for o in others if keeper_id is None or o["id"] == keeper_id]:
-        if await identical(target["path"], other["path"], progress):
+        result = await identical(target["path"], other["path"], progress)
+        if result.same:
             break
+        reasons.append(result.reason)
+        log.info("not deleting %s: compared with %s: %s", target["path"], other["path"], result.reason)
     else:
-        raise HTTPException(409, "the files are not identical byte for byte; nothing was deleted")
+        raise HTTPException(409, "the files are not identical byte for byte; nothing was deleted"
+                                 + (f" ({reasons[0]})" if reasons else ""))
     async with pool.acquire() as conn, conn.transaction():
         await _combine(conn, kind, [r["id"] for r in rows])
     result = await delete_content(pool, get_settings().generated_dir, table, [content_id], None)
@@ -260,7 +304,7 @@ async def run_delete_extras(pool, ctx, kind: str) -> str:
     log.info("deleting duplicates: %d extra %s copies to check (%.1f GB)", len(extras), kind, total_bytes / 2**30)
     checked_bytes = 0
     deleted = freed = different = failed = 0
-    reason = None
+    reason = why = None
     for n, (content_id, keeper_id, size) in enumerate(extras, start=1):
         if await ctx.cancelled():
             break
@@ -281,6 +325,7 @@ async def run_delete_extras(pool, ctx, kind: str) -> str:
         except HTTPException as e:
             if "not identical" in str(e.detail):
                 different += 1
+                why = why or str(e.detail).partition("(")[2].rstrip(")")
             else:
                 failed += 1
                 reason = reason or str(e.detail)
@@ -288,7 +333,7 @@ async def run_delete_extras(pool, ctx, kind: str) -> str:
         await ctx.progress(checked_bytes / total_bytes, f"{n} of {len(extras)} copies checked · {deleted} deleted")
     message = f"deleted {deleted} extra copies ({freed / 1_048_576:.1f} MB freed)"
     if different:
-        message += f"; {different} kept because they are not identical byte for byte"
+        message += f"; {different} kept because they are not identical byte for byte (e.g. {why})"
     if failed:
         message += f"; {failed} could not be deleted ({reason})"
     return message
