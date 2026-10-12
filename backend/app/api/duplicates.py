@@ -10,7 +10,7 @@ list of extra copies, delete those outside the app, then run Maintenance -> Clea
 """
 
 import asyncio
-import filecmp
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -23,6 +23,7 @@ from app.config import get_settings
 from app.deletion import DeleteError, delete_content
 
 JOB_KIND = "delete_duplicates"
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/duplicates", tags=["duplicates"])
 
@@ -134,14 +135,38 @@ async def combine(body: Combine, request: Request) -> dict:
     return {"groups": len(groups)}
 
 
-def _identical(a: str, b: str) -> bool:
+COMPARE_CHUNK = 8 * 1024 * 1024
+
+
+async def identical(a: str, b: str, progress=None) -> bool:
+    """Byte-for-byte comparison, in large pieces: alternating small reads between two
+    files makes a hard disk or a NAS seek back and forth constantly, which can turn a
+    few seconds into hours. `progress(done_bytes)` is awaited after each piece."""
+    def read_pair(fa, fb):
+        return fa.read(COMPARE_CHUNK), fb.read(COMPARE_CHUNK)
     try:
-        return filecmp.cmp(a, b, shallow=False)
+        fa, fb = await asyncio.to_thread(open, a, "rb"), await asyncio.to_thread(open, b, "rb")
     except OSError:
         return False
+    try:
+        done = 0
+        while True:
+            x, y = await asyncio.to_thread(read_pair, fa, fb)
+            if x != y:
+                return False
+            if not x:
+                return True
+            done += len(x)
+            if progress:
+                await progress(done)
+    except OSError:
+        return False
+    finally:
+        fa.close()
+        fb.close()
 
 
-async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | None = None) -> dict:
+async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | None = None, progress=None) -> dict:
     """Delete one copy of a duplicated file. First its details are combined into the
     other copies, and it is compared byte for byte with one that stays: the fingerprint
     only looks at the ends of a file, and a deletion must not rest on that alone."""
@@ -161,7 +186,7 @@ async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | N
     # different file that merely shares the fingerprint).
     # The job names the copy it keeps, so "Suggested to keep" is always the survivor.
     for other in [o for o in others if keeper_id is None or o["id"] == keeper_id]:
-        if await asyncio.to_thread(_identical, target["path"], other["path"]):
+        if await identical(target["path"], other["path"], progress):
             break
     else:
         raise HTTPException(409, "the files are not identical byte for byte; nothing was deleted")
@@ -228,29 +253,54 @@ async def delete_extras(body: DeleteExtras, request: Request) -> dict:
 
 async def run_delete_extras(pool, ctx, kind: str) -> str:
     rows = await pool.fetch(
-        f"""SELECT array_agg(c.id ORDER BY f.id) AS ids FROM {CANDIDATES.format(table=TABLE[kind])}
+        f"""SELECT array_agg(c.id ORDER BY f.id) AS ids, f.size FROM {CANDIDATES.format(table=TABLE[kind])}
             GROUP BY f.oshash, f.size HAVING count(*) > 1""")
-    extras = [(i, r["ids"][0]) for r in rows for i in r["ids"][1:]]
+    extras = [(i, r["ids"][0], r["size"]) for r in rows for i in r["ids"][1:]]
+    total_bytes = sum(size for _, _, size in extras) or 1
+    log.info("deleting duplicates: %d extra %s copies to check (%.1f GB)", len(extras), kind, total_bytes / 2**30)
+    checked_bytes = 0
     deleted = freed = different = failed = 0
-    for n, (content_id, keeper_id) in enumerate(extras, start=1):
+    reason = None
+    for n, (content_id, keeper_id, size) in enumerate(extras, start=1):
         if await ctx.cancelled():
             break
+
+        async def progress(done: int, n=n, size=size) -> None:
+            await ctx.progress((checked_bytes + done) / total_bytes,
+                               f"comparing copy {n} of {len(extras)}: {done / 2**30:.1f} of {size / 2**30:.1f} GB"
+                               f" · {deleted} deleted so far")
+            if await ctx.cancelled():
+                raise asyncio.CancelledError
         try:
-            result = await delete_extra_copy(pool, kind, content_id, keeper_id)
+            result = await delete_extra_copy(pool, kind, content_id, keeper_id, progress)
             deleted += 1
             freed += result["bytes"]
+            log.info("deleted duplicate %s %s (%d bytes)", kind, content_id, result["bytes"])
+        except asyncio.CancelledError:
+            break
         except HTTPException as e:
             if "not identical" in str(e.detail):
                 different += 1
             else:
                 failed += 1
-        await ctx.progress(n / len(extras), f"{n}/{len(extras)} extra copies checked")
+                reason = reason or str(e.detail)
+        checked_bytes += size
+        await ctx.progress(checked_bytes / total_bytes, f"{n} of {len(extras)} copies checked · {deleted} deleted")
     message = f"deleted {deleted} extra copies ({freed / 1_048_576:.1f} MB freed)"
     if different:
         message += f"; {different} kept because they are not identical byte for byte"
     if failed:
-        message += f"; {failed} could not be deleted"
+        message += f"; {failed} could not be deleted ({reason})"
     return message
+
+
+@router.get("/job")
+async def delete_job(request: Request, kind: Kind = "scene") -> dict | None:
+    """The latest "delete all extra copies" job for this kind, to show its progress and result."""
+    row = await request.app.state.pool.fetchrow(
+        """SELECT id, status, progress, message, error, created_at, finished_at FROM jobs
+           WHERE kind = $1 AND payload->>'kind' = $2 ORDER BY id DESC LIMIT 1""", JOB_KIND, kind)
+    return dict(row) if row else None
 
 
 @router.get("/extra-copies.txt", response_class=PlainTextResponse)

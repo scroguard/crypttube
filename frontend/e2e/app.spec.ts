@@ -80,6 +80,8 @@ test("admin adds a library and it gets indexed", async () => {
   await page.screenshot({ path: `${SHOTS}/02-libraries.png` });
 
   await adminNav("Jobs").click();
+  // preview batches and count refreshes are hidden unless asked for
+  await page.getByLabel("Show preview batches and count refreshes").check();
   // scan -> generate + refresh_counts all finish
   await expect(async () => {
     const rows = page.getByTestId("job-row");
@@ -1061,10 +1063,13 @@ test("duplicates: same file under another name is found, details combined, list 
     expect(text.trim().split("\n")).toHaveLength(1);
     expect(text).toContain("/media/lib/videos/Beach Day");
 
-    // each copy has its own Delete button; the set has one that removes all but one copy
+    // each copy has its own Delete button, and the set one that removes all but one copy;
+    // here the page-wide "Delete all extra copies" runs in the background and reports back
     await expect(group.getByRole("button", { name: "Delete /media/lib/videos/Beach Day (copy).mp4" })).toBeVisible();
+    await expect(group.getByRole("button", { name: "Delete 1 extra copy" })).toBeVisible();
     page.once("dialog", (d) => d.accept());
-    await group.getByRole("button", { name: "Delete 1 extra copy" }).click();
+    await page.getByRole("button", { name: "Delete all extra copies…" }).click();
+    await expect(page.getByTestId("delete-job")).toContainText("deleted 1 extra copies", { timeout: 40_000 });
     await expect(page.getByTestId("duplicate-group")).toHaveCount(0);
     expect(fs.existsSync(copy)).toBe(false);
     expect(fs.existsSync("e2e/media/lib/videos/Beach Day.mp4")).toBe(true);

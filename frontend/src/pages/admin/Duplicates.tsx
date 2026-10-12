@@ -1,10 +1,10 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api, buildUrl } from "../../api/client";
 import { useWrite } from "../../api/hooks";
 import { ErrorBox, Spinner, Tabs } from "../../components/ui";
-import { formatBytes, formatDuration } from "../../lib/format";
+import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
 import AdminNav from "./AdminNav";
 
 type Kind = "scene" | "image";
@@ -15,6 +15,7 @@ interface Item {
 }
 interface Group { oshash: string; size: number; in_sync: boolean; items: Item[] }
 interface Summary { groups: number; extra_copies: number; extra_bytes: number }
+interface DeleteJob { id: number; status: string; progress: number | null; message: string | null; error: string | null; finished_at: string | null }
 interface Result { groups: Group[]; has_more: boolean; summary: Record<Kind, Summary> }
 
 const PAGE = 25;
@@ -34,7 +35,17 @@ export default function Duplicates() {
     if (r.kept) throw new Error(`${r.deleted} deleted, ${r.kept} kept: ${r.reason}`);
     return r;
   });
-  const removeAll = useWrite(() => api<{ job_id: number }>("/duplicates/delete-extras", { json: { kind } }));
+  const removeAll = useWrite(async () => {
+    const r = await api<{ job_id: number }>("/duplicates/delete-extras", { json: { kind } });
+    await deleteJob.refetch();
+    return r;
+  });
+  // The background "delete all extra copies" job: its progress and result, right here.
+  const deleteJob = useQuery({
+    queryKey: ["duplicates-job", kind],
+    queryFn: () => api<DeleteJob | null>("/duplicates/job", { query: { kind } }),
+    refetchInterval: (q) => (q.state.data && ["queued", "running"].includes(q.state.data.status) ? 2000 : false),
+  });
   const summary = list.data?.pages[0]?.summary;
   const groups = list.data?.pages.flatMap((p) => p.groups) ?? [];
   const s = summary?.[kind];
@@ -78,11 +89,7 @@ export default function Duplicates() {
             )}
           </div>
           {(combine.error || remove.error || removeSet.error || removeAll.error) && <ErrorBox error={combine.error || remove.error || removeSet.error || removeAll.error} className="mb-3" />}
-          {removeAll.isSuccess && (
-            <p className="mb-3 text-sm text-emerald-300" role="status">
-              Deleting in the background. Follow it under <Link to="/admin/jobs" className="underline">Jobs</Link>, then reload this page.
-            </p>
-          )}
+          {deleteJob.data && <DeleteJobStatus job={deleteJob.data} onDone={() => list.refetch()} />}
           <ul className="space-y-4">
             {groups.map((g) => (
               <li key={`${g.oshash}-${g.size}`} className="card p-4" data-testid="duplicate-group">
@@ -144,6 +151,38 @@ export default function Duplicates() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function DeleteJobStatus({ job, onDone }: { job: DeleteJob; onDone: () => void }) {
+  const active = job.status === "queued" || job.status === "running";
+  const cancel = useWrite(() => api(`/jobs/${job.id}/cancel`, { method: "POST" }));
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (wasActive.current && !active) onDone();   // finished: show what's left
+    wasActive.current = active;
+  }, [active, onDone]);
+  const color = job.status === "failed" ? "border-red-900 bg-red-950/40 text-red-200"
+    : active ? "border-sky-900 bg-sky-950/40 text-sky-200" : "border-zinc-800 bg-zinc-950/40 text-zinc-300";
+  return (
+    <div className={`mb-3 rounded-md border px-4 py-3 text-sm ${color}`} role="status" data-testid="delete-job">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-medium">
+          {job.status === "queued" ? "Delete all extra copies: waiting to start (scans and other disk jobs go one at a time)…"
+            : job.status === "running" ? "Deleting extra copies…"
+            : job.status === "failed" ? "Deleting extra copies failed"
+            : job.status === "cancelled" ? "Deleting extra copies was stopped"
+            : `Last run${job.finished_at ? ` (${formatDateTime(job.finished_at)})` : ""}`}
+        </span>
+        {active && (
+          <button className="btn-ghost ml-auto py-1" disabled={cancel.isPending} onClick={() => cancel.mutate(undefined)}>Stop</button>
+        )}
+      </div>
+      {job.status === "running" && job.progress != null && (
+        <div className="mt-2 h-1.5 rounded bg-zinc-800"><div className="h-full rounded bg-sky-500" style={{ width: `${job.progress * 100}%` }} /></div>
+      )}
+      {(job.error || job.message) && <p className="mt-1 whitespace-pre-line text-xs opacity-90">{job.error || job.message}</p>}
     </div>
   );
 }

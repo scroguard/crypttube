@@ -28,12 +28,17 @@ async def list_jobs(
     limit: int = Query(50, ge=1, le=200),
     before_id: int | None = Query(None, description="keyset cursor: id of the last job seen"),
     status: Literal["queued", "running", "done", "failed", "cancelled"] | None = None,
+    hide_batches: bool = Query(False, description="leave out preview batches and count refreshes"),
 ) -> dict:
+    # Batches: generate jobs for given scenes/images (made by splitting up a big job, or
+    # queued by a scan); the generate jobs an admin starts cover a library or everything.
     rows = await request.app.state.pool.fetch(
         f"""SELECT {COLUMNS} FROM jobs
             WHERE ($1::bigint IS NULL OR id < $1) AND ($2::job_status IS NULL OR status = $2::job_status)
+              AND NOT ($4 AND (kind = 'refresh_counts'
+                               OR (kind = 'generate' AND (payload ? 'scene_ids' OR payload ? 'image_ids'))))
             ORDER BY id DESC LIMIT $3""",
-        before_id, status, limit + 1,
+        before_id, status, limit + 1, hide_batches,
     )
     items = [_redact(dict(r)) for r in rows[:limit]]
     return {"items": items, "next": items[-1]["id"] if len(rows) > limit else None}

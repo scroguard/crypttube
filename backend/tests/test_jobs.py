@@ -147,3 +147,15 @@ async def test_large_generate_is_split_into_batches(app, client, indexed, monkey
     assert await pool.fetchval("SELECT count(*) FROM jobs WHERE status <> 'done' AND kind = 'generate'") == 1  # the parent, still 'running' here
     for sid in indexed["scenes"].values():
         assert (await client.get(f"/api/scenes/{sid}/sprite.vtt")).status_code == 200
+
+
+
+async def test_job_list_can_hide_batches(app, client, clean):
+    pool = app.state.pool
+    for kind, payload in (("scan", {}), ("generate", {"force": True}), ("generate", {"scene_ids": [1], "image_ids": []}),
+                          ("refresh_counts", {}), ("delete_duplicates", {"kind": "scene"})):
+        await pool.execute("INSERT INTO jobs (kind, payload) VALUES ($1, $2)", kind, payload)
+    every = [j["kind"] for j in (await client.get("/api/jobs")).json()["items"]]
+    assert len(every) == 5
+    shown = [(j["kind"], j["payload"]) for j in (await client.get("/api/jobs", params={"hide_batches": True})).json()["items"]]
+    assert shown == [("delete_duplicates", {"kind": "scene"}), ("generate", {"force": True}), ("scan", {})]

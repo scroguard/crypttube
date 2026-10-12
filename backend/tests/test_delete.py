@@ -186,3 +186,49 @@ async def test_delete_all_extra_copies_of_one_set(app, client, indexed):
     assert (await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": 999999})).status_code == 404
     again = await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": keeper["id"]})
     assert again.json()["deleted"] == 0       # nothing left to delete in that set
+
+
+async def test_delete_job_reports_progress_and_status(app, client, indexed, monkeypatch):
+    """The comparison reads big pieces and reports how far it is; the Duplicates page
+    can show the job's state and result."""
+    from app.api import duplicates
+    pool = app.state.pool
+    root = indexed["root"]
+    (root / "other").mkdir()
+    shutil.copy(root / "videos" / "h264.mp4", root / "other" / "copy.mp4")
+    await rescan(app)
+    monkeypatch.setattr(duplicates, "COMPARE_CHUNK", 4096)       # several pieces even for a small file
+    seen: list[str] = []
+    real = JobContext.progress
+
+    async def record(self, fraction, message=None):
+        seen.append(message or "")
+        self._last_progress = 0                                   # no throttling in the test
+        await real(self, fraction, message)
+    monkeypatch.setattr(JobContext, "progress", record)
+    assert (await client.get("/api/duplicates/job")).json() is None
+    r = await client.post("/api/duplicates/delete-extras", json={"kind": "scene"})
+    job_id = r.json()["job_id"]
+    await pool.execute("UPDATE jobs SET status = 'running' WHERE id = $1", job_id)
+    msg = await worker.HANDLERS["delete_duplicates"](pool, get_settings(), JobContext(pool, job_id), {"kind": "scene"})
+    assert msg.startswith("deleted 1 extra copies")
+    assert any(m.startswith("comparing copy 1 of 1:") for m in seen)
+    assert seen[-1] == "1 of 1 copies checked · 1 deleted"
+    await pool.execute("UPDATE jobs SET status = 'done', message = $2 WHERE id = $1", job_id, msg)
+    status = (await client.get("/api/duplicates/job", params={"kind": "scene"})).json()
+    assert status["id"] == job_id and status["status"] == "done" and status["message"] == msg
+    assert (await client.get("/api/duplicates/job", params={"kind": "image"})).json() is None
+
+
+async def test_identical_compares_every_byte(tmp_path):
+    from app.api import duplicates
+    a, b = tmp_path / "a", tmp_path / "b"
+    data = bytes(range(256)) * 50_000
+    a.write_bytes(data)
+    b.write_bytes(data)
+    assert await duplicates.identical(str(a), str(b))
+    b.write_bytes(data[:-1] + b"x")                 # differs in the last byte only
+    assert not await duplicates.identical(str(a), str(b))
+    b.write_bytes(data[:-1])                        # shorter
+    assert not await duplicates.identical(str(a), str(b))
+    assert not await duplicates.identical(str(a), str(tmp_path / "missing"))

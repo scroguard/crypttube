@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { useWrite } from "../../api/hooks";
 import type { Job, Page } from "../../api/types";
-import { ErrorBox, Spinner } from "../../components/ui";
+import { ErrorBox, Spinner, Toggle } from "../../components/ui";
 import { formatDateTime } from "../../lib/format";
 import AdminNav from "./AdminNav";
 
@@ -12,9 +12,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function Jobs() {
+  // Preview generation runs as many small batch jobs; hidden by default so they don't
+  // push everything else out of the list.
+  const [previews, setPreviews] = useState(false);
   const jobs = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => api<Page<Job>>("/jobs", { query: { limit: 100 } }),
+    queryKey: ["jobs", previews],
+    queryFn: () => api<Page<Job>>("/jobs", { query: { limit: 100, hide_batches: !previews } }),
     // Poll quickly while something is happening, slowly otherwise.
     refetchInterval: (q) => (q.state.data?.items.some((j) => j.status === "running" || j.status === "queued") ? 1500 : 10_000),
   });
@@ -24,6 +27,7 @@ export default function Jobs() {
       <AdminNav />
       <h1 className="mb-4 text-xl font-semibold">Jobs</h1>
       <WorkerSettings />
+      <div className="mb-3"><Toggle checked={previews} onChange={setPreviews} label="Show preview batches and count refreshes" /></div>
       {jobs.isPending ? <Spinner /> : jobs.isError ? <ErrorBox error={jobs.error} /> : (
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
