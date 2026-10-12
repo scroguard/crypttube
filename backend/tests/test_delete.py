@@ -141,14 +141,11 @@ async def test_delete_duplicate_copies(app, client, indexed):
     job_id = await pool.fetchval("INSERT INTO jobs (kind, status) VALUES ('delete_duplicates', 'running') RETURNING id")
     msg = await worker.HANDLERS["delete_duplicates"](pool, get_settings(), JobContext(pool, job_id), {"kind": "scene"})
     assert (root / "videos" / "vp9.webm").exists()
-    if first.endswith("vp9.webm"):       # the look-alike is the one kept: nothing matches it
-        assert msg.startswith("deleted 0 extra copies") and "2 kept because they are not identical" in msg
-        assert os.path.exists(keeper["path"]) and os.path.exists(fake["path"])
-        os.unlink(fake["path"])
-        await rescan(app)
-    else:                                # a real copy is kept: its twin goes, the look-alike stays
-        assert msg.startswith("deleted 1 extra copies") and "1 kept because they are not identical" in msg
-        assert os.path.exists(first) and sum(os.path.exists(p) for p in (keeper["path"], fake["path"])) == 1
+    # whichever is older, the two real copies agree with each other: one goes, the
+    # look-alike stays (it matches nothing)
+    assert msg.startswith("deleted 1 extra copies") and "1 kept because they differ from the other copies" in msg
+    assert sum(os.path.exists(p) for p in (keeper["path"], fake["path"])) == 1
+    assert first  # (the older copy may be either one)
     # the last real copy can't be removed through the duplicates tool
     await pool.execute("UPDATE files SET oshash = 'ffffffffffffffff' WHERE path LIKE '%vp9.webm'")
     keeper = (await client.get("/api/scenes")).json()["items"]
@@ -176,7 +173,8 @@ async def test_delete_all_extra_copies_of_one_set(app, client, indexed):
     # asked through any copy of the set; the suggested keeper is the one that stays
     r = await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": extra["id"]})
     assert r.status_code == 200, r.text
-    assert r.json() == {"deleted": 3, "bytes": 3 * four["size"], "kept": 0, "reason": None}
+    assert {k: r.json()[k] for k in ("deleted", "bytes", "kept", "reason", "suggested_kept")} == {
+        "deleted": 3, "bytes": 3 * four["size"], "kept": 0, "reason": None, "suggested_kept": True}
     assert [os.path.exists(i["path"]) for i in four["items"]] == [i["keep"] for i in four["items"]]
     assert (await client.get(f"/api/scenes/{keeper['id']}")).json()["rating"] == 40
     # the other set is untouched
@@ -212,8 +210,8 @@ async def test_delete_job_reports_progress_and_status(app, client, indexed, monk
     await pool.execute("UPDATE jobs SET status = 'running' WHERE id = $1", job_id)
     msg = await worker.HANDLERS["delete_duplicates"](pool, get_settings(), JobContext(pool, job_id), {"kind": "scene"})
     assert msg.startswith("deleted 1 extra copies")
-    assert any(m.startswith("comparing copy 1 of 1:") for m in seen)
-    assert seen[-1] == "1 of 1 copies checked · 1 deleted"
+    assert any(m.startswith("set 1 of 1: compared") for m in seen)
+    assert seen[-1] == "1 of 1 sets done · 1 deleted"
     await pool.execute("UPDATE jobs SET status = 'done', message = $2 WHERE id = $1", job_id, msg)
     status = (await client.get("/api/duplicates/job", params={"kind": "scene"})).json()
     assert status["id"] == job_id and status["status"] == "done" and status["message"] == msg
@@ -267,3 +265,47 @@ async def test_identical_copes_with_short_reads(tmp_path, monkeypatch):
     real_open(b, "wb").write(bytes(b_data))
     r = await duplicates.identical(str(a), str(b))
     assert not r.same and r.reason == "contents differ from byte 2,500,000"
+
+
+async def test_set_keeps_the_copy_most_others_agree_with(app, client, indexed):
+    """The first-indexed copy is damaged (a stretch of empty bytes); the other three agree.
+    One of the three is kept, two are deleted, and the damaged one is left and reported."""
+    import subprocess
+    root = indexed["root"]
+    # a video big enough that its middle lies outside the fingerprint (first/last 64 KiB)
+    original = root / "videos" / "long.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=4:size=640x360:rate=25",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-b:v", "2M", str(original)], check=True)
+    good = original.read_bytes()
+    assert len(good) > 400_000
+    damaged = bytearray(good)
+    middle = len(good) // 2
+    damaged[middle:middle + 5000] = bytes(5000)         # what a broken copy often looks like
+    original.write_bytes(bytes(damaged))                 # same size; ends unchanged -> same fingerprint
+    await rescan(app)                                    # indexed first: the "Suggested to keep" copy
+    (root / "other").mkdir()
+    for name in ("b.mp4", "c.mp4", "d.mp4"):
+        (root / "other" / name).write_bytes(good)
+    await rescan(app)
+    group = (await client.get("/api/duplicates")).json()["groups"][0]
+    assert len(group["items"]) == 4
+    first = next(i for i in group["items"] if i["keep"])
+    assert first["path"] == str(original)
+
+    r = await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": first["id"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["deleted"] == 2 and body["kept"] == 1 and body["suggested_kept"] is False
+    assert body["kept_copies"][0]["path"] == str(original)
+    assert body["reason"].startswith(f"contents differ from byte {middle:,}")
+    assert "this copy has empty bytes there, so it is probably damaged" in body["reason"]
+    assert body["keeper"]["path"] in {str(root / "other" / n) for n in ("b.mp4", "c.mp4", "d.mp4")}
+    left = sorted(p.name for p in (root / "other").iterdir())
+    assert len(left) == 1 and original.exists()
+
+    # the damaged one can still be removed on purpose
+    r = await client.post("/api/duplicates/delete", json={"kind": "scene", "id": first["id"]})
+    assert r.status_code == 409 and "not identical" in r.json()["detail"]
+    r = await client.post("/api/duplicates/delete", json={"kind": "scene", "id": first["id"], "force": True})
+    assert r.status_code == 200 and not original.exists()
+    assert len(list((root / "other").iterdir())) == 1

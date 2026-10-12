@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { api, buildUrl } from "../../api/client";
+import { api, ApiError, buildUrl } from "../../api/client";
 import { useWrite } from "../../api/hooks";
 import { ErrorBox, Spinner, Tabs } from "../../components/ui";
 import { formatBytes, formatDateTime, formatDuration } from "../../lib/format";
@@ -15,6 +15,10 @@ interface Item {
 }
 interface Group { oshash: string; size: number; in_sync: boolean; items: Item[] }
 interface Summary { groups: number; extra_copies: number; extra_bytes: number }
+interface SetResult {
+  deleted: number; kept: number; reason: string | null; suggested_kept: boolean;
+  keeper: { id: number; path: string }; kept_copies: { id: number; path: string; reason: string }[];
+}
 interface DeleteJob { id: number; status: string; progress: number | null; message: string | null; error: string | null; finished_at: string | null }
 interface Result { groups: Group[]; has_more: boolean; summary: Record<Kind, Summary> }
 
@@ -29,12 +33,19 @@ export default function Duplicates() {
     getNextPageParam: (last, pages) => (last.has_more ? pages.length * PAGE : undefined),
   });
   const combine = useWrite((id: number | null) => api<{ groups: number }>("/duplicates/combine", { json: { kind, id } }));
-  const remove = useWrite((id: number) => api("/duplicates/delete", { json: { kind, id } }));
-  const removeSet = useWrite(async (id: number) => {
-    const r = await api<{ deleted: number; kept: number; reason: string | null }>("/duplicates/delete-set", { json: { kind, id } });
-    if (r.kept) throw new Error(`${r.deleted} deleted, ${r.kept} kept: ${r.reason}`);
-    return r;
+  // Deleting one copy is refused when it differs from every other copy; the admin can then
+  // look at why and delete it anyway.
+  const remove = useWrite(async (id: number) => {
+    try {
+      return await api("/duplicates/delete", { json: { kind, id } });
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 409 || !e.message.includes("not identical")) throw e;
+      const why = e.message.match(/\((.*)\)$/)?.[1] ?? "they differ";
+      if (!confirm(`This copy is not identical to the others: ${why}.\n\nThey may still be the same video (one of them can be damaged). Delete this copy anyway? This cannot be undone.`)) return null;
+      return await api("/duplicates/delete", { json: { kind, id, force: true } });
+    }
   });
+  const removeSet = useWrite((id: number) => api<SetResult>("/duplicates/delete-set", { json: { kind, id } }));
   const removeAll = useWrite(async () => {
     const r = await api<{ job_id: number }>("/duplicates/delete-extras", { json: { kind } });
     await deleteJob.refetch();
@@ -90,6 +101,21 @@ export default function Duplicates() {
           </div>
           {(combine.error || remove.error || removeSet.error || removeAll.error) && <ErrorBox error={combine.error || remove.error || removeSet.error || removeAll.error} className="mb-3" />}
           {deleteJob.data && <DeleteJobStatus job={deleteJob.data} onDone={() => list.refetch()} />}
+          {removeSet.data && !removeSet.isPending && (
+            <div className="mb-3 rounded-md border border-zinc-800 bg-zinc-950/40 px-4 py-3 text-sm" role="status" data-testid="set-result">
+              <p>
+                Deleted {removeSet.data.deleted} {removeSet.data.deleted === 1 ? "copy" : "copies"}; kept
+                {" "}<code className="break-all text-xs">{removeSet.data.keeper.path}</code>
+                {!removeSet.data.suggested_kept && " (the copy most others matched, instead of the suggested one)"}.
+              </p>
+              {removeSet.data.kept_copies.map((k) => (
+                <p key={k.id} className="mt-1 text-amber-300">
+                  Also kept, because it differs: <code className="break-all text-xs">{k.path}</code> ({k.reason}).
+                  Use its Delete button if you want it gone anyway.
+                </p>
+              ))}
+            </div>
+          )}
           <ul className="space-y-4">
             {groups.map((g) => (
               <li key={`${g.oshash}-${g.size}`} className="card p-4" data-testid="duplicate-group">
@@ -98,7 +124,7 @@ export default function Duplicates() {
                   <span className="text-zinc-400">{formatBytes(g.size)} each</span>
                   <span className="mr-auto" />
                   <button className="btn-danger py-1" disabled={removeSet.isPending}
-                          onClick={() => confirm(`Delete ${g.items.length - 1} of these ${g.items.length} copies from disk? The one marked "Suggested to keep" stays, with the details of all of them. This cannot be undone.`) && removeSet.mutate(g.items[0].id)}>
+                          onClick={() => confirm(`Delete ${g.items.length - 1} of these ${g.items.length} copies from disk? One copy stays (normally the one marked "Suggested to keep"), with the details of all of them. A copy that differs from the others is left alone. This cannot be undone.`) && removeSet.mutate(g.items[0].id)}>
                     {removeSet.isPending && removeSet.variables === g.items[0].id ? "Deleting…" : `Delete ${g.items.length - 1} extra ${g.items.length === 2 ? "copy" : "copies"}`}
                   </button>
                   {g.in_sync ? <span className="text-xs text-emerald-400">Details match</span> : (

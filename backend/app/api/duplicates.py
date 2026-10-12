@@ -143,6 +143,8 @@ COMPARE_CHUNK = 8 * 1024 * 1024
 class Comparison:
     same: bool
     reason: str = ""      # why not: where the files differ, or what couldn't be read
+    # which side has only empty (zero) bytes where they differ: typical of a damaged copy
+    empty_in: str | None = None   # "a", "b" or None
 
 
 def _read_exactly(f, n: int) -> bytes:
@@ -193,8 +195,11 @@ async def identical(a: str, b: str, progress=None) -> Comparison:
             if x != y:
                 if len(x) != len(y):
                     return Comparison(False, f"one file ends early ({done + min(len(x), len(y)):,} bytes)")
-                at = done + _first_difference(x, y)
-                return Comparison(False, f"contents differ from byte {at:,}")
+                off = _first_difference(x, y)
+                at = done + off
+                empty = bytes(min(4096, len(x) - off))
+                empty_in = "a" if x[off:off + len(empty)] == empty else "b" if y[off:off + len(empty)] == empty else None
+                return Comparison(False, f"contents differ from byte {at:,}", empty_in)
             if not x:
                 return Comparison(True)
             done += len(x)
@@ -205,7 +210,8 @@ async def identical(a: str, b: str, progress=None) -> Comparison:
             f.close()
 
 
-async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | None = None, progress=None) -> dict:
+async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | None = None, progress=None,
+                            force: bool = False) -> dict:
     """Delete one copy of a duplicated file. First its details are combined into the
     other copies, and it is compared byte for byte with one that stays: the fingerprint
     only looks at the ends of a file, and a deletion must not rest on that alone."""
@@ -225,15 +231,16 @@ async def delete_extra_copy(pool, kind: str, content_id: int, keeper_id: int | N
     # different file that merely shares the fingerprint).
     # The job names the copy it keeps, so "Suggested to keep" is always the survivor.
     reasons = []
-    for other in [o for o in others if keeper_id is None or o["id"] == keeper_id]:
+    for other in ([] if force else [o for o in others if keeper_id is None or o["id"] == keeper_id]):
         result = await identical(target["path"], other["path"], progress)
         if result.same:
             break
         reasons.append(result.reason)
         log.info("not deleting %s: compared with %s: %s", target["path"], other["path"], result.reason)
     else:
-        raise HTTPException(409, "the files are not identical byte for byte; nothing was deleted"
-                                 + (f" ({reasons[0]})" if reasons else ""))
+        if not force:
+            raise HTTPException(409, "the files are not identical byte for byte; nothing was deleted"
+                                     + (f" ({reasons[0]})" if reasons else ""))
     async with pool.acquire() as conn, conn.transaction():
         await _combine(conn, kind, [r["id"] for r in rows])
     result = await delete_content(pool, get_settings().generated_dir, table, [content_id], None)
@@ -246,41 +253,83 @@ class DeleteCopy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Kind
     id: int
+    # Delete even if not byte-identical to another copy (the admin looked and decided).
+    force: bool = False
 
 
 @router.post("/delete")
 async def delete_copy(body: DeleteCopy, request: Request) -> dict:
     try:
-        return await delete_extra_copy(request.app.state.pool, body.kind, body.id)
+        return await delete_extra_copy(request.app.state.pool, body.kind, body.id, force=body.force)
     except DeleteError as e:
         raise HTTPException(409, str(e)) from e
 
 
-@router.post("/delete-set")
-async def delete_set(body: DeleteCopy, request: Request) -> dict:
-    """Delete every extra copy in the set that `id` belongs to, keeping the first-indexed
-    one ("Suggested to keep"). Copies not byte-identical to the keeper are left alone."""
-    pool = request.app.state.pool
-    table = TABLE[body.kind]
+async def clean_set(pool, kind: str, any_id: int, progress=None) -> dict:
+    """Delete the extra copies in the set `any_id` belongs to, keeping one.
+
+    The copies are grouped by identical content (byte for byte), and one copy of the
+    largest group is kept, preferring the first indexed ("Suggested to keep"). The rest of
+    that group is deleted. A copy that matches none of them (often a damaged one, or a
+    different file with the same fingerprint) is left alone and reported."""
+    table = TABLE[kind]
     rows = await pool.fetch(
-        f"""SELECT c.id FROM {CANDIDATES.format(table=table)} AND (f.oshash, f.size) =
+        f"""SELECT c.id, f.path, f.size FROM {CANDIDATES.format(table=table)} AND (f.oshash, f.size) =
                 (SELECT f2.oshash, f2.size FROM files f2 JOIN {table} c2 ON c2.file_id = f2.id WHERE c2.id = $1)
-            ORDER BY f.id""", body.id)
+            ORDER BY f.id""", any_id)
     if not rows:
         raise HTTPException(404, "not found")
-    keeper, extras = rows[0]["id"], [r["id"] for r in rows[1:]]
-    deleted = freed = 0
-    kept: list[str] = []
-    for content_id in extras:
-        try:
-            result = await delete_extra_copy(pool, body.kind, content_id, keeper)
-            deleted += 1
-            freed += result["bytes"]
-        except DeleteError as e:
-            raise HTTPException(409, str(e)) from e
-        except HTTPException as e:
-            kept.append(str(e.detail))
-    return {"deleted": deleted, "bytes": freed, "kept": len(kept), "reason": kept[0] if kept else None}
+    groups: list[list] = []
+    verdicts: dict[tuple[int, int], Comparison] = {}       # (copy, group's first copy) -> result
+    for row in rows:
+        for group in groups:
+            result = await identical(row["path"], group[0]["path"], progress)
+            verdicts[(row["id"], group[0]["id"])] = result
+            if result.same:
+                group.append(row)
+                break
+        else:
+            groups.append([row])
+    winner = max(groups, key=len)           # max() keeps the first of equals: the earliest indexed
+    keeper = winner[0]
+
+    def why(row) -> str:
+        rep = next(g[0] for g in groups if row in g)
+        if (v := verdicts.get((rep["id"], keeper["id"]))) is not None:
+            this_side = "a"                  # compared as identical(this copy, kept copy)
+        elif (v := verdicts.get((keeper["id"], rep["id"]))) is not None:
+            this_side = "b"
+        else:
+            return "differs from the copy kept"
+        if v.empty_in == this_side:
+            return f"{v.reason}; this copy has empty bytes there, so it is probably damaged"
+        if v.empty_in:
+            return f"{v.reason}; the kept copy has empty bytes there"
+        return v.reason
+
+    async with pool.acquire() as conn, conn.transaction():
+        await _combine(conn, kind, [r["id"] for r in rows])
+    extras = [r["id"] for r in winner[1:]]
+    result = await delete_content(pool, get_settings().generated_dir, table, extras, None) if extras else \
+        {"deleted": 0, "bytes": 0, "skipped": []}
+    kept = [{"id": r["id"], "path": r["path"], "reason": why(r)} for g in groups if g is not winner for r in g]
+    for k in kept:
+        log.info("kept %s: %s", k["path"], k["reason"])
+    return {"deleted": result["deleted"], "bytes": result["bytes"], "kept": kept,
+            "skipped": result["skipped"], "keeper": {"id": keeper["id"], "path": keeper["path"]},
+            "suggested_kept": keeper["id"] == rows[0]["id"]}
+
+
+@router.post("/delete-set")
+async def delete_set(body: DeleteCopy, request: Request) -> dict:
+    """Delete the extra copies of one set (see clean_set)."""
+    try:
+        r = await clean_set(request.app.state.pool, body.kind, body.id)
+    except DeleteError as e:
+        raise HTTPException(409, str(e)) from e
+    return {"deleted": r["deleted"], "bytes": r["bytes"], "kept": len(r["kept"]),
+            "reason": r["kept"][0]["reason"] if r["kept"] else None,
+            "kept_copies": r["kept"], "keeper": r["keeper"], "suggested_kept": r["suggested_kept"]}
 
 
 class DeleteExtras(BaseModel):
@@ -296,44 +345,44 @@ async def delete_extras(body: DeleteExtras, request: Request) -> dict:
 
 
 async def run_delete_extras(pool, ctx, kind: str) -> str:
-    rows = await pool.fetch(
-        f"""SELECT array_agg(c.id ORDER BY f.id) AS ids, f.size FROM {CANDIDATES.format(table=TABLE[kind])}
-            GROUP BY f.oshash, f.size HAVING count(*) > 1""")
-    extras = [(i, r["ids"][0], r["size"]) for r in rows for i in r["ids"][1:]]
-    total_bytes = sum(size for _, _, size in extras) or 1
-    log.info("deleting duplicates: %d extra %s copies to check (%.1f GB)", len(extras), kind, total_bytes / 2**30)
-    checked_bytes = 0
-    deleted = freed = different = failed = 0
-    reason = why = None
-    for n, (content_id, keeper_id, size) in enumerate(extras, start=1):
+    sets = await pool.fetch(
+        f"""SELECT min(c.id) AS any_id, count(*) AS n, f.size FROM {CANDIDATES.format(table=TABLE[kind])}
+            GROUP BY f.oshash, f.size HAVING count(*) > 1 ORDER BY min(f.id)""")
+    # every extra copy is read once against the copy kept, roughly
+    total_bytes = sum(r["size"] * (r["n"] - 1) for r in sets) or 1
+    log.info("deleting duplicates: %d %s sets to check (%.1f GB to compare)", len(sets), kind, total_bytes / 2**30)
+    checked = deleted = freed = kept = failed = 0
+    why = reason = None
+    for n, row in enumerate(sets, start=1):
         if await ctx.cancelled():
             break
+        base = checked
 
-        async def progress(done: int, n=n, size=size) -> None:
-            await ctx.progress((checked_bytes + done) / total_bytes,
-                               f"comparing copy {n} of {len(extras)}: {done / 2**30:.1f} of {size / 2**30:.1f} GB"
-                               f" · {deleted} deleted so far")
+        async def progress(done: int, n=n, base=base) -> None:
+            await ctx.progress(min(1.0, (base + done) / total_bytes),
+                               f"set {n} of {len(sets)}: compared {done / 2**30:.1f} GB · {deleted} deleted so far")
             if await ctx.cancelled():
                 raise asyncio.CancelledError
         try:
-            result = await delete_extra_copy(pool, kind, content_id, keeper_id, progress)
-            deleted += 1
-            freed += result["bytes"]
-            log.info("deleted duplicate %s %s (%d bytes)", kind, content_id, result["bytes"])
+            r = await clean_set(pool, kind, row["any_id"], progress)
         except asyncio.CancelledError:
             break
         except HTTPException as e:
-            if "not identical" in str(e.detail):
-                different += 1
-                why = why or str(e.detail).partition("(")[2].rstrip(")")
-            else:
-                failed += 1
-                reason = reason or str(e.detail)
-        checked_bytes += size
-        await ctx.progress(checked_bytes / total_bytes, f"{n} of {len(extras)} copies checked · {deleted} deleted")
+            failed += 1
+            reason = reason or str(e.detail)
+            continue
+        deleted += r["deleted"]
+        freed += r["bytes"]
+        kept += len(r["kept"])
+        why = why or (r["kept"][0]["reason"] if r["kept"] else None)
+        if r["skipped"]:
+            failed += len(r["skipped"])
+            reason = reason or r["skipped"][0]["reason"]
+        checked += row["size"] * (row["n"] - 1)
+        await ctx.progress(min(1.0, checked / total_bytes), f"{n} of {len(sets)} sets done · {deleted} deleted")
     message = f"deleted {deleted} extra copies ({freed / 1_048_576:.1f} MB freed)"
-    if different:
-        message += f"; {different} kept because they are not identical byte for byte (e.g. {why})"
+    if kept:
+        message += f"; {kept} kept because they differ from the other copies (e.g. {why})"
     if failed:
         message += f"; {failed} could not be deleted ({reason})"
     return message
