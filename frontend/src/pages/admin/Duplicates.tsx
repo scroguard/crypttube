@@ -45,9 +45,11 @@ export default function Duplicates() {
       return await api("/duplicates/delete", { json: { kind, id, force: true } });
     }
   });
-  const removeSet = useWrite((id: number) => api<SetResult>("/duplicates/delete-set", { json: { kind, id } }));
+  const removeSet = useWrite(({ id, force = false }: { id: number; force?: boolean }) =>
+    api<SetResult>("/duplicates/delete-set", { json: { kind, id, force } }));
+  const [override, setOverride] = useState(false);
   const removeAll = useWrite(async () => {
-    const r = await api<{ job_id: number }>("/duplicates/delete-extras", { json: { kind } });
+    const r = await api<{ job_id: number }>("/duplicates/delete-extras", { json: { kind, force: override } });
     await deleteJob.refetch();
     return r;
   });
@@ -93,9 +95,16 @@ export default function Duplicates() {
                   Download list of extra copies
                 </a>
                 <button className="btn-danger" disabled={removeAll.isPending}
-                        onClick={() => confirm(`Delete all ${s.extra_copies} extra copies from disk? One copy of each set is kept (the one marked "Suggested to keep"). This cannot be undone.`) && removeAll.mutate(undefined)}>
+                        onClick={() => confirm(override
+                          ? `Delete all ${s.extra_copies} extra copies from disk, INCLUDING copies that are not identical to the one kept? One copy of each set stays. This cannot be undone.`
+                          : `Delete all ${s.extra_copies} extra copies from disk? One copy of each set is kept (normally the one marked "Suggested to keep"); copies that differ from it are left alone. This cannot be undone.`)
+                          && removeAll.mutate(undefined)}>
                   Delete all extra copies…
                 </button>
+                <label className="flex items-center gap-2 text-xs text-zinc-400" title="Admin override: the byte-for-byte check still picks which copy to keep, but copies that differ are deleted too">
+                  <input type="checkbox" className="accent-accent" checked={override} onChange={(e) => setOverride(e.target.checked)} />
+                  Also delete copies that differ
+                </label>
               </>
             )}
           </div>
@@ -111,9 +120,15 @@ export default function Duplicates() {
               {removeSet.data.kept_copies.map((k) => (
                 <p key={k.id} className="mt-1 text-amber-300">
                   Also kept, because it differs: <code className="break-all text-xs">{k.path}</code> ({k.reason}).
-                  Use its Delete button if you want it gone anyway.
                 </p>
               ))}
+              {removeSet.data.kept_copies.length > 0 && (
+                <button className="btn-danger mt-2 py-1" disabled={removeSet.isPending}
+                        onClick={() => confirm(`Delete ${removeSet.data!.kept_copies.length === 1 ? "that copy" : `those ${removeSet.data!.kept_copies.length} copies`} anyway, keeping only ${removeSet.data!.keeper.path}? They are not identical to it. This cannot be undone.`)
+                          && removeSet.mutate({ id: removeSet.data!.keeper.id, force: true })}>
+                  Delete {removeSet.data.kept_copies.length === 1 ? "it" : "them"} anyway
+                </button>
+              )}
             </div>
           )}
           <ul className="space-y-4">
@@ -124,8 +139,8 @@ export default function Duplicates() {
                   <span className="text-zinc-400">{formatBytes(g.size)} each</span>
                   <span className="mr-auto" />
                   <button className="btn-danger py-1" disabled={removeSet.isPending}
-                          onClick={() => confirm(`Delete ${g.items.length - 1} of these ${g.items.length} copies from disk? One copy stays (normally the one marked "Suggested to keep"), with the details of all of them. A copy that differs from the others is left alone. This cannot be undone.`) && removeSet.mutate(g.items[0].id)}>
-                    {removeSet.isPending && removeSet.variables === g.items[0].id ? "Deleting…" : `Delete ${g.items.length - 1} extra ${g.items.length === 2 ? "copy" : "copies"}`}
+                          onClick={() => confirm(`Delete ${g.items.length - 1} of these ${g.items.length} copies from disk? One copy stays (normally the one marked "Suggested to keep"), with the details of all of them. A copy that differs from the others is left alone. This cannot be undone.`) && removeSet.mutate({ id: g.items[0].id })}>
+                    {removeSet.isPending && removeSet.variables?.id === g.items[0].id ? "Deleting…" : `Delete ${g.items.length - 1} extra ${g.items.length === 2 ? "copy" : "copies"}`}
                   </button>
                   {g.in_sync ? <span className="text-xs text-emerald-400">Details match</span> : (
                     <>

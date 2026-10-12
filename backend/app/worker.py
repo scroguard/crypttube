@@ -361,7 +361,7 @@ async def handle_maintenance(pool: asyncpg.Pool, settings: Settings, ctx: jobs.J
 async def handle_delete_duplicates(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
     from app.api import duplicates
     try:
-        return await duplicates.run_delete_extras(pool, ctx, payload["kind"])
+        return await duplicates.run_delete_extras(pool, ctx, payload["kind"], bool(payload.get("force")))
     except DeleteError as e:
         raise ScanError(str(e)) from e
 

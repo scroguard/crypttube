@@ -265,13 +265,14 @@ async def delete_copy(body: DeleteCopy, request: Request) -> dict:
         raise HTTPException(409, str(e)) from e
 
 
-async def clean_set(pool, kind: str, any_id: int, progress=None) -> dict:
+async def clean_set(pool, kind: str, any_id: int, progress=None, force: bool = False) -> dict:
     """Delete the extra copies in the set `any_id` belongs to, keeping one.
 
     The copies are grouped by identical content (byte for byte), and one copy of the
     largest group is kept, preferring the first indexed ("Suggested to keep"). The rest of
     that group is deleted. A copy that matches none of them (often a damaged one, or a
-    different file with the same fingerprint) is left alone and reported."""
+    different file with the same fingerprint) is left alone and reported, unless `force`:
+    then every copy but the kept one is deleted (the admin's override)."""
     table = TABLE[kind]
     rows = await pool.fetch(
         f"""SELECT c.id, f.path, f.size FROM {CANDIDATES.format(table=table)} AND (f.oshash, f.size) =
@@ -290,7 +291,14 @@ async def clean_set(pool, kind: str, any_id: int, progress=None) -> dict:
                 break
         else:
             groups.append([row])
-    winner = max(groups, key=len)           # max() keeps the first of equals: the earliest indexed
+    # A copy whose differing bytes are empty looks damaged (an interrupted copy, a disk error).
+    def looks_damaged(group) -> bool:
+        rep = group[0]["id"]
+        return any((a == rep and v.empty_in == "a") or (b == rep and v.empty_in == "b")
+                   for (a, b), v in verdicts.items())
+    # The largest group of identical copies wins; on a tie, one that doesn't look damaged;
+    # then the earliest indexed (max() keeps the first of equals).
+    winner = max(groups, key=lambda g: (len(g), not looks_damaged(g)))
     keeper = winner[0]
 
     def why(row) -> str:
@@ -309,10 +317,13 @@ async def clean_set(pool, kind: str, any_id: int, progress=None) -> dict:
 
     async with pool.acquire() as conn, conn.transaction():
         await _combine(conn, kind, [r["id"] for r in rows])
-    extras = [r["id"] for r in winner[1:]]
+    others = [r for g in groups if g is not winner for r in g]
+    extras = [r["id"] for r in winner[1:]] + ([r["id"] for r in others] if force else [])
+    for r in others if force else []:
+        log.info("deleting %s anyway (admin override): %s", r["path"], why(r))
     result = await delete_content(pool, get_settings().generated_dir, table, extras, None) if extras else \
         {"deleted": 0, "bytes": 0, "skipped": []}
-    kept = [{"id": r["id"], "path": r["path"], "reason": why(r)} for g in groups if g is not winner for r in g]
+    kept = [] if force else [{"id": r["id"], "path": r["path"], "reason": why(r)} for r in others]
     for k in kept:
         log.info("kept %s: %s", k["path"], k["reason"])
     return {"deleted": result["deleted"], "bytes": result["bytes"], "kept": kept,
@@ -324,7 +335,7 @@ async def clean_set(pool, kind: str, any_id: int, progress=None) -> dict:
 async def delete_set(body: DeleteCopy, request: Request) -> dict:
     """Delete the extra copies of one set (see clean_set)."""
     try:
-        r = await clean_set(request.app.state.pool, body.kind, body.id)
+        r = await clean_set(request.app.state.pool, body.kind, body.id, force=body.force)
     except DeleteError as e:
         raise HTTPException(409, str(e)) from e
     return {"deleted": r["deleted"], "bytes": r["bytes"], "kept": len(r["kept"]),
@@ -335,16 +346,18 @@ async def delete_set(body: DeleteCopy, request: Request) -> dict:
 class DeleteExtras(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Kind
+    # Admin override: also delete copies that differ from the one kept.
+    force: bool = False
 
 
 @router.post("/delete-extras", status_code=202)
 async def delete_extras(body: DeleteExtras, request: Request) -> dict:
     """Queue a job that deletes every extra copy (all but the first-indexed of each set)."""
-    return {"job_id": await jobs.enqueue(request.app.state.pool, JOB_KIND, {"kind": body.kind},
+    return {"job_id": await jobs.enqueue(request.app.state.pool, JOB_KIND, {"kind": body.kind, "force": body.force},
                                          dedupe_key=f"{JOB_KIND}:{body.kind}")}
 
 
-async def run_delete_extras(pool, ctx, kind: str) -> str:
+async def run_delete_extras(pool, ctx, kind: str, force: bool = False) -> str:
     sets = await pool.fetch(
         f"""SELECT min(c.id) AS any_id, count(*) AS n, f.size FROM {CANDIDATES.format(table=TABLE[kind])}
             GROUP BY f.oshash, f.size HAVING count(*) > 1 ORDER BY min(f.id)""")
@@ -364,7 +377,7 @@ async def run_delete_extras(pool, ctx, kind: str) -> str:
             if await ctx.cancelled():
                 raise asyncio.CancelledError
         try:
-            r = await clean_set(pool, kind, row["any_id"], progress)
+            r = await clean_set(pool, kind, row["any_id"], progress, force=force)
         except asyncio.CancelledError:
             break
         except HTTPException as e:

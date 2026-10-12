@@ -303,9 +303,37 @@ async def test_set_keeps_the_copy_most_others_agree_with(app, client, indexed):
     left = sorted(p.name for p in (root / "other").iterdir())
     assert len(left) == 1 and original.exists()
 
-    # the damaged one can still be removed on purpose
+    # on its own, the differing copy is refused unless forced...
     r = await client.post("/api/duplicates/delete", json={"kind": "scene", "id": first["id"]})
     assert r.status_code == 409 and "not identical" in r.json()["detail"]
-    r = await client.post("/api/duplicates/delete", json={"kind": "scene", "id": first["id"], "force": True})
-    assert r.status_code == 200 and not original.exists()
-    assert len(list((root / "other").iterdir())) == 1
+    # ...and the set with the admin override removes it: one copy stays
+    r = await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": first["id"], "force": True})
+    assert r.status_code == 200 and r.json()["deleted"] == 1 and r.json()["kept"] == 0
+    assert not original.exists() and len(list((root / "other").iterdir())) == 1
+
+
+async def test_bulk_override_deletes_differing_copies_too(app, client, indexed):
+    import subprocess
+    pool = app.state.pool
+    root = indexed["root"]
+    good_path = root / "videos" / "long.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=4:size=640x360:rate=25",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-b:v", "2M", str(good_path)], check=True)
+    good = good_path.read_bytes()
+    await rescan(app)
+    bad = bytearray(good)
+    bad[len(good) // 2] ^= 0xFF
+    (root / "other").mkdir()
+    (root / "other" / "bad.mp4").write_bytes(bytes(bad))
+    await rescan(app)
+    run = lambda payload: worker.HANDLERS["delete_duplicates"](  # noqa: E731
+        pool, get_settings(), JobContext(pool, job_id), payload)
+    job_id = await pool.fetchval("INSERT INTO jobs (kind, status) VALUES ('delete_duplicates', 'running') RETURNING id")
+    msg = await run({"kind": "scene"})
+    assert msg.startswith("deleted 0 extra copies") and "1 kept because they differ" in msg
+    assert (root / "other" / "bad.mp4").exists()
+    msg = await run({"kind": "scene", "force": True})
+    assert msg.startswith("deleted 1 extra copies")
+    assert good_path.exists() and not (root / "other" / "bad.mp4").exists()
+    r = await client.post("/api/duplicates/delete-extras", json={"kind": "scene", "force": True})
+    assert (await pool.fetchval("SELECT payload FROM jobs WHERE id = $1", r.json()["job_id"]))["force"] is True
