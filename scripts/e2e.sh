@@ -66,6 +66,7 @@ con.commit()
 PY
 fi
 
+export BACKEND_TAG=e2e   # its own image tag, so a test build never replaces the real one
 compose=(docker compose -p goon-e2e -f compose.yaml -f compose.e2e.yaml)
 cleanup() { [ "${1:-}" = "--keep" ] || "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1; }
 trap 'cleanup "${1:-}"' EXIT

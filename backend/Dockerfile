@@ -7,7 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOME=/tmp \
     USER=goonstreamer
 
-RUN apt-get update \
+# Retry downloads: a mirror hiccup during a deploy shouldn't fail the whole build.
+RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 

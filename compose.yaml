@@ -1,8 +1,10 @@
 name: goon-streamer
 
 x-backend: &backend
+  # The API and the worker run the same image: built once, under one name.
   build:
     context: ./backend
+  image: goonstreamer-backend:${BACKEND_TAG:-latest}
   # Run as a host user that can read MEDIA_ROOT. Generated content lives in the
   # `generated` volume, which any PUID can write to.
   user: "${PUID:-1000}:${PGID:-1000}"
