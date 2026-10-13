@@ -266,7 +266,7 @@ async def _sweep_keyed(db, base: Path, key_of, valid_keys, delete: bool, tally: 
 
 def _plain_key(name: str) -> str | None:
     stem, ext = os.path.splitext(name)
-    return stem if ext in (".webp", ".vtt") else None
+    return stem if ext in (".webp", ".vtt", ".mp4") else None
 
 
 def _thumb_key(name: str) -> str | None:
@@ -280,7 +280,8 @@ async def sweep_generated(db, root: Path, *, delete: bool, ctx: jobs.JobContext 
     performers/studios/tags, and stale temporary files. Also clears picture references
     whose file has vanished. Files this app did not create are left alone."""
     scene, image, entity, temp = _Tally(), _Tally(), _Tally(), _Tally()
-    for sub, key_of in (("screenshots", _plain_key), ("sprites", _plain_key), ("thumbs/scenes", _thumb_key)):
+    for sub, key_of in (("screenshots", _plain_key), ("sprites", _plain_key), ("thumbs/scenes", _thumb_key),
+                        ("live", _plain_key)):
         await _sweep_keyed(db, root / sub, key_of, _valid_scene_keys, delete, scene, temp, ctx)
     await _sweep_keyed(db, root / "thumbs/images", _thumb_key, _valid_image_keys, delete, image, temp, ctx)
     await _sweep_keyed(db, root / "display", _plain_key, _valid_image_keys, delete, image, temp, ctx)

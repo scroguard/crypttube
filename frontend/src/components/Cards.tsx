@@ -136,6 +136,10 @@ export const ImageTile = memo(function ImageTile({ image, onOpen, selected, onTo
             className={`relative block aspect-square w-full overflow-hidden rounded-md bg-zinc-900 ring-2 focus:outline-none focus:ring-accent ${selected ? "ring-accent" : "ring-transparent"}`}>
       <img src={image.thumbnail_url} alt={image.title ?? ""} loading="lazy" decoding="async"
            className="h-full w-full object-cover transition-transform duration-200 hover:scale-[1.03]" />
+      {image.live_url && (
+        <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white"
+              data-testid="live-badge">LIVE</span>
+      )}
       {onToggle && (
         <span className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded border-2 text-sm ${selected ? "border-accent bg-accent" : "border-white/80 bg-black/40"}`}>
           {selected && "✓"}

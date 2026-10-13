@@ -93,7 +93,8 @@ async def continue_watching(request: Request, limit: int = Query(DEFAULT_LIMIT, 
     browse._check_thumb(thumb_w)
     pool = request.app.state.pool
     q = Q()
-    conds = [f"us.user_id = {q.p(user.id)}", "f.missing_since IS NULL", *visible(user.acl, "scene", "s", q)]
+    conds = [f"us.user_id = {q.p(user.id)}", "f.missing_since IS NULL", "NOT s.is_live_photo",
+             *visible(user.acl, "scene", "s", q)]
     ids = [r["id"] for r in await pool.fetch(
         f"""SELECT s.id FROM user_scene_state us
             JOIN scenes s ON s.id = us.scene_id JOIN files f ON f.id = s.file_id

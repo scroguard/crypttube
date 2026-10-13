@@ -1240,3 +1240,26 @@ test("fullscreen on phones: falls back to the browser's own video fullscreen", a
   expect(await page.evaluate(() => (window as unknown as { __nativeFs: number }).__nativeFs)).toBe(1);
   await page.reload();   // drop the stubs
 });
+
+test("a Live Photo plays its motion in the image viewer", async () => {
+  const headers = { "X-Requested-With": "e2e" };
+  const lib = await (await page.request.post("/api/libraries", { data: { path: "/media/livephotos" }, headers })).json();
+  await page.request.post(`/api/libraries/${lib.id}/scan`, { data: {}, headers });
+  await expect(async () => {
+    await page.goto("/images?q=IMG_LIVE");
+    await expect(page.getByTestId("live-badge")).toHaveCount(1, { timeout: 3000 });
+  }).toPass({ timeout: 60_000 });
+  // its video is part of the photo, not a scene of its own
+  await page.goto("/scenes?q=IMG_LIVE");
+  await expect(page.getByText("No scenes match.")).toBeVisible();
+
+  await page.goto("/images?q=IMG_LIVE");
+  await page.getByTestId("image-tile").first().click();
+  await page.getByTestId("live-button").click();
+  const video = page.getByTestId("live-video");
+  await expect(video).toBeVisible();
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 20_000 }).toBeGreaterThan(0.5);
+  await page.screenshot({ path: `${SHOTS}/24-live-photo.png` });
+  await expect(video).toHaveCount(0, { timeout: 20_000 });          // back to the still when it ends
+  await page.keyboard.press("Escape");
+});

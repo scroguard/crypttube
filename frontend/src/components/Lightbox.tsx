@@ -23,6 +23,8 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
   const [zoom, setZoom] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [editing, setEditing] = useState(false);
+  // A Live Photo's motion, played over the still on request (LIVE button or holding the picture).
+  const [moving, setMoving] = useState(false);
   const swipe = useRef<number | null>(null);
   const swiped = useRef(false);
   const frame = useRef<HTMLDivElement>(null);
@@ -37,6 +39,7 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
   useEffect(() => {
     setZoom(false);
     setLoaded(false);
+    setMoving(false);
     for (const i of [index + 1, index + 2, index - 1]) {
       if (images[i]) new Image().src = images[i].file_url;
     }
@@ -88,6 +91,12 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
         {detail?.can_edit && detail.id === image.id && (
           <button onClick={() => setEditing(true)} className="hover:text-white">Edit</button>
         )}
+        {image.live_url && (
+          <button onClick={() => setMoving((m) => !m)} aria-pressed={moving} data-testid="live-button"
+                  className={`rounded px-2 py-0.5 text-xs font-semibold tracking-wide ${moving ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`}>
+            LIVE
+          </button>
+        )}
         <a href={`${image.file_url}${image.file_url.includes("?") ? "&" : "?"}raw=1`} target="_blank" rel="noreferrer" className="hover:text-white">Original</a>
         <button onClick={onClose} className="text-xl hover:text-white" aria-label="Close">✕</button>
       </div>
@@ -107,8 +116,14 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
            }} data-testid="lightbox-backdrop">
         {!loaded && <img src={image.thumbnail_url} alt="" data-backdrop="1" className="absolute inset-0 m-auto max-h-full max-w-full object-contain opacity-60 blur-sm" />}
         <img key={image.id} src={image.file_url} alt={image.title ?? ""} onLoad={() => setLoaded(true)}
+             onContextMenu={(e) => { if (image.live_url) { e.preventDefault(); setMoving(true); } }}
              onClick={() => setZoom((z) => !z)}
              className={zoom ? "mx-auto max-w-none cursor-zoom-out" : "absolute inset-0 m-auto max-h-full max-w-full cursor-zoom-in object-contain"} />
+        {moving && image.live_url && (
+          <video key={image.live_url} src={image.live_url} autoPlay playsInline data-testid="live-video"
+                 onEnded={() => setMoving(false)} onError={() => setMoving(false)} onClick={() => setMoving(false)}
+                 className="absolute inset-0 m-auto max-h-full max-w-full object-contain" />
+        )}
         {index > 0 && (
           <button onClick={() => go(-1)} aria-label="Previous"
                   className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-2xl text-white hover:bg-black/80">‹</button>

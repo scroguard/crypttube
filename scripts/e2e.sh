@@ -34,6 +34,16 @@ if [ ! -f "$DRM/Leftover Headers.mp4" ]; then
   python3 scripts/add_drm_headers.py "$MEDIA/videos/Beach Day.mp4" "$DRM/Leftover Headers.mp4"
 fi
 
+# A Live Photo (still + short .MOV with uncompressed audio, like an iPhone's), outside the
+# main library.
+LIVE=frontend/e2e/media/livephotos
+if [ ! -f "$LIVE/IMG_LIVE.mov" ]; then
+  mkdir -p "$LIVE"
+  ffmpeg -v error -y -f lavfi -i "testsrc2=size=480x360:rate=1:duration=1" -frames:v 1 "$LIVE/IMG_LIVE.JPG"
+  ffmpeg -v error -y -f lavfi -i "testsrc2=duration=2:size=480x360:rate=30" -f lavfi -i "sine=duration=2" \
+    -c:v libx264 -pix_fmt yuv420p -c:a pcm_s16le "$LIVE/IMG_LIVE.mov"
+fi
+
 # A small Stash database and a studio picture, outside the library, for the import test.
 STASH=frontend/e2e/media/stash
 if [ ! -f "$STASH/stash-go.sqlite" ]; then

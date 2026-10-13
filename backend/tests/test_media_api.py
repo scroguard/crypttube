@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from app import generated, worker
+from app import generated, media, worker
 from app.config import get_settings
 from app.jobs import JobContext
 from app.scanner import Scanner
@@ -372,3 +372,53 @@ async def test_heic_photos(app, client, clean, library_dir):
     # a performer picture can come from it too
     perf = (await client.post("/api/performers", json={"name": "From iPhone"})).json()["id"]
     assert (await client.post(f"/api/performers/{perf}/image/from-library", json={"image_id": iid})).status_code == 204
+
+
+async def test_live_photos_are_paired(app, client, clean, library_dir, sample_media):
+    """A photo and a short video with the same name are a Live Photo: the video plays
+    from the image, as a browser-friendly clip, and is left out of the scene lists."""
+    import subprocess
+    from app.scanner import Scanner
+    from tests.test_user_libraries import drain
+    pool = app.state.pool
+    live = library_dir / "phone"
+    live.mkdir()
+    Image.new("RGB", (400, 300), "teal").save(live / "IMG_0001.JPG")
+    # like an iPhone clip: a .MOV with uncompressed audio
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=2:size=480x360:rate=30",
+                    "-f", "lavfi", "-i", "sine=duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "pcm_s16le", str(live / "IMG_0001.mov")], check=True)
+    # not a Live Photo: same name but too long, and a lone short video
+    shutil_copy = (sample_media / "h264.mp4").read_bytes()
+    (live / "clip_alone.mp4").write_bytes(shutil_copy)
+    lid = await pool.fetchval("INSERT INTO library_paths (path) VALUES ($1) RETURNING id", str(library_dir))
+    await pool.execute("INSERT INTO jobs (kind, payload) VALUES ('scan', $1)", {"library_id": lid, "settle": 0})
+    await drain(app)
+
+    img = next(i for i in (await client.get("/api/images", params={"q": "IMG_0001"})).json()["items"])
+    assert img["live_url"]
+    others = [i for i in (await client.get("/api/images")).json()["items"] if i["id"] != img["id"]]
+    assert others and all(i["live_url"] is None for i in others)
+    titles = [s["title"] for s in (await client.get("/api/scenes")).json()["items"]]
+    assert "IMG_0001" not in titles and "clip_alone" in titles          # the motion is not a scene of its own
+    assert (await client.get("/api/ids/scenes")).json()["ids"] and len(titles) == 4
+
+    # the clip was made by the generate job after the scan: H.264, small, starts at once
+    r = await client.get(img["live_url"])
+    assert r.status_code == 200 and r.headers["content-type"] == "video/mp4"
+    probe = media.parse_video_probe(await media.ffprobe(_write(tmp := library_dir / "check.bin", r.content)))
+    tmp.unlink()
+    assert probe["video_codec"] == "h264" and probe["audio_codec"] == "aac" and 1.5 < probe["duration"] < 2.5
+    assert (await client.get(img["live_url"], headers={"Range": "bytes=0-99"})).status_code == 206
+
+    # deleting the photo takes its motion with it
+    scene_id = await pool.fetchval("SELECT live_scene_id FROM images WHERE id = $1", img["id"])
+    r = await client.post("/api/delete", json={"kind": "images", "ids": [img["id"]]})
+    assert r.json()["deleted"] == 1 and r.json()["files"] == 2
+    assert not (live / "IMG_0001.mov").exists() and not (live / "IMG_0001.JPG").exists()
+    assert (await client.get(f"/api/scenes/{scene_id}")).status_code == 404
+
+
+def _write(path, data: bytes) -> str:
+    path.write_bytes(data)
+    return str(path)

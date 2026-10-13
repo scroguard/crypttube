@@ -95,7 +95,7 @@ async def _generate_candidates(pool: asyncpg.Pool, payload: dict):
     if payload.get("library_id") is not None:
         args.append(payload["library_id"])
         conds.append(f"s.library_id = ${len(args)}")
-    query = f"""SELECT s.id, s.duration, s.assets_rev, f.id AS file_id, f.path, f.oshash,
+    query = f"""SELECT s.id, s.duration, s.assets_rev, s.is_live_photo, f.id AS file_id, f.path, f.oshash,
                        l.owner_id AS library_owner
                 FROM scenes s JOIN files f ON f.id = s.file_id JOIN library_paths l ON l.id = s.library_id
                 WHERE {' AND '.join(conds)} AND s.id > ${len(args) + 1}
@@ -273,6 +273,15 @@ async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobC
             async with sem, locks.setdefault(version, asyncio.Lock()), crypto.async_private_outputs(row["path"]):
                 first = version not in rebuilt
                 rebuilt.add(version)
+                if row["is_live_photo"]:
+                    # The motion of a Live Photo: just a browser-friendly copy, no previews.
+                    clip = generated.live_clip_path(root, version)
+                    if force and first:
+                        await asyncio.to_thread(generated.remove_files, [clip])
+                    if not generated.usable(clip):
+                        await generated.make_live_clip(row["path"], clip)
+                        made += 1
+                    return
                 if await generated.generate_scene_assets(
                         root, row["path"], row["duration"], version,
                         url_ver=generated.url_version(version, rev), force=force and first):

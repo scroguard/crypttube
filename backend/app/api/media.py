@@ -322,6 +322,22 @@ async def image_thumbnail(image_id: int, request: Request, w: int = 320, v: str 
     return generated_file(out, "image/webp", _cache_for(v, generated.url_version(version, img["assets_rev"])))
 
 
+@router.get("/images/{image_id}/live.mp4")
+async def image_live_clip(image_id: int, request: Request, acl: Acl = Depends(get_acl)):
+    """The motion of a Live Photo, as a small MP4 every browser plays (made once)."""
+    img = await _image(request, image_id, acl)
+    row = await request.app.state.pool.fetchrow(
+        """SELECT s.id, s.duration, f.id AS file_id, f.path, f.oshash FROM images i
+           JOIN scenes s ON s.id = i.live_scene_id JOIN files f ON f.id = s.file_id
+           WHERE i.id = $1 AND f.missing_since IS NULL""", img["id"])
+    if row is None:
+        raise HTTPException(404, "this image has no motion")
+    out = generated.live_clip_path(get_settings().generated_dir, generated.scene_version(row["oshash"], row["file_id"]))
+    with crypto.private_outputs(row["path"]):
+        await _ensure(out, lambda: generated.make_live_clip(row["path"], out))
+    return patched_file_response(request, str(out), "video/mp4", {})
+
+
 @router.get("/images/{image_id}/file")
 async def image_file(image_id: int, request: Request, v: str | None = None, raw: bool = False,
                      acl: Acl = Depends(get_acl)):

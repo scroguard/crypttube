@@ -20,7 +20,7 @@ def _counts_sql(acl: Acl, q: Q) -> str:
     def where(conds: list[str]) -> str:
         return " AND ".join(conds) or "true"
 
-    scenes = where(["f.missing_since IS NULL", *visible(acl, "scene", "s", q)])
+    scenes = where(["f.missing_since IS NULL", "NOT s.is_live_photo", *visible(acl, "scene", "s", q)])
     galleries = where(["g.image_count > 0", *visible(acl, "gallery", "g", q)])
     images = where(["f.missing_since IS NULL", "z.missing_since IS NULL", *visible(acl, "image", "i", q)])
     parts = []

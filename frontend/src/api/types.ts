@@ -117,6 +117,8 @@ export interface ImageItem {
   organized: boolean;
   thumbnail_url: string;
   file_url: string;
+  /** The motion of a Live Photo (a short MP4), if the image has one. */
+  live_url: string | null;
 }
 
 export interface ImageDetail extends ImageItem {

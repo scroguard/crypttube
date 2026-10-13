@@ -274,6 +274,16 @@ API: `/api/my/libraries` (list/create), `/api/my/libraries/{id}` (PATCH/DELETE),
 `/api/my/libraries/{id}/files` (GET list, `PUT ?path=` upload raw body, `DELETE ?path=`),
 `/api/my/share-targets`; admin overview at `/api/libraries/user`.
 
+## Live Photos
+
+A photo and a short video (up to 6 s) with the same name in the same folder, like an
+iPhone's `IMG_1234.HEIC` + `IMG_1234.MOV`, are paired by the scanner into one Live
+Photo. The image gets a LIVE badge; in the image viewer the LIVE button (or a long press
+on the picture) plays the motion over it. The video is converted once to a small
+H.264/AAC MP4 so it plays instantly in any browser (originals are often HEVC with
+uncompressed audio), and it is left out of scene lists and counts. Deleting the photo
+deletes its video too. Existing libraries are paired on their next scan.
+
 ## Encrypting user uploads
 
 Files users upload to their own libraries, and everything generated from them

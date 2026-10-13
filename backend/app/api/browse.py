@@ -239,6 +239,7 @@ class SceneFilter(ContentFilter):
 
 def scene_where(q: Q, f: SceneFilter, acl: Acl) -> list[str]:
     w = content_where(q, f, "scene", "s", acl)
+    w.append("NOT s.is_live_photo")   # the motion of a Live Photo belongs to its image
     if f.file_status == "present":
         w.append("f.missing_since IS NULL")
     elif f.file_status == "missing":
@@ -486,7 +487,7 @@ IMAGE_SORTS = {
     "rating": Sort("coalesce(i.rating, -1)", "smallint"),
 }
 IMAGE_SELECT = """i.id, i.title, i.width, i.height, i.rating, i.organized, i.assets_rev,
-                  f.id AS file_id, f.mod_time"""
+                  f.id AS file_id, f.mod_time, i.live_scene_id"""
 IMAGE_JOINS = "JOIN files f ON f.id = i.file_id LEFT JOIN files z ON z.id = f.zip_file_id"
 IMAGE_FROM = f"images i {IMAGE_JOINS}"
 IMAGE_PRESENT = "f.missing_since IS NULL AND z.missing_since IS NULL"
@@ -499,6 +500,8 @@ class ImageFilter(ContentFilter):
 
 def finish_image(it: dict, w: int) -> dict:
     it.update(image_urls(it["id"], it.pop("file_id"), it.pop("mod_time"), w, it.pop("assets_rev")))
+    live = it.pop("live_scene_id", None)
+    it["live_url"] = f"/api/images/{it['id']}/live.mp4?s={live}" if live else None
     return it
 
 

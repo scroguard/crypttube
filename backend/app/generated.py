@@ -75,9 +75,39 @@ def thumbnail_path(root: Path, kind: str, version: str, width: int) -> Path:
     return _shard(root, f"thumbs/{kind}", f"{version}-w{width}", ".webp")
 
 
+def live_clip_path(root: Path, version: str) -> Path:
+    """A Live Photo's motion, converted once to H.264/AAC MP4 so every browser plays it."""
+    return _shard(root, "live", version, ".mp4")
+
+
 def scene_asset_files(root: Path, version: str) -> list[Path]:
     return [screenshot_path(root, version), *sprite_paths(root, version),
-            *(thumbnail_path(root, "scenes", version, w) for w in THUMB_WIDTHS)]
+            *(thumbnail_path(root, "scenes", version, w) for w in THUMB_WIDTHS), live_clip_path(root, version)]
+
+
+LIVE_CLIP_MAX = 1080   # px on the long side
+
+
+async def make_live_clip(path: str, dest: Path) -> None:
+    """Convert a Live Photo's short video (often HEVC with uncompressed audio, which most
+    browsers can't play) to a small MP4 that starts instantly everywhere."""
+    ensure_dir(dest.parent)
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".tmp-", suffix=".mp4")
+    os.close(fd)
+    try:
+        with crypto.ffmpeg_input(path) as src:
+            scale = (f"scale='min({LIVE_CLIP_MAX},iw)':'min({LIVE_CLIP_MAX},ih)'"
+                     ":force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p")
+            await _run_ffmpeg(["-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-threads", "2",
+                               "-vf", scale, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                               "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-movflags", "+faststart",
+                               "-y", "-f", "mp4", tmp], timeout=120)
+        data = await asyncio.to_thread(Path(tmp).read_bytes)
+        if not data:
+            raise ProbeError("no clip produced")
+        await asyncio.to_thread(_atomic_write, dest, lambda f: f.write(data))
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 def display_path(root: Path, version: str) -> Path:
@@ -129,7 +159,7 @@ def check_writable(root: Path) -> str | None:
 
 
 # Everything rebuildable. `entities/` (uploaded performer/studio/tag images) is not.
-REBUILDABLE_DIRS = ("screenshots", "sprites", "thumbs", "display")
+REBUILDABLE_DIRS = ("screenshots", "sprites", "thumbs", "display", "live")
 
 
 def wipe_rebuildable(root: Path) -> None:

@@ -208,6 +208,7 @@ class Scanner:
                 await self.ctx.progress(min(1.0, (i + BATCH) / total), f"processed {min(total, i + BATCH)}/{total}")
 
         await self._finalize_galleries()
+        await pair_live_photos(self.pool, library_id)
         return self.stats
 
     async def _hash_all(self, entries: list[Entry]) -> list[tuple[Entry, str | None]]:
@@ -448,3 +449,39 @@ class Scanner:
                          WHERE gallery_id = g.id AND image_id = g.cover_image_id))""",
                 ids,
             )
+
+
+LIVE_PHOTO_MAX_SECONDS = 6
+# Same folder, same name but for the extension (any case): IMG_1234.HEIC + IMG_1234.MOV.
+_STEM = r"lower(regexp_replace({}, '\.[^./]+$', ''))"
+
+
+async def pair_live_photos(pool: asyncpg.Pool, library_id: int) -> int:
+    """Pair Live Photos (a photo and a short video saved side by side) in one library:
+    the image gets `live_scene_id`, the scene `is_live_photo`. Pairs whose files went
+    away are undone. Returns how many images are paired."""
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            rf"""CREATE TEMP TABLE live_pairs ON COMMIT DROP AS
+                SELECT DISTINCT ON (i.id) i.id AS image_id, s.id AS scene_id
+                FROM images i JOIN files fi ON fi.id = i.file_id
+                JOIN files fs ON fs.library_id = fi.library_id AND fs.zip_file_id IS NULL
+                     AND fs.missing_since IS NULL AND {_STEM.format("fs.path")} = {_STEM.format("fi.path")}
+                JOIN scenes s ON s.file_id = fs.id
+                WHERE fi.library_id = $1 AND fi.zip_file_id IS NULL AND fi.missing_since IS NULL
+                  AND lower(fi.path) ~ '\.(heic|heif|jpe?g)$' AND lower(fs.path) ~ '\.(mov|mp4)$'
+                  AND coalesce(s.duration, 0) <= {LIVE_PHOTO_MAX_SECONDS}
+                ORDER BY i.id, s.id""", library_id)
+        await conn.execute(
+            """UPDATE images i SET live_scene_id = p.scene_id FROM live_pairs p
+               WHERE i.id = p.image_id AND i.live_scene_id IS DISTINCT FROM p.scene_id""")
+        await conn.execute(
+            """UPDATE images i SET live_scene_id = NULL
+               WHERE i.library_id = $1 AND i.live_scene_id IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM live_pairs p WHERE p.image_id = i.id)""", library_id)
+        await conn.execute(
+            """UPDATE scenes s SET is_live_photo = x.paired FROM (
+                   SELECT s2.id, EXISTS (SELECT 1 FROM images i WHERE i.live_scene_id = s2.id) AS paired
+                   FROM scenes s2 WHERE s2.library_id = $1) x
+               WHERE s.id = x.id AND s.is_live_photo IS DISTINCT FROM x.paired""", library_id)
+        return await conn.fetchval("SELECT count(*) FROM live_pairs")
