@@ -128,6 +128,23 @@ test("force-rebuild a library's previews", async () => {
   await expect(row).toContainText("done");
 });
 
+test("scene cards all have the same height, whatever their titles", async () => {
+  // Uneven rows made the virtualized grid jitter while scrolling.
+  await nav("Scenes").click();
+  const card = page.getByTestId("scene-card").first();
+  const href = await card.getByRole("link").first().getAttribute("href");
+  const headers = { "X-Requested-With": "e2e" };
+  const before = await (await page.request.get(`/api${href}`)).json();
+  await page.request.patch(`/api${href}`, { headers, data: { title: "A very long title that certainly wraps onto more than one line, and then some more words" } });
+  await page.reload();
+  await expect(page.getByTestId("scene-card")).toHaveCount(3);
+  await expect(page.getByText("A very long title")).toBeVisible();
+  const heights = await page.getByTestId("scene-card").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+  expect(heights.length).toBe(3);
+  expect(new Set(heights).size).toBe(1);
+  await page.request.patch(`/api${href}`, { headers, data: { title: before.title } });
+});
+
 test("scene grid shows indexed videos", async () => {
   await nav("Scenes").click();
   // Grouped-by-performer is the default; nothing is assigned yet, so it's one section.

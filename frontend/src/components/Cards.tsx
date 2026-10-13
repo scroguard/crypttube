@@ -93,17 +93,20 @@ export const SceneCard = memo(function SceneCard({ scene, selected, onToggle }: 
         </div>
       </Link>
       <div className="mt-2 px-0.5">
-        <Link to={`/scenes/${scene.id}`} className="line-clamp-2 text-sm font-medium leading-snug hover:text-accent-hover" title={scene.title ?? ""}>
+        {/* Every card has the same height (two title lines, two detail lines, filled or
+            not): the virtualized grid assumes equal rows, and uneven ones made the page
+            jitter up and down while scrolling. */}
+        <Link to={`/scenes/${scene.id}`} className="line-clamp-2 h-[2.75em] text-sm font-medium leading-snug hover:text-accent-hover" title={scene.title ?? ""}>
           {scene.title || "Untitled"}
         </Link>
-        <div className="mt-0.5 truncate text-xs text-zinc-400">
+        <div className="mt-0.5 h-4 truncate text-xs leading-4 text-zinc-400">
           {scene.studio && <Link to={`/studios/${scene.studio.id}`} className="hover:text-white">{scene.studio.name}</Link>}
           {scene.studio && scene.release_date && " · "}
           {scene.release_date && formatDate(scene.release_date)}
         </div>
-        {scene.performers.length > 0 && (
-          <div className="truncate text-xs text-zinc-500"><RefLinks items={scene.performers} to="performers" /></div>
-        )}
+        <div className="h-4 truncate text-xs leading-4 text-zinc-500">
+          {scene.performers.length > 0 && <RefLinks items={scene.performers} to="performers" />}
+        </div>
       </div>
     </div>
   );
@@ -117,8 +120,8 @@ export const GalleryCard = memo(function GalleryCard({ gallery }: { gallery: Gal
         <Badge className="absolute bottom-1.5 right-1.5">{plural(gallery.image_count, "image")}</Badge>
       </Link>
       <div className="mt-2 px-0.5">
-        <Link to={`/galleries/${gallery.id}`} className="line-clamp-2 text-sm font-medium hover:text-accent-hover">{gallery.title || "Untitled"}</Link>
-        <div className="truncate text-xs text-zinc-500"><RefLinks items={gallery.performers} to="performers" /></div>
+        <Link to={`/galleries/${gallery.id}`} className="line-clamp-2 h-[2.75em] text-sm font-medium leading-snug hover:text-accent-hover">{gallery.title || "Untitled"}</Link>
+        <div className="h-4 truncate text-xs leading-4 text-zinc-500"><RefLinks items={gallery.performers} to="performers" /></div>
       </div>
     </div>
   );
@@ -181,7 +184,7 @@ export const TagCard = memo(function TagCard({ tag }: { tag: TagItem }) {
   return (
     <Link to={`/tags/${tag.id}`} className="card group block p-3 hover:border-zinc-600" data-testid="tag-card">
       <div className="truncate font-medium group-hover:text-accent-hover">{tag.name}</div>
-      <div className="text-xs text-zinc-500">
+      <div className="truncate text-xs text-zinc-500">
         {tag.scene_count} scenes · {tag.gallery_count} galleries{tag.child_count > 0 && ` · ${tag.child_count} sub-tags`}
       </div>
     </Link>
