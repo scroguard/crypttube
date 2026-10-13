@@ -917,6 +917,23 @@ test("owner shares the library with one user", async () => {
   await expect(page.getByTestId("total")).toHaveText("3 scenes");
 });
 
+test("an uploader deletes their own file from a selection", async () => {
+  await logout(ADMIN.username);   // (the previous test ends signed in as the admin)
+  await login("uma", "uma-password");
+  await nav("My uploads").click();
+  await page.getByTestId("my-library").click();
+  await expect(page.getByTestId("scene-card")).toHaveCount(1);
+  await page.getByRole("button", { name: "Select", exact: true }).first().click();
+  await page.getByTestId("scene-card").first().click();
+  page.once("dialog", (d) => d.accept());
+  await page.getByTestId("bulk-bar").getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByTestId("scene-card")).toHaveCount(0);
+  await page.getByRole("tab", { name: /Files/ }).click();
+  await expect(page.getByTestId("library-file")).toHaveCount(0);
+  await logout("uma");
+  await login(ADMIN.username, ADMIN.password);   // later tests continue as the admin
+});
+
 test("import from Stash: review, approve selectively, reject, studio pictures by name", async () => {
   await page.goto("/admin/libraries");
   await adminNav("Import").click();

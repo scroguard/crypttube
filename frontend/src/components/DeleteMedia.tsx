@@ -20,11 +20,12 @@ export async function deleteMedia(kind: Kind, ids: number[]): Promise<DeleteResu
   return total;
 }
 
-/** Admins only: permanently delete the files behind the given items, after confirming. */
+/** Permanently delete the files behind the given items, after confirming: admins in the
+ *  main libraries, users with uploads in their own (the server checks each item). */
 export default function DeleteMediaButton({ kind, ids, onDeleted, className = "btn-danger" }: {
   kind: Kind; ids: number[]; onDeleted?: (r: DeleteResult) => void; className?: string;
 }) {
-  const { isAdmin } = useMe();
+  const { isAdmin, canUpload } = useMe();
   // onDeleted runs as part of the mutation: by the time the caches refresh, a detail page
   // for the deleted item may already have unmounted this button (and its callbacks).
   const del = useWrite(async () => {
@@ -32,7 +33,7 @@ export default function DeleteMediaButton({ kind, ids, onDeleted, className = "b
     onDeleted?.(result);
     return result;
   });
-  if (!isAdmin) return null;
+  if (!isAdmin && !canUpload) return null;
   const what = ids.length === 1 ? `this ${NOUN[kind][0]}` : `${ids.length.toLocaleString()} ${NOUN[kind][1]}`;
   const extra = kind === "galleries" ? " A gallery's archive, or every image in its folder, is deleted with it." : "";
   return (

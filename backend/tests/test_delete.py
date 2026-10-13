@@ -92,18 +92,40 @@ async def test_shared_previews_survive_while_a_copy_remains(app, client, indexed
     assert gen_files() == set()
 
 
-async def test_only_admins_and_only_global_libraries(app, people, alice_lib):
-    admin, alice, editor = people["admin"], people["alice"], people["editor"]
+async def test_who_may_delete_what(app, people, alice_lib, indexed):
+    """Admins delete in the main libraries; a user deletes only in their own libraries."""
+    admin, alice, bob, editor = people["admin"], people["alice"], people["bob"], people["editor"]
+    pool = app.state.pool
+    main_scene = indexed["scenes"]["vp9"]
+    # nobody but an admin deletes from the main libraries
     for c in (alice, editor):
-        assert (await post(c, "scenes", [alice_lib["scene"]])).status_code == 403
-    # private: the admin can't even see it
-    assert (await post(admin, "scenes", [alice_lib["scene"]])).json() == {
-        "deleted": 0, "files": 0, "bytes": 0, "skipped": [{"id": alice_lib["scene"], "reason": "not found"}]}
-    # shared with everyone: visible, but still the owner's to delete
+        r = await post(c, "scenes", [main_scene])
+        assert r.status_code == 200 and r.json()["deleted"] == 0
+        assert r.json()["skipped"] == [{"id": main_scene, "reason": "only admins can delete from the main libraries"}]
+    # a private library: invisible to others, admins included
+    for c in (admin, bob):
+        assert (await post(c, "scenes", [alice_lib["scene"]])).json()["skipped"] == [
+            {"id": alice_lib["scene"], "reason": "not found"}]
+    # shared with everyone: visible, but still only the owner's to delete
     await alice.patch(f"/api/my/libraries/{alice_lib['id']}", json={"visibility": "everyone"})
-    r = await post(admin, "scenes", [alice_lib["scene"]])
-    assert r.json()["deleted"] == 0 and "user's own library" in r.json()["skipped"][0]["reason"]
-    assert (await alice.get(f"/api/scenes/{alice_lib['scene']}")).status_code == 200
+    for c in (admin, bob):
+        r = await post(c, "scenes", [alice_lib["scene"]])
+        assert r.json()["deleted"] == 0 and "someone else's library" in r.json()["skipped"][0]["reason"]
+    # the owner can
+    path = await pool.fetchval(
+        "SELECT f.path FROM scenes s JOIN files f ON f.id = s.file_id WHERE s.id = $1", alice_lib["scene"])
+    r = await post(alice, "scenes", [alice_lib["scene"]])
+    assert r.status_code == 200 and r.json()["deleted"] == 1, r.text
+    assert not os.path.exists(path)
+    assert (await alice.get(f"/api/scenes/{alice_lib['scene']}")).status_code == 404
+    # ...her images too, and the emptied folder goes with them
+    images = [i["id"] for i in (await alice.get(f"/api/galleries/{alice_lib['gallery']}/images")).json()["items"]]
+    folder = os.path.dirname(await pool.fetchval(
+        "SELECT f.path FROM images i JOIN files f ON f.id = i.file_id WHERE i.id = $1", images[0]))
+    assert (await post(alice, "images", images)).json()["deleted"] == len(images) == 2
+    assert not os.path.exists(folder)
+    assert (await alice.get("/api/my/libraries")).json()["libraries"][0]["file_count"] == 0
+    assert (await app.state.pool.fetchval("SELECT count(*) FROM galleries WHERE id = $1", alice_lib["gallery"])) == 0
 
 
 # --- duplicates -----------------------------------------------------------------------------

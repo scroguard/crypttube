@@ -38,9 +38,9 @@ app = FastAPI(
 ROUTES = [
     ((health.router, session.router), []),
     ((browse.router, entities.router, groups.router, media.router, edit.read_router, edit.router,
-      my_libraries.router, home.router, filters.router, preferences.router),
+      my_libraries.router, home.router, filters.router, preferences.router, delete.router),
      [Depends(require_user)]),
-    ((libraries.router, jobs.router, users.router, stash.router, maintenance.router, duplicates.router, delete.router), [Depends(require_admin)]),
+    ((libraries.router, jobs.router, users.router, stash.router, maintenance.router, duplicates.router), [Depends(require_admin)]),
 ]
 for routers, deps in ROUTES:
     for r in routers:

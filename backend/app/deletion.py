@@ -1,5 +1,5 @@
 """Deleting media for good: the file on disk, its database entries and what was generated
-for it. Admin only, and only in global libraries (users manage their own uploads).
+for it. Admins delete in global libraries; a user deletes in their own libraries only.
 
 The file is removed first; only when that worked are the database rows deleted. So a
 media store that is mounted read-only fails cleanly with nothing changed.
@@ -41,7 +41,19 @@ def _unlink(paths: list[str]) -> list[str]:
     return done
 
 
-async def _file_rows(pool, kind: str, ids: list[int], acl: Acl | None) -> tuple[list[asyncpg.Record], dict[int, str]]:
+def _prune_empty_dirs(items: list[tuple[str, str]]) -> None:
+    for path, root in items:
+        parent, top = Path(path).parent, Path(root)
+        while parent != top and parent.is_relative_to(top):
+            try:
+                parent.rmdir()          # only succeeds when empty
+            except OSError:
+                break
+            parent = parent.parent
+
+
+async def _file_rows(pool, kind: str, ids: list[int], acl: Acl | None, *, admin: bool,
+                     user_id: int | None) -> tuple[list[asyncpg.Record], dict[int, str]]:
     """The plain files behind the given scenes/images/galleries, plus why any were skipped."""
     q = Q()
     alias = {"scenes": "c", "images": "c", "galleries": "g"}[kind]
@@ -73,8 +85,10 @@ async def _file_rows(pool, kind: str, ids: list[int], acl: Acl | None) -> tuple[
         if i not in found:
             skipped[i] = "not found"
     for r in rows:
-        if r["owner_id"] is not None:
-            skipped[r["id"]] = "it belongs to a user's own library"
+        if r["owner_id"] is None and not admin:
+            skipped[r["id"]] = "only admins can delete from the main libraries"
+        elif r["owner_id"] is not None and r["owner_id"] != user_id:
+            skipped[r["id"]] = "it belongs to someone else's library"
         elif kind != "galleries" and r["zip_file_id"] is not None:
             skipped[r["id"]] = "it is inside an archive; delete the gallery instead"
         elif not r["path"].startswith(r["library_path"].rstrip("/") + "/"):
@@ -85,16 +99,18 @@ async def _file_rows(pool, kind: str, ids: list[int], acl: Acl | None) -> tuple[
 
 
 async def delete_content(pool: asyncpg.Pool, generated_dir: Path, kind: str, ids: list[int],
-                         acl: Acl | None) -> dict:
+                         acl: Acl | None, *, admin: bool = True, user_id: int | None = None) -> dict:
     """Delete the files of the given scenes/images/galleries, then their rows and
     generated assets. `acl` limits it to what that viewer can see (None = no limit)."""
-    rows, skipped = await _file_rows(pool, kind, list(dict.fromkeys(ids)), acl)
+    rows, skipped = await _file_rows(pool, kind, list(dict.fromkeys(ids)), acl, admin=admin, user_id=user_id)
     by_path = {r["path"]: r for r in rows}
     removed = await asyncio.to_thread(_unlink, list(by_path))
     for path, r in by_path.items():
         if path not in removed:
             skipped[r["id"]] = "the file could not be deleted"
     gone = [by_path[p] for p in removed]
+    # In a user's own library, folders left empty go too (as when deleting there by path).
+    await asyncio.to_thread(_prune_empty_dirs, [(r["path"], r["library_path"]) for r in gone if r["owner_id"] is not None])
     file_ids = [r["file_id"] for r in gone]
     if file_ids:
         # Generated files: image thumbnails are per file; scene assets are shared by
