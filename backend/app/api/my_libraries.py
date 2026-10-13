@@ -122,7 +122,9 @@ async def my_libraries(request: Request, user: User = Depends(require_user)) -> 
         f"{LIBRARY_SELECT} WHERE l.owner_id = $1 ORDER BY lower(l.name), l.id", user.id)
     used = await asyncio.to_thread(_disk_usage, user_root(user.id)) if user.can_upload else 0
     return {"can_upload": user.can_upload, "quota_bytes": user.upload_quota_bytes,
-            "used_bytes": used, "libraries": [dict(r) for r in rows]}
+            "used_bytes": used, "libraries": [dict(r) for r in rows],
+            # What can be uploaded (the page checks before sending): the scanner's list.
+            "upload_extensions": sorted(e.lstrip(".") for e in media.VIDEO_EXTS | media.IMAGE_EXTS | media.ARCHIVE_EXTS)}
 
 
 @router.get("/share-targets")

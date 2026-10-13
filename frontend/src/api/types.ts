@@ -271,6 +271,7 @@ export interface MyLibraries {
   quota_bytes: number | null;
   used_bytes: number;
   libraries: MyLibrary[];
+  upload_extensions: string[];
 }
 
 export interface LibraryFile {

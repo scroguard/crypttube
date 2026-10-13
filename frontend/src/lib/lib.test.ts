@@ -4,6 +4,7 @@ import { buildUrl } from "../api/client";
 import { SCENE_FILTERS, readFilters, toQuery, writeFilters } from "./filters";
 import { age, formatBytes, formatDuration, resolutionLabel } from "./format";
 import { sourceUrl, usableModes } from "./playback";
+import { isMediaFile } from "./upload";
 import { parsePageSize } from "./pageSize";
 import { cueAt, parseSpriteVtt } from "./vtt";
 
@@ -101,5 +102,16 @@ describe("page size preference", () => {
     expect(parsePageSize(null)).toBeNull();
     expect(parsePageSize("7")).toBeNull();
     expect(parsePageSize("100000")).toBeNull();
+  });
+});
+
+describe("upload file types", () => {
+  const fromServer = ["heic", "jpg", "mov", "mp4", "zip"];
+  it("follows the server's list, any case", () => {
+    expect(isMediaFile("IMG_2702.HEIC", fromServer)).toBe(true);
+    expect(isMediaFile("IMG_2702.mov", fromServer)).toBe(true);
+    expect(isMediaFile("notes.txt", fromServer)).toBe(false);
+    expect(isMediaFile(".hidden.jpg", fromServer)).toBe(false);
+    expect(isMediaFile("noextension", fromServer)).toBe(false);
   });
 });

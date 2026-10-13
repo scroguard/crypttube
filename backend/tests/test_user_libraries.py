@@ -56,7 +56,8 @@ async def scene_ids(c, **params):
 
 async def test_uploads_must_be_enabled_by_an_admin(app, people):
     bob, admin = people["bob"], people["admin"]
-    assert (await bob.get("/api/my/libraries")).json() == {
+    body = (await bob.get("/api/my/libraries")).json()
+    assert {k: body[k] for k in ("can_upload", "quota_bytes", "used_bytes", "libraries")} == {
         "can_upload": False, "quota_bytes": None, "used_bytes": 0, "libraries": []}
     assert (await bob.post("/api/my/libraries", json={"name": "x"})).status_code == 403
     assert (await bob.get("/api/my/share-targets")).status_code == 403
@@ -446,3 +447,23 @@ async def test_select_all_ids_follow_ownership(app, people, alice_lib, library_d
     assert alice_lib["scene"] not in theirs and len(theirs) == 3
     # path search works inside user libraries for those who can see them
     assert await scene_ids(alice, q="clip") == [alice_lib["scene"]]
+
+
+async def test_upload_types_come_from_the_server(app, people, sample_media):
+    """The upload page checks file types against this list; it must include everything
+    the scanner indexes (HEIC photos were once refused by a stale copy in the page)."""
+    from app import media
+    alice = people["alice"]
+    exts = set((await alice.get("/api/my/libraries")).json()["upload_extensions"])
+    assert {"heic", "heif", "mov", "mp4", "jpg", "zip"} <= exts
+    assert exts == {e.lstrip(".") for e in media.VIDEO_EXTS | media.IMAGE_EXTS | media.ARCHIVE_EXTS}
+    import pillow_heif
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    pillow_heif.from_pillow(Image.new("RGB", (64, 48), "blue")).save(buf, format="HEIF")
+    lib = (await alice.post("/api/my/libraries", json={"name": "Phone"})).json()["id"]
+    assert (await upload(alice, lib, "IMG_0001.HEIC", buf.getvalue())).status_code == 201
+    await drain(app)
+    items = (await alice.get("/api/images")).json()["items"]
+    assert [(i["width"], i["height"]) for i in items] == [(64, 48)]

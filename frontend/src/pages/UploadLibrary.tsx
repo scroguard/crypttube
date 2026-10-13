@@ -24,6 +24,7 @@ let nextKey = 1;
 /** Sequential upload queue with per-file progress. */
 function useUploader(libraryId: number) {
   const qc = useQueryClient();
+  const accepted = useMyLibraries().data?.upload_extensions ?? [];
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const running = useRef(false);
   const items = useRef<QueueItem[]>([]);
@@ -63,14 +64,14 @@ function useUploader(libraryId: number) {
   const add = useCallback((files: PendingFile[], folder: string) => {
     const added: QueueItem[] = files.map((f) => {
       const path = joinPath(folder, f.path);
-      const ok = isMediaFile(f.file.name);
+      const ok = isMediaFile(f.file.name, accepted);
       return { ...f, path, key: nextKey++, progress: 0, status: ok ? "waiting" : "skipped",
-               error: ok ? undefined : "not a video, image or zip" };
+               error: ok ? undefined : "not a supported video, image or zip file" };
     });
     setQueue((q) => [...q, ...added]);
     items.current = [...items.current, ...added];
     pump();
-  }, [pump]);
+  }, [pump, accepted]);
 
   const busy = queue.some((it) => it.status === "waiting" || it.status === "uploading");
   return { queue, add, busy, clear: () => setQueue((q) => q.filter((it) => it.status === "waiting" || it.status === "uploading")) };

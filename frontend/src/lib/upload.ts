@@ -1,14 +1,10 @@
 import { buildUrl } from "../api/client";
 
-// Mirrors backend/app/media.py; the server re-checks.
-const MEDIA_EXTENSIONS = new Set(
-  ("mp4 m4v mkv webm mov avi wmv flv mpg mpeg ts m2ts 3gp ogv " +
-    "jpg jpeg png webp gif bmp tif tiff avif zip cbz").split(" "),
-);
-
-export function isMediaFile(name: string): boolean {
+/** Is this a file the server accepts? `accepted` is the server's list of extensions
+ *  (from /api/my/libraries); the server checks again on upload. */
+export function isMediaFile(name: string, accepted: Iterable<string>): boolean {
   const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
-  return MEDIA_EXTENSIONS.has(ext) && !name.startsWith(".");
+  return !name.startsWith(".") && new Set(accepted).has(ext);
 }
 
 export interface PendingFile {
