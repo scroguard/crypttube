@@ -868,6 +868,11 @@ test("user creates a private library and uploads a video", async () => {
   // indexed in the background, then shown
   await expect(page.getByTestId("scene-card")).toHaveCount(1, { timeout: 40_000 });
   await page.screenshot({ path: `${SHOTS}/13-my-library.png` });
+  // (this stack runs with encryption of uploads on: the file on disk is encrypted, the
+  // browser gets the real thing)
+  const stream = await page.request.get(`/api${await page.getByTestId("scene-card").getByRole("link").first().getAttribute("href")}/stream`, { headers: { Range: "bytes=0-3" } });
+  expect(stream.status()).toBe(206);
+  expect((await stream.body()).toString("latin1")).toBe("\x1aE\xdf\xa3");   // the WebM signature
 
   await page.getByTestId("scene-card").getByRole("link").first().click();
   await expect(page.getByTestId("scene-title")).toHaveText("City Lights");
@@ -1042,7 +1047,11 @@ test("maintenance: check, clean up media deleted outside the app, run routine ma
     await cleanup.getByRole("button", { name: "Clean up now…" }).click();
     await expect(report).toContainText("Nothing to clean up.", { timeout: 30_000 });
 
-    // routine maintenance: change the schedule, run it now
+    // encryption of uploads is on in this stack, and nothing is left unencrypted
+  await expect(page.getByTestId("encryption")).toContainText("On");
+  await expect(page.getByTestId("encryption-counts")).toContainText(/(\d+) of \1 uploaded files encrypted/);
+
+  // routine maintenance: change the schedule, run it now
     const routine = page.getByTestId("routine");
     await routine.getByLabel("Hour").selectOption("3");
     await routine.getByRole("button", { name: "Save" }).click();

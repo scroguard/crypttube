@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, Request
 from app.api import (browse, delete, duplicates, edit, entities, filters, groups, health, home, jobs, libraries, maintenance, media, preferences,
                      my_libraries, session, stash, users)
 from app.auth import require_admin, require_user
+from app import crypto
 from app.config import get_settings
 from app.db import create_pool, migrate
 from app.streaming import TranscodeLimiter
@@ -16,6 +17,7 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    crypto.load_key(settings.uploads_key_file)   # a malformed key stops the API here, loudly
     settings.generated_dir.mkdir(parents=True, exist_ok=True)
     pool = await create_pool(settings.db_params(), settings.db_pool_min, settings.db_pool_max)
     if settings.run_migrations:

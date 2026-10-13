@@ -44,6 +44,10 @@ x-backend: &backend
     # Users' own libraries (uploaded through the UI).
     - uploads:/uploads
   networks: [goonstreamer]
+  # Key for encrypting users' uploads (README: "Encrypting user uploads"). Without
+  # UPLOADS_KEY_FILE this is an empty file and encryption is off.
+  secrets:
+    - uploads_key
 
 # Service and container names are prefixed so they can't collide with other stacks
 # (container names are global; on a shared network so are service hostnames).
@@ -125,6 +129,10 @@ services:
 
 networks:
   goonstreamer:
+
+secrets:
+  uploads_key:
+    file: ${UPLOADS_KEY_FILE:-/dev/null}
 
 volumes:
   pgdata:

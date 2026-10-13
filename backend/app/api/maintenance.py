@@ -1,11 +1,13 @@
 """Admin: cleanup of removed media and routine maintenance (see app.maintenance)."""
 
+import asyncio
+import os
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import jobs, maintenance
+from app import crypto, jobs, maintenance
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
@@ -42,6 +44,35 @@ async def overview(request: Request) -> dict:
         "cleanup_report": await maintenance.get_state(pool, maintenance.CLEANUP_REPORT),
         "jobs": {r["kind"]: dict(r) for r in active},
     }
+
+
+def _encryption_counts(paths: list[str]) -> tuple[int, int]:
+    present = [p for p in paths if os.path.exists(p)]
+    return len(present), sum(crypto.is_encrypted(p) for p in present)
+
+
+async def encryption_status(pool) -> dict:
+    paths = [r["path"] for r in await pool.fetch(
+        """SELECT f.path FROM files f JOIN library_paths l ON l.id = f.library_id
+           WHERE l.owner_id IS NOT NULL AND f.zip_file_id IS NULL AND f.missing_since IS NULL""")]
+    total, encrypted = await asyncio.to_thread(_encryption_counts, paths)
+    job = await pool.fetchrow(
+        "SELECT id, status, progress, message, error FROM jobs WHERE kind = 'encrypt_uploads' ORDER BY id DESC LIMIT 1")
+    return {"enabled": crypto.enabled(), "key_id": crypto.key_id().hex() if crypto.enabled() else None,
+            "uploaded_files": total, "encrypted_files": encrypted, "job": dict(job) if job else None}
+
+
+@router.get("/encryption")
+async def encryption(request: Request) -> dict:
+    """Whether users' uploads are encrypted at rest, and how far along existing files are."""
+    return await encryption_status(request.app.state.pool)
+
+
+@router.post("/encryption/run", status_code=202)
+async def encrypt_now(request: Request) -> dict:
+    if not crypto.enabled():
+        raise HTTPException(409, "encryption is off: no uploads key is configured")
+    return {"job_id": await jobs.enqueue(request.app.state.pool, "encrypt_uploads", {}, dedupe_key="encrypt_uploads")}
 
 
 @router.put("/settings")

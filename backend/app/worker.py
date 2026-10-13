@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import asyncpg
 
-from app import counts, generated, jobs, maintenance
+from app import counts, crypto, generated, jobs, maintenance
 from app.config import Settings, get_settings
 from app.db import create_pool, migrate
 from app.deletion import DeleteError
@@ -166,7 +166,8 @@ async def _generate_image_thumbnails(pool: asyncpg.Pool, settings: Settings, ctx
         nonlocal made, failed
         async with sem:
             try:
-                made += await asyncio.to_thread(_image_thumbnails, root, row)
+                with crypto.private_outputs(row["zip_path"] or row["path"]):
+                    made += await asyncio.to_thread(_image_thumbnails, root, row)
             except (ProbeError, OSError, KeyError, zipfile.BadZipFile):
                 failed += 1
 
@@ -269,7 +270,7 @@ async def handle_generate(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobC
         version = generated.scene_version(row["oshash"], row["file_id"])
         rev = row["assets_rev"] + 1 if force else row["assets_rev"]
         try:
-            async with sem, locks.setdefault(version, asyncio.Lock()):
+            async with sem, locks.setdefault(version, asyncio.Lock()), crypto.async_private_outputs(row["path"]):
                 first = version not in rebuilt
                 rebuilt.add(version)
                 if await generated.generate_scene_assets(
@@ -366,7 +367,60 @@ async def handle_delete_duplicates(pool: asyncpg.Pool, settings: Settings, ctx: 
         raise ScanError(str(e)) from e
 
 
-HANDLERS = {"delete_duplicates": handle_delete_duplicates, "scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
+async def handle_encrypt_uploads(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+    """Encrypt users' uploads (and what was generated from them) that aren't yet: run when
+    encryption is turned on after files were uploaded, and harmless to run again."""
+    if not crypto.enabled():
+        return "encryption of user uploads is off (no key): nothing to do"
+    root = settings.generated_dir
+    rows = await pool.fetch(
+        """SELECT f.id, f.path, f.oshash, f.mod_time, s.id AS scene_id, i.id AS image_id
+           FROM files f JOIN library_paths l ON l.id = f.library_id
+           LEFT JOIN scenes s ON s.file_id = f.id LEFT JOIN images i ON i.file_id = f.id
+           WHERE l.owner_id IS NOT NULL AND f.zip_file_id IS NULL AND f.missing_since IS NULL
+           ORDER BY f.id""")
+    members = await pool.fetch(
+        """SELECT m.id, m.mod_time FROM files m JOIN files z ON z.id = m.zip_file_id
+           JOIN library_paths l ON l.id = z.library_id JOIN images i ON i.file_id = m.id
+           WHERE l.owner_id IS NOT NULL""")
+    done = files = assets = failed = 0
+    for row in rows:
+        if await ctx.cancelled():
+            break
+        try:
+            if await asyncio.to_thread(crypto.encrypt_file_in_place, row["path"]):
+                files += 1
+        except OSError as e:
+            failed += 1
+            log.warning("could not encrypt %s: %s", row["path"], e)
+        derived = []
+        if row["scene_id"]:
+            version = generated.scene_version(row["oshash"], row["id"])
+            derived = generated.scene_asset_files(root, version)
+        elif row["image_id"]:
+            derived = generated.image_asset_files(root, generated.image_version(row["id"], row["mod_time"]))
+        assets += await asyncio.to_thread(_encrypt_existing, derived)
+        done += 1
+        await ctx.progress(done / max(len(rows), 1), f"{done} of {len(rows)} uploaded files")
+    for m in members:                                   # thumbnails of images inside uploaded zips
+        assets += await asyncio.to_thread(
+            _encrypt_existing, generated.image_asset_files(root, generated.image_version(m["id"], m["mod_time"])))
+    message = f"encrypted {files} uploaded files and {assets} generated files"
+    return message + (f"; {failed} could not be encrypted (see the worker log)" if failed else "")
+
+
+def _encrypt_existing(paths) -> int:
+    n = 0
+    for p in paths:
+        try:
+            if p.exists() and crypto.encrypt_file_in_place(p):
+                n += 1
+        except OSError as e:
+            log.warning("could not encrypt %s: %s", p, e)
+    return n
+
+
+HANDLERS = {"encrypt_uploads": handle_encrypt_uploads, "delete_duplicates": handle_delete_duplicates, "scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
             maintenance.CLEANUP_KIND: handle_cleanup, maintenance.JOB_KIND: handle_maintenance}
 
 SCHEDULE_CHECK_SECONDS = 60
@@ -478,6 +532,7 @@ async def job_loop(pool, settings, wake: asyncio.Event, stop: asyncio.Event) -> 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = get_settings()
+    crypto.load_key(settings.uploads_key_file)   # a malformed key stops the worker here, loudly
     # Background work yields to everything else on the machine, and never uses more
     # threads for file access than the configured concurrency allows.
     try:
@@ -492,6 +547,9 @@ async def main() -> None:
     await jobs.recover_stale(pool)
     await jobs.prune(pool)
     await counts.request_refresh(pool)  # cheap; guarantees the cache exists after upgrades
+    if crypto.enabled():
+        # Encryption may have just been turned on: encrypt whatever was uploaded before.
+        await jobs.enqueue(pool, "encrypt_uploads", {}, dedupe_key="encrypt_uploads")
 
     stop, wake = asyncio.Event(), asyncio.Event()
     loop = asyncio.get_running_loop()

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import asyncpg
 
-from app import media
+from app import crypto, media
 from app.jobs import JobContext
 
 log = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ def _is_within(path: Path, root: Path) -> bool:
 def walk(root: Path, library_root: Path, excludes: list[str], skip_dir: Path) -> list[Entry]:
     """Collect media files under root. Runs in a worker thread."""
     entries = []
+    private = crypto.is_private(library_root)
 
     def excluded(p: str) -> bool:
         rel = os.path.relpath(p, library_root)
@@ -98,7 +99,10 @@ def walk(root: Path, library_root: Path, excludes: list[str], skip_dir: Path) ->
             except OSError:
                 continue  # vanished between listdir and stat
             mod_time = EPOCH + timedelta(microseconds=st.st_mtime_ns // 1000)
-            entries.append(Entry(path, st.st_size, mod_time, kind))
+            # An encrypted upload is a little larger on disk; record the content's size, so
+            # encrypting an existing file doesn't look like a change.
+            size = crypto.plain_size(path, st.st_size) if private else st.st_size
+            entries.append(Entry(path, size, mod_time, kind))
     return entries
 
 

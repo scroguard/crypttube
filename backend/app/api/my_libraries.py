@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import ClientDisconnect
 
-from app import counts, jobs, media
+from app import counts, crypto, jobs, media
 from app.auth import User, require_user
 from app.config import get_settings
 from app.generated import FILE_MODE, ensure_dir
@@ -261,6 +261,9 @@ async def upload_file(library_id: int, request: Request, path: str = Query(max_l
     received = 0
     try:
         with open(tmp, "wb") as f:
+            # With encryption on, the upload is encrypted as it streams in: the plain
+            # content never reaches the disk.
+            out = crypto.EncryptingWriter(f) if crypto.enabled() else f
             buffer = bytearray()
             async for chunk in request.stream():
                 received += len(chunk)
@@ -268,10 +271,12 @@ async def upload_file(library_id: int, request: Request, path: str = Query(max_l
                     raise HTTPException(413, "upload would exceed your storage quota")
                 buffer += chunk
                 if len(buffer) >= WRITE_BUFFER:
-                    await asyncio.to_thread(f.write, bytes(buffer))
+                    await asyncio.to_thread(out.write, bytes(buffer))
                     buffer.clear()
             if buffer:
-                await asyncio.to_thread(f.write, bytes(buffer))
+                await asyncio.to_thread(out.write, bytes(buffer))
+            if out is not f:
+                await asyncio.to_thread(out.close)
         if received == 0:
             raise HTTPException(422, "empty upload")
         os.chmod(tmp, FILE_MODE)

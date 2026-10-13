@@ -46,6 +46,7 @@ export default function Maintenance() {
       <h1 className="mb-4 text-xl font-semibold">Maintenance</h1>
       {q.isPending ? <Spinner /> : q.isError ? <ErrorBox error={q.error} /> : (
         <>
+          <Encryption />
           <Cleanup data={q.data} />
           <Routine data={q.data} />
         </>
@@ -193,6 +194,53 @@ function Routine({ data }: { data: Overview }) {
           </ul>
         </div>
       )}
+    </section>
+  );
+}
+
+interface EncryptionStatus {
+  enabled: boolean; key_id: string | null; uploaded_files: number; encrypted_files: number; job: JobState | null;
+}
+
+/** Encryption at rest of users' uploads: on/off (set by the stack's key file), progress. */
+function Encryption() {
+  const q = useQuery({
+    queryKey: ["encryption"],
+    queryFn: () => api<EncryptionStatus>("/maintenance/encryption"),
+    refetchInterval: (query) => (active(query.state.data?.job ?? undefined) ? 2000 : false),
+  });
+  const run = useWrite(() => api("/maintenance/encryption/run", { method: "POST" }));
+  const e = q.data;
+  if (!e) return null;
+  const pending = e.uploaded_files - e.encrypted_files;
+  return (
+    <section className="card mb-6 p-5" data-testid="encryption">
+      <h2 className="mb-1 text-lg font-semibold">Encryption of user uploads</h2>
+      {e.enabled ? (
+        <>
+          <p className="text-sm text-zinc-300">
+            <span className="chip mr-2 bg-emerald-900/50 text-emerald-200">On</span>
+            Files users upload, and the previews made from them, are stored encrypted (key {e.key_id}).
+          </p>
+          <p className="mt-2 text-sm text-zinc-400" data-testid="encryption-counts">
+            {e.encrypted_files} of {e.uploaded_files} uploaded files encrypted
+            {pending > 0 && !active(e.job ?? undefined) && " (the rest are encrypted by a background job)"}.
+          </p>
+          {pending > 0 && (
+            <button className="btn-ghost mt-3" disabled={run.isPending || active(e.job ?? undefined)}
+                    onClick={() => run.mutate(undefined)}>Encrypt the rest now</button>
+          )}
+          <JobLine job={e.job ?? undefined} />
+          {e.job && !active(e.job) && e.job.message && <p className="mt-2 text-xs text-zinc-500">Last run: {e.job.message}</p>}
+        </>
+      ) : (
+        <p className="text-sm text-zinc-400">
+          <span className="chip mr-2">Off</span>
+          Uploads are stored as they are. To turn encryption on, give the stack a key file (UPLOADS_KEY_FILE, see the
+          README); existing uploads are then encrypted automatically.
+        </p>
+      )}
+      {run.isError && <ErrorBox error={run.error} className="mt-3" />}
     </section>
   );
 }

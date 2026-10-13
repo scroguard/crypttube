@@ -66,6 +66,10 @@ con.commit()
 PY
 fi
 
+# Run the whole journey with encryption of user uploads on.
+KEY=frontend/e2e/.uploads-key
+[ -f "$KEY" ] || { python3 -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())" > "$KEY"; chmod 400 "$KEY"; }
+export UPLOADS_KEY_FILE="$PWD/$KEY"
 export BACKEND_TAG=e2e   # its own image tag, so a test build never replaces the real one
 compose=(docker compose -p goon-e2e -f compose.yaml -f compose.e2e.yaml)
 cleanup() { [ "${1:-}" = "--keep" ] || "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1; }

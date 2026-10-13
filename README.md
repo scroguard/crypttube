@@ -258,7 +258,8 @@ Besides the global libraries an admin adds from `/media`, users can have their o
 - **Private means private from admins too**: an admin sees that a library exists, who owns
   it and how much space it uses (and can delete it), but can't browse, search or play its
   content, and scan-job paths inside user libraries are redacted. (Someone with shell
-  access to the Docker host can of course read the volume.)
+  access to the Docker host can read the volume, unless uploads are encrypted and the
+  key is kept elsewhere: see "Encrypting user uploads".)
 - Only the owner can edit or delete what's in their library, whatever their role.
   People it is shared with can browse and play. An admin's deny rules for a user still
   apply to content shared with that user.
@@ -267,10 +268,64 @@ Besides the global libraries an admin adds from `/media`, users can have their o
   unique per owner, so they neither collide nor leak through "name taken" errors.
   Editors/admins create the global ones, which anyone may use on their own content.
 - Deleting a user (or a library) removes the uploaded files as well.
+- Uploads (and their previews) can be stored encrypted: see "Encrypting user uploads".
 
 API: `/api/my/libraries` (list/create), `/api/my/libraries/{id}` (PATCH/DELETE),
 `/api/my/libraries/{id}/files` (GET list, `PUT ?path=` upload raw body, `DELETE ?path=`),
 `/api/my/share-targets`; admin overview at `/api/libraries/user`.
+
+## Encrypting user uploads
+
+Files users upload to their own libraries, and everything generated from them
+(thumbnails, screenshots, scrub previews, viewer copies), can be stored encrypted. The
+main libraries are not touched: encrypting the disk they live on is the admin's job.
+
+**What it protects against:** someone who gets the `uploads` and `generated` volumes, a
+backup of them, or a disk from the server, but not the key, sees only encrypted data.
+It does not protect against someone with root access to the running server (they can
+read the key). Keep the key file away from the volumes and their backups, ideally on
+another disk.
+
+**How it works:** AES-256-GCM in 1 MiB chunks, a random key per file wrapped with your
+master key; each chunk is authenticated, so damage or tampering is detected. Files are
+decrypted on the fly when served (seeking and HTTP Range keep working); ffmpeg reads
+encrypted videos through a loopback-only stream inside the container, so plaintext never
+touches the disk. File names, folder names and titles are not encrypted (search needs
+them).
+
+**Turning it on** (any time; existing uploads are encrypted automatically):
+
+1. Create a key file on the Docker host, readable by the user the app runs as (`PUID`):
+
+   ```sh
+   openssl rand -base64 32 > /root/goonstreamer-uploads.key
+   chown 1000:1000 /root/goonstreamer-uploads.key   # your PUID:PGID
+   chmod 400 /root/goonstreamer-uploads.key
+   ```
+
+   (Docker hands the containers that one file, so the folder it's in can stay closed to
+   everyone else. Only the file itself must be readable by `PUID`.)
+
+2. **Back the key up** somewhere safe and separate (a password manager is fine: it's one
+   line of text). **If the key is lost, encrypted uploads can never be read again.**
+
+3. Set `UPLOADS_KEY_FILE=/root/goonstreamer-uploads.key` in the stack's environment and
+   redeploy **recreating the containers** (`docker compose up -d --force-recreate`, or a
+   forced redeploy in a stack manager): Compose doesn't notice a new secret file on its own. It's passed to the api and worker as a Docker secret (`/run/secrets/uploads_key`),
+   so it doesn't appear in the environment or in `docker inspect`.
+
+4. On start, the worker queues **Encrypt uploads**, which encrypts existing uploads and
+   their previews in place (keeping their timestamps, so nothing is rescanned). Progress
+   is under **Admin → Maintenance → Encryption of user uploads**. New uploads are
+   encrypted as they stream in.
+
+Without `UPLOADS_KEY_FILE` the secret is an empty file and encryption is off. A key file
+that is unreadable or malformed stops the api and worker at startup with an explanation,
+rather than silently storing uploads unencrypted.
+
+**Don't** change or remove the key once files are encrypted: they would become
+unreadable (playback and previews of those files fail with "encrypted with a different
+uploads key"). Rotating the key isn't supported yet.
 
 ## Importing from Stash
 

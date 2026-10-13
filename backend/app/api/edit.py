@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import counts, generated, jobs
+from app import counts, crypto, generated, jobs
 from app.api import media as media_api
 from app.api.libraries import media_file_path
 from app.auth import require_admin
@@ -650,8 +650,9 @@ async def entity_image_from_library(kind: str, entity_id: int, body: ImageFromLi
         version = generated.scene_version(scene["oshash"], scene["file_id"])
         shot = generated.screenshot_path(get_settings().generated_dir, version)
         if not generated.usable(shot):
-            await generated.make_screenshot(scene["path"], scene["duration"], shot)
-        data = await asyncio.to_thread(shot.read_bytes)
+            with crypto.private_outputs(scene["path"]):
+                await generated.make_screenshot(scene["path"], scene["duration"], shot)
+        data = await asyncio.to_thread(crypto.read_all, shot)
     return await _store_entity_image(request, kind, entity_id, data)
 
 

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
+from app import crypto
 from app.media import ProbeError, background
 
 THUMB_WIDTHS = (160, 320, 640, 1280)
@@ -157,11 +158,18 @@ def ensure_dir(path: Path) -> None:
 
 
 def _atomic_write(dest: Path, write) -> None:
+    """Write via a temp file and rename. Inside crypto.private_outputs() (generating from a
+    user's upload, with encryption on) the content is stored encrypted."""
     ensure_dir(dest.parent)
     fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".tmp-")  # created 0600
     try:
         with os.fdopen(fd, "wb") as f:
-            write(f)
+            if crypto.outputs_private():
+                buf = io.BytesIO()
+                write(buf)
+                f.write(crypto.encrypt_bytes(buf.getvalue()))
+            else:
+                write(f)
         os.chmod(tmp, FILE_MODE)
         os.replace(tmp, dest)
     except BaseException:
@@ -176,8 +184,8 @@ def _atomic_write(dest: Path, write) -> None:
 def open_image_source(path: str, zip_path: str | None = None):
     """A readable binary file object for a plain file or a zip member."""
     if zip_path is None:
-        return open(path, "rb")
-    zf = zipfile.ZipFile(zip_path)
+        return crypto.open_media(path)
+    zf = zipfile.ZipFile(crypto.open_media(zip_path))
     try:
         return io.BytesIO(zf.read(path))
     finally:
@@ -186,6 +194,9 @@ def open_image_source(path: str, zip_path: str | None = None):
 
 def make_thumbnail(src, width: int, dest: Path) -> None:
     """Downscale (never upscale) to `width`, honouring EXIF orientation, save as WebP."""
+    if isinstance(src, (str, os.PathLike)):        # e.g. a scene's screenshot, maybe encrypted
+        with crypto.open_media(src) as f:
+            return make_thumbnail(f, width, dest)
     try:
         with Image.open(src) as im:
             # For JPEGs, decode at reduced scale: much faster than full decode + resize.
@@ -227,10 +238,11 @@ async def _frame_at(path: str, seconds: float, width: int, *, fast: bool) -> Ima
     seek = ["-noaccurate_seek"] if fast else []
     # One decoder thread: by default ffmpeg starts a thread per core for every process,
     # and several of these run at once.
-    out = await _run_ffmpeg([
-        "-threads", "1", *seek, "-ss", f"{seconds:.3f}", "-i", path, "-frames:v", "1", "-an", "-sn",
-        "-vf", f"scale='min({width},iw)':-2", "-f", "image2pipe", "-c:v", "png", "-",
-    ])
+    with crypto.ffmpeg_input(path) as src:
+        out = await _run_ffmpeg([
+            "-threads", "1", *seek, "-ss", f"{seconds:.3f}", "-i", src, "-frames:v", "1", "-an", "-sn",
+            "-vf", f"scale='min({width},iw)':-2", "-f", "image2pipe", "-c:v", "png", "-",
+        ])
     if not out:
         return None
     im = Image.open(io.BytesIO(out))

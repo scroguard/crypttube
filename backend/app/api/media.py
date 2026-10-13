@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
-from app import generated, jobs, streaming
+from app import crypto, generated, jobs, streaming
 from app.acl import Acl, visible
 from app.auth import get_acl
 from app.config import get_settings
@@ -26,6 +26,14 @@ router = APIRouter(tags=["media"])
 
 IMMUTABLE = "private, max-age=31536000, immutable"
 REVALIDATE = "private, no-cache"
+
+
+def generated_file(path, media_type: str, headers: dict) -> Response:
+    """Serve a generated file (thumbnail, screenshot, sprite): encrypted ones, made from a
+    user's upload, are decrypted on the way (they are small)."""
+    if crypto.is_encrypted(path):
+        return Response(crypto.read_all(path), media_type=media_type, headers=headers)
+    return FileResponse(path, media_type=media_type, headers=headers)
 
 
 class VideoFileResponse(FileResponse):
@@ -103,9 +111,10 @@ async def stream_direct(scene_id: int, request: Request, acl: Acl = Depends(get_
     """The original file, with HTTP Range support (206 Partial Content) for instant seeking."""
     s = await _scene(request, scene_id, acl)
     protection = await asyncio.to_thread(media.mp4_protection, s["path"])
-    if protection.pssh_types:
+    if protection.pssh_types or await asyncio.to_thread(crypto.is_encrypted, s["path"]):
         # Leftover DRM headers on unencrypted content: serve the file with those boxes
         # relabelled as padding, so every browser plays it directly. Same bytes otherwise.
+        # (An encrypted upload goes this way too: it is decrypted as it is sent.)
         return patched_file_response(request, s["path"], streaming.mime_type(s["path"]),
                                      {o: b"free" for o in protection.pssh_types})
     return VideoFileResponse(
@@ -135,24 +144,26 @@ def _byte_range(header: str | None, size: int) -> tuple[int, int] | None:
 
 
 def patched_file_response(request: Request, path: str, media_type: str, patches: dict[int, bytes]) -> Response:
-    """A file served with some bytes replaced (same length), with Range support."""
+    """A file's content (decrypted if it's an encrypted upload) with some bytes replaced
+    (same length), with Range support."""
     st = os.stat(path)
-    etag = f'"p{st.st_mtime_ns:x}-{st.st_size:x}"'
+    size = crypto.plain_size(path, st.st_size)
+    etag = f'"p{st.st_mtime_ns:x}-{size:x}"'
     headers = {"Accept-Ranges": "bytes", "ETag": etag, "Cache-Control": "private, no-transform"}
     wanted = request.headers.get("range")
     if_range = request.headers.get("if-range")
-    rng = _byte_range(wanted, st.st_size) if not if_range or if_range == etag else None
-    start, end = rng or (0, st.st_size - 1)
+    rng = _byte_range(wanted, size) if not if_range or if_range == etag else None
+    start, end = rng or (0, size - 1)
     length = end - start + 1
     headers["Content-Length"] = str(length)
     if rng:
-        headers["Content-Range"] = f"bytes {start}-{end}/{st.st_size}"
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     status = 206 if rng else 200
     if request.method == "HEAD":
         return Response(status_code=status, headers=headers, media_type=media_type)
 
     def chunks():
-        with open(path, "rb") as f:
+        with crypto.open_media(path) as f:
             f.seek(start)
             pos, left = start, length
             while left > 0:
@@ -190,9 +201,15 @@ async def stream_converted(
     limiter: streaming.TranscodeLimiter = request.app.state.transcodes
     if not limiter.available():
         raise HTTPException(503, "too many concurrent transcodes", headers={"Retry-After": "2"})
-    args = streaming.ffmpeg_args(s["path"], mode, start, height, s["video_codec"])
+    async def body():
+        # An encrypted upload reaches ffmpeg through crypto's loopback stream.
+        with crypto.ffmpeg_input(s["path"]) as src:
+            async for chunk in streaming.ffmpeg_stream(
+                    streaming.ffmpeg_args(src, mode, start, height, s["video_codec"]), limiter):
+                yield chunk
+
     return StreamingResponse(
-        streaming.ffmpeg_stream(args, limiter), media_type="video/mp4",
+        body(), media_type="video/mp4",
         headers={"Cache-Control": "no-store", "X-Stream-Start": f"{start:.3f}"},
     )
 
@@ -233,12 +250,13 @@ async def screenshot(scene_id: int, request: Request, w: int = 1280, v: str | No
     root = get_settings().generated_dir
     version = generated.scene_version(s["oshash"], s["file_id"])
     master = generated.screenshot_path(root, version)
-    await _ensure(master, lambda: generated.make_screenshot(s["path"], s["duration"], master))
-    out = master
-    if w != generated.SCREENSHOT_WIDTH:
-        out = generated.thumbnail_path(root, "scenes", version, w)
-        await _ensure(out, lambda: asyncio.to_thread(generated.make_thumbnail, master, w, out))
-    return FileResponse(out, media_type="image/webp",
+    with crypto.private_outputs(s["path"]):
+        await _ensure(master, lambda: generated.make_screenshot(s["path"], s["duration"], master))
+        out = master
+        if w != generated.SCREENSHOT_WIDTH:
+            out = generated.thumbnail_path(root, "scenes", version, w)
+            await _ensure(out, lambda: asyncio.to_thread(generated.make_thumbnail, master, w, out))
+    return generated_file(out, "image/webp",
                         headers=_cache_for(v, generated.url_version(version, s["assets_rev"])))
 
 
@@ -251,8 +269,7 @@ async def _sprite_file(scene_id: int, request: Request, v: str | None, which: in
         await jobs.enqueue(request.app.state.pool, "generate", {"scene_ids": [scene_id]},
                            dedupe_key=f"generate:scene:{scene_id}")
         raise HTTPException(404, "sprite not generated yet; queued")
-    return FileResponse(path, media_type=media_type,
-                        headers=_cache_for(v, generated.url_version(version, s["assets_rev"])))
+    return generated_file(path, media_type, _cache_for(v, generated.url_version(version, s["assets_rev"])))
 
 
 @router.get("/scenes/{scene_id}/sprite.webp")
@@ -300,9 +317,9 @@ async def image_thumbnail(image_id: int, request: Request, w: int = 320, v: str 
         with generated.open_image_source(img["path"], img["zip_path"]) as src:
             generated.make_thumbnail(src, w, out)
 
-    await _ensure(out, lambda: asyncio.to_thread(make))
-    return FileResponse(out, media_type="image/webp",
-                        headers=_cache_for(v, generated.url_version(version, img["assets_rev"])))
+    with crypto.private_outputs(img["zip_path"] or img["path"]):
+        await _ensure(out, lambda: asyncio.to_thread(make))
+    return generated_file(out, "image/webp", _cache_for(v, generated.url_version(version, img["assets_rev"])))
 
 
 @router.get("/images/{image_id}/file")
@@ -322,9 +339,10 @@ async def image_file(image_id: int, request: Request, v: str | None = None, raw:
         def convert():
             with generated.open_image_source(img["path"], img["zip_path"]) as src:
                 generated.make_display_copy(src, out)
-        await _ensure(out, lambda: asyncio.to_thread(convert))
-        return FileResponse(out, media_type="image/webp", headers=headers)
-    if img["zip_path"] is None:
+        with crypto.private_outputs(img["zip_path"] or img["path"]):
+            await _ensure(out, lambda: asyncio.to_thread(convert))
+        return generated_file(out, "image/webp", headers)
+    if img["zip_path"] is None and not await asyncio.to_thread(crypto.is_encrypted, img["path"]):
         return FileResponse(img["path"], media_type=media_type, headers=headers)
 
     def read():

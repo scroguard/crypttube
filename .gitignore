@@ -10,3 +10,5 @@ test-results/
 playwright-report/
 frontend/e2e/media/
 samples/
+frontend/e2e/.uploads-key
+*.key

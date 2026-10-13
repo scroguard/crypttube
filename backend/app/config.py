@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     generated_dir: Path = Path("/data/generated")
     media_dir: Path = Path("/media")
     uploads_dir: Path = Path("/uploads")  # user libraries (a Docker volume), one folder per library
+    # Encryption of user uploads: a file holding the key (a Docker secret). Missing or
+    # empty = off. See README, "Encrypting user uploads".
+    uploads_key_file: str | None = "/run/secrets/uploads_key"
     run_migrations: bool = True
     db_pool_min: int = 2
     db_pool_max: int = 20

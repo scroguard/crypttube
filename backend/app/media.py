@@ -13,6 +13,8 @@ from pathlib import PurePosixPath
 from PIL import Image
 from pillow_heif import register_heif_opener
 
+from app import crypto
+
 register_heif_opener()   # lets Pillow open HEIC/HEIF (iPhone photos) everywhere it opens images
 
 VIDEO_EXTS = frozenset(
@@ -43,8 +45,8 @@ def oshash(path: str) -> str:
     Reads at most 128 KiB regardless of file size, so it is cheap even for huge videos,
     and it survives renames/moves, which is what we use it for.
     """
-    size = os.path.getsize(path)
-    with open(path, "rb") as f:
+    size = crypto.plain_size(path)
+    with crypto.open_media(path) as f:
         head = f.read(OSHASH_CHUNK)
         f.seek(max(0, size - OSHASH_CHUNK))
         tail = f.read(OSHASH_CHUNK)
@@ -80,8 +82,8 @@ class Protection:
 
 
 def _read_protection(path: str) -> Protection:
-    with open(path, "rb") as f:
-        size = os.fstat(f.fileno()).st_size
+    size = crypto.plain_size(path)
+    with crypto.open_media(path) as f:
         off = 0
         while off + 8 <= size:
             f.seek(off)
@@ -159,6 +161,11 @@ def background(cmd: list[str]) -> list[str]:
 
 
 async def ffprobe(path: str, timeout: float = 60) -> dict:
+    with crypto.ffmpeg_input(path) as src:
+        return await _ffprobe(src, timeout)
+
+
+async def _ffprobe(path: str, timeout: float) -> dict:
     proc = await asyncio.create_subprocess_exec(
         *background(["ffprobe", "-v", "error", "-threads", "1", "-print_format", "json",
                      "-show_format", "-show_streams", path]),
@@ -222,6 +229,16 @@ class ImageInfo:
 
 def probe_image(fp) -> ImageInfo:
     """Read dimensions from the image header only; fp is a path or a file object."""
+    if isinstance(fp, (str, os.PathLike)):
+        try:
+            with crypto.open_media(fp) as f:
+                return _probe_image_file(f)
+        except OSError as e:
+            raise ProbeError(f"unreadable image: {e}") from e
+    return _probe_image_file(fp)
+
+
+def _probe_image_file(fp) -> ImageInfo:
     try:
         with Image.open(fp) as im:
             return ImageInfo(im.width, im.height, (im.format or "").lower())
@@ -240,7 +257,7 @@ def read_archive(path: str) -> tuple[list[ArchiveMember], int]:
     """List image members of a zip archive. Returns (members, unreadable_count)."""
     members, bad = [], 0
     try:
-        zf = zipfile.ZipFile(path)
+        zf = zipfile.ZipFile(crypto.open_media(path))
     except zipfile.BadZipFile as e:
         raise ProbeError(f"bad archive: {e}") from e
     with zf:
