@@ -274,6 +274,17 @@ API: `/api/my/libraries` (list/create), `/api/my/libraries/{id}` (PATCH/DELETE),
 `/api/my/libraries/{id}/files` (GET list, `PUT ?path=` upload raw body, `DELETE ?path=`),
 `/api/my/share-targets`; admin overview at `/api/libraries/user`.
 
+## Moving files
+
+Select scenes or images and use **Move…** in the selection bar to put them in another
+folder, optionally a new one ("a/b" creates both). The file is renamed on disk (copied
+across filesystems if needed) and keeps its entry: ratings, tags, performers, play
+history and previews stay. Folder galleries follow, and a Live Photo's video moves with
+its photo. When the name is taken in the destination, the dialog lets you choose a new
+name, adds a number, or leaves the file, as you choose. Admins move within and between
+the main libraries; users within and between their own libraries; never between the two.
+Files inside zip archives can't be moved individually.
+
 ## Live Photos
 
 A photo and a short video (up to 6 s) with the same name in the same folder, like an

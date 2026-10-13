@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 
-from app.api import (browse, delete, duplicates, edit, entities, filters, groups, health, home, jobs, libraries, maintenance, media, preferences,
+from app.api import (browse, delete, move, duplicates, edit, entities, filters, groups, health, home, jobs, libraries, maintenance, media, preferences,
                      my_libraries, session, stash, users)
 from app.auth import require_admin, require_user
 from app import crypto
@@ -40,7 +40,7 @@ app = FastAPI(
 ROUTES = [
     ((health.router, session.router), []),
     ((browse.router, entities.router, groups.router, media.router, edit.read_router, edit.router,
-      my_libraries.router, home.router, filters.router, preferences.router, delete.router),
+      my_libraries.router, home.router, filters.router, preferences.router, delete.router, move.router),
      [Depends(require_user)]),
     ((libraries.router, jobs.router, users.router, stash.router, maintenance.router, duplicates.router), [Depends(require_admin)]),
 ]

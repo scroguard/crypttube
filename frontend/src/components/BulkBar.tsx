@@ -1,8 +1,9 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
 import { api, type Query } from "../api/client";
-import { useWrite } from "../api/hooks";
+import { useMe, useWrite } from "../api/hooks";
 import DeleteMediaButton from "./DeleteMedia";
+import MoveDialog from "./MoveDialog";
 import EntityPicker, { creator } from "./EntityPicker";
 import { ErrorBox } from "./ui";
 
@@ -32,6 +33,8 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
     }
   });
   const [studio, setStudio] = useState<number[]>([]);
+  const [moving, setMoving] = useState(false);
+  const { isAdmin, canUpload } = useMe();
   const run = (body: object) => write.mutate(body, { onSuccess: () => { setTags([]); setPerformers([]); setStudio([]); } });
 
   // What the selection already has, so it can be seen and removed here (kept fresh by
@@ -129,6 +132,9 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
           <option value="none">No rating</option>
         </select>
         <button className="btn-ghost" onClick={() => run({ set: { organized: true } })}>Mark organized</button>
+        {kind !== "galleries" && (isAdmin || canUpload) && (
+          <button className="btn-ghost" onClick={() => setMoving(true)}>Move…</button>
+        )}
         <DeleteMediaButton kind={kind} ids={ids} onDeleted={onDone} />
         {write.isPending && (
           <span className="text-sm text-zinc-400" role="status" data-testid="bulk-progress">
@@ -139,6 +145,9 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
         {write.isError && <ErrorBox error={write.error} />}
       </div>
     </div>
+    {moving && kind !== "galleries" && (
+      <MoveDialog kind={kind} ids={ids} onClose={() => setMoving(false)} onMoved={() => undefined} />
+    )}
     </>
   );
 }

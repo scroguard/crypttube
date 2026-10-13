@@ -1263,3 +1263,42 @@ test("a Live Photo plays its motion in the image viewer", async () => {
   await expect(video).toHaveCount(0, { timeout: 20_000 });          // back to the still when it ends
   await page.keyboard.press("Escape");
 });
+
+test("move files to another folder, choosing a new name on a clash", async () => {
+  const base = "e2e/media/livephotos";
+  fs.mkdirSync(`${base}/Trip`, { recursive: true });
+  fs.copyFileSync(`${base}/IMG_LIVE.JPG`, `${base}/Trip/IMG_LIVE.JPG`);     // the name is taken there
+  try {
+    await page.goto("/images?q=IMG_LIVE");
+    await expect(page.getByTestId("image-tile")).toHaveCount(1);
+    await page.getByRole("button", { name: "Select images" }).first().click();
+    await page.getByTestId("image-tile").first().click();
+    await page.getByTestId("bulk-bar").getByRole("button", { name: "Move…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Move to folder" });
+    await dialog.getByRole("button", { name: "Open /media/livephotos" }).click();
+    await dialog.getByRole("button", { name: "Open Trip" }).click();
+    await expect(dialog.getByTestId("move-path")).toHaveText("/media/livephotos / Trip");
+    await page.screenshot({ path: `${SHOTS}/25-move.png` });
+    await dialog.getByRole("button", { name: "Move 1 image here" }).click();
+
+    const conflicts = dialog.getByTestId("move-conflicts");
+    const name = conflicts.getByLabel("New name for IMG_LIVE.JPG");
+    await expect(name).toHaveValue("IMG_LIVE (2).JPG");
+    await name.fill("Beach sunset.JPG");
+    await conflicts.getByRole("button", { name: "Move with these names" }).click();
+    await expect(dialog.getByTestId("move-summary")).toContainText("Moved 1 item");
+    await dialog.getByRole("button", { name: "Done" }).click();
+    // the photo and its video moved together and kept their pairing
+    expect(fs.existsSync(`${base}/Trip/Beach sunset.JPG`)).toBe(true);
+    expect(fs.existsSync(`${base}/Trip/Beach sunset.mov`)).toBe(true);
+    expect(fs.existsSync(`${base}/IMG_LIVE.JPG`)).toBe(false);
+    await page.goto("/images?q=Beach+sunset");
+    await expect(page.getByTestId("live-badge")).toHaveCount(1);
+  } finally {
+    // put the fixture back for the next run
+    for (const ext of ["JPG", "mov"]) {
+      if (fs.existsSync(`${base}/Trip/Beach sunset.${ext}`)) fs.renameSync(`${base}/Trip/Beach sunset.${ext}`, `${base}/IMG_LIVE.${ext}`);
+    }
+    fs.rmSync(`${base}/Trip`, { recursive: true, force: true });
+  }
+});
