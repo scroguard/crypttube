@@ -88,7 +88,7 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
         {detail?.can_edit && detail.id === image.id && (
           <button onClick={() => setEditing(true)} className="hover:text-white">Edit</button>
         )}
-        <a href={image.file_url} target="_blank" rel="noreferrer" className="hover:text-white">Original</a>
+        <a href={`${image.file_url}${image.file_url.includes("?") ? "&" : "?"}raw=1`} target="_blank" rel="noreferrer" className="hover:text-white">Original</a>
         <button onClick={onClose} className="text-xl hover:text-white" aria-label="Close">✕</button>
       </div>
       <div className={`relative flex-1 ${zoom ? "overflow-auto" : "overflow-hidden"}`}

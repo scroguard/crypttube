@@ -283,6 +283,7 @@ async def sweep_generated(db, root: Path, *, delete: bool, ctx: jobs.JobContext 
     for sub, key_of in (("screenshots", _plain_key), ("sprites", _plain_key), ("thumbs/scenes", _thumb_key)):
         await _sweep_keyed(db, root / sub, key_of, _valid_scene_keys, delete, scene, temp, ctx)
     await _sweep_keyed(db, root / "thumbs/images", _thumb_key, _valid_image_keys, delete, image, temp, ctx)
+    await _sweep_keyed(db, root / "display", _plain_key, _valid_image_keys, delete, image, temp, ctx)
 
     cutoff = time.time() - TEMP_MAX_AGE
     links_fixed = 0

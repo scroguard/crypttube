@@ -336,3 +336,39 @@ async def test_leftover_drm_headers_are_hidden_when_serving(app, client, indexed
     assert body["modes"][0] == "direct" and body["notice"] is None
     other = (await client.get(f"/api/scenes/{indexed['scenes']['vp9']}/stream", headers={"Range": "bytes=0-9"}))
     assert other.status_code == 206 and other.content == (root / "videos" / "vp9.webm").read_bytes()[:10]
+
+
+async def test_heic_photos(app, client, clean, library_dir):
+    """iPhone photos (HEIC) are indexed, thumbnailed, and shown in the viewer as a
+    converted copy (most browsers can't display HEIC); the original stays downloadable."""
+    import pillow_heif
+    from app.scanner import Scanner
+    pool = app.state.pool
+    photo = Image.new("RGB", (1200, 900), "orange")
+    heif = pillow_heif.from_pillow(photo)
+    heif.save(str(library_dir / "pics" / "iphone.HEIC"), quality=80)
+    lid = await pool.fetchval("INSERT INTO library_paths (path) VALUES ($1) RETURNING id", str(library_dir))
+    stats = await Scanner(pool, get_settings().generated_dir, settle_seconds=0).scan(lid)
+    assert stats.failed == 0
+    row = await pool.fetchrow("SELECT i.id, i.width, i.height, i.format FROM images i JOIN files f ON f.id = i.file_id WHERE f.path LIKE '%iphone.HEIC'")
+    assert (row["width"], row["height"], row["format"]) == (1200, 900, "heif")
+    iid = row["id"]
+
+    thumb = await client.get(f"/api/images/{iid}/thumbnail", params={"w": 320})
+    assert thumb.status_code == 200 and thumb.headers["content-type"] == "image/webp"
+    assert Image.open(io.BytesIO(thumb.content)).size == (320, 240)
+
+    shown = await client.get(f"/api/images/{iid}/file")
+    assert shown.status_code == 200 and shown.headers["content-type"] == "image/webp"
+    with Image.open(io.BytesIO(shown.content)) as im:
+        assert im.size == (1200, 900) and im.getpixel((10, 10))[0] > 200     # still orange
+    raw = await client.get(f"/api/images/{iid}/file", params={"raw": 1})
+    assert raw.status_code == 200 and raw.content == (library_dir / "pics" / "iphone.HEIC").read_bytes()
+    # ordinary formats are served as they are
+    jpg = next(r["id"] for r in await pool.fetch("SELECT i.id FROM images i JOIN files f ON f.id = i.file_id WHERE f.path LIKE '%img1.jpg'"))
+    r = await client.get(f"/api/images/{jpg}/file")
+    assert r.headers["content-type"] == "image/jpeg"
+
+    # a performer picture can come from it too
+    perf = (await client.post("/api/performers", json={"name": "From iPhone"})).json()["id"]
+    assert (await client.post(f"/api/performers/{perf}/image/from-library", json={"image_id": iid})).status_code == 204

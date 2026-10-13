@@ -306,12 +306,24 @@ async def image_thumbnail(image_id: int, request: Request, w: int = 320, v: str 
 
 
 @router.get("/images/{image_id}/file")
-async def image_file(image_id: int, request: Request, v: str | None = None, acl: Acl = Depends(get_acl)):
-    """The original image, for the full-size lightbox view."""
+async def image_file(image_id: int, request: Request, v: str | None = None, raw: bool = False,
+                     acl: Acl = Depends(get_acl)):
+    """The original image, for the full-size lightbox view. Formats browsers can't show
+    are converted, unless `raw` (to download the file as it is)."""
     img = await _image(request, image_id, acl)
-    version = generated.url_version(generated.image_version(img["file_id"], img["mod_time"]), img["assets_rev"])
+    key = generated.image_version(img["file_id"], img["mod_time"])
+    version = generated.url_version(key, img["assets_rev"])
     media_type = mimetypes.guess_type(img["path"])[0] or "application/octet-stream"
     headers = _cache_for(v, version)
+    if os.path.splitext(img["path"])[1].lower() in media.NOT_FOR_BROWSERS and not raw:
+        # Most browsers can't show HEIC/TIFF/BMP: serve a full-size WebP copy (made once).
+        out = generated.display_path(get_settings().generated_dir, key)
+
+        def convert():
+            with generated.open_image_source(img["path"], img["zip_path"]) as src:
+                generated.make_display_copy(src, out)
+        await _ensure(out, lambda: asyncio.to_thread(convert))
+        return FileResponse(out, media_type="image/webp", headers=headers)
     if img["zip_path"] is None:
         return FileResponse(img["path"], media_type=media_type, headers=headers)
 

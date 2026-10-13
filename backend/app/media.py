@@ -11,11 +11,16 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from PIL import Image
+from pillow_heif import register_heif_opener
+
+register_heif_opener()   # lets Pillow open HEIC/HEIF (iPhone photos) everywhere it opens images
 
 VIDEO_EXTS = frozenset(
     ".mp4 .m4v .mkv .webm .mov .avi .wmv .flv .mpg .mpeg .ts .m2ts .3gp .ogv".split()
 )
-IMAGE_EXTS = frozenset(".jpg .jpeg .png .webp .gif .bmp .tif .tiff .avif".split())
+IMAGE_EXTS = frozenset(".jpg .jpeg .png .webp .gif .bmp .tif .tiff .avif .heic .heif".split())
+# Formats most browsers can't display: the image viewer gets a converted copy of these.
+NOT_FOR_BROWSERS = frozenset(".heic .heif .tif .tiff .bmp".split())
 ARCHIVE_EXTS = frozenset(".zip .cbz".split())
 
 OSHASH_CHUNK = 64 * 1024

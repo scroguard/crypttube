@@ -79,8 +79,29 @@ def scene_asset_files(root: Path, version: str) -> list[Path]:
             *(thumbnail_path(root, "scenes", version, w) for w in THUMB_WIDTHS)]
 
 
+def display_path(root: Path, version: str) -> Path:
+    """Full-size browser-friendly copy of an image in a format browsers can't show (HEIC...)."""
+    return _shard(root, "display", version, ".webp")
+
+
 def image_asset_files(root: Path, version: str) -> list[Path]:
-    return [thumbnail_path(root, "images", version, w) for w in THUMB_WIDTHS]
+    return [*(thumbnail_path(root, "images", version, w) for w in THUMB_WIDTHS), display_path(root, version)]
+
+
+DISPLAY_MAX = 4096   # px on the long side; WebP can't go past 16383, and viewers don't need more
+
+
+def make_display_copy(src, dest: Path) -> None:
+    try:
+        with Image.open(src) as im:
+            im = ImageOps.exif_transpose(im)
+            if max(im.size) > DISPLAY_MAX:
+                im.thumbnail((DISPLAY_MAX, DISPLAY_MAX), Image.Resampling.LANCZOS)
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGBA" if "A" in im.getbands() or "transparency" in im.info else "RGB")
+            _atomic_write(dest, lambda f: im.save(f, "WEBP", quality=90, method=4))
+    except (OSError, ValueError, Image.DecompressionBombError) as e:
+        raise ProbeError(f"cannot convert: {e}") from e
 
 
 def remove_files(paths) -> None:
@@ -107,7 +128,7 @@ def check_writable(root: Path) -> str | None:
 
 
 # Everything rebuildable. `entities/` (uploaded performer/studio/tag images) is not.
-REBUILDABLE_DIRS = ("screenshots", "sprites", "thumbs")
+REBUILDABLE_DIRS = ("screenshots", "sprites", "thumbs", "display")
 
 
 def wipe_rebuildable(root: Path) -> None:
