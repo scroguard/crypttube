@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { useWrite } from "../api/hooks";
 import type { Ref } from "../api/types";
 import EntityPicker, { creator } from "./EntityPicker";
-import ImageSourceModal from "./ImageSourceModal";
+import ImageSourceModal, { CropModal } from "./ImageSourceModal";
 import { ErrorBox, Field, Modal, Toggle } from "./ui";
 
 const ids = (refs: Ref[] | undefined) => (refs ?? []).map((r) => r.id);
@@ -124,10 +124,13 @@ export function FormButtons({ busy, error, onCancel, label = "Save", children }:
 /** Set / replace / remove the image of a performer, studio or tag. */
 export function EntityImageControls({ kind, id, hasImage }: { kind: "performers" | "studios" | "tags"; id: number; hasImage: boolean }) {
   const [choosing, setChoosing] = useState(false);
+  const [cropping, setCropping] = useState(false);
   const remove = useWrite(() => api(`/${kind}/${id}/image`, { method: "DELETE" }));
   return (
     <div className="flex flex-wrap items-center gap-2">
       <button className="btn-ghost" onClick={() => setChoosing(true)}>{hasImage ? "Change image" : "Add image"}</button>
+      {hasImage && <button className="btn-ghost" onClick={() => setCropping(true)}>Adjust crop</button>}
+      {cropping && <CropModal kind={kind} id={id} onClose={() => setCropping(false)} />}
       {hasImage && <button className="btn-ghost" onClick={() => remove.mutate()}>Remove image</button>}
       {remove.error ? <ErrorBox error={remove.error} /> : null}
       {choosing && <ImageSourceModal kind={kind} id={id} onClose={() => setChoosing(false)} />}

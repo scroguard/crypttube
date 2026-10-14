@@ -564,6 +564,7 @@ async def delete_entity(kind: str, entity_id: int, request: Request, acl: Acl) -
         f"DELETE FROM {kind} WHERE id = $1 RETURNING image_path", entity_id))
     if path:
         (get_settings().generated_dir / path).unlink(missing_ok=True)
+    _source_path(kind, entity_id).unlink(missing_ok=True)
     return Response(status_code=204)
 
 
@@ -571,11 +572,26 @@ async def delete_entity(kind: str, entity_id: int, request: Request, acl: Acl) -
 # Entity images (performer headshots, studio logos, tag images)
 # ---------------------------------------------------------------------------
 
-def _normalize_image(data: bytes, dest) -> None:
+ENTITY_SOURCE_MAX = 2048   # the uncropped original kept for re-cropping
+
+
+def _source_path(kind: str, entity_id: int):
+    """The uncropped picture an entity's image was made from (kept so it can be re-cropped)."""
+    return get_settings().generated_dir / f"entities/{kind}/{entity_id}.src.webp"
+
+
+def _normalize_image(data: bytes, dest, max_size: int = ENTITY_IMAGE_MAX, crop=None) -> None:
+    """Store `data` as WebP at `dest`, at most max_size px; `crop` = (x, y, w, h) as
+    fractions of the picture."""
     try:
         with Image.open(io.BytesIO(data)) as im:
             im = ImageOps.exif_transpose(im)
-            im.thumbnail((ENTITY_IMAGE_MAX, ENTITY_IMAGE_MAX), Image.Resampling.LANCZOS)
+            if crop:
+                x, y, w, h = crop
+                box = (round(x * im.width), round(y * im.height),
+                       round((x + w) * im.width), round((y + h) * im.height))
+                im = im.crop((max(0, box[0]), max(0, box[1]), min(im.width, box[2]), min(im.height, box[3])))
+            im.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
             if im.mode not in ("RGB", "RGBA"):
                 im = im.convert("RGBA" if "A" in im.getbands() or "transparency" in im.info else "RGB")
             _atomic_write(dest, lambda f: im.save(f, "WEBP", quality=85, method=4))
@@ -600,9 +616,48 @@ async def _store_entity_image(request: Request, kind: str, entity_id: int, data:
     """Normalize to WebP and attach to the entity. The UPDATE also bumps updated_at,
     which is the image URL's version, so browsers pick up the new picture."""
     rel = f"entities/{kind}/{entity_id}.webp"
+    await asyncio.to_thread(_normalize_image, data, _source_path(kind, entity_id), ENTITY_SOURCE_MAX)
     await asyncio.to_thread(_normalize_image, data, get_settings().generated_dir / rel)
     await request.app.state.pool.execute(f"UPDATE {kind} SET image_path = $2 WHERE id = $1", entity_id, rel)
     return Response(status_code=204)
+
+
+class Crop(Body):
+    # The part of the original picture to keep, as fractions of its width and height.
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    w: float = Field(gt=0, le=1)
+    h: float = Field(gt=0, le=1)
+
+
+async def crop_entity_image(kind: str, entity_id: int, body: Crop, request: Request, acl: Acl) -> Response:
+    """Re-cut the entity's picture from its original (any number of times, no loss)."""
+    await _editable_entity(kind, entity_id, request, acl)
+    if body.x + body.w > 1.001 or body.y + body.h > 1.001:
+        raise HTTPException(422, "the crop must lie inside the picture")
+    rel = await request.app.state.pool.fetchval(f"SELECT image_path FROM {kind} WHERE id = $1", entity_id)
+    if not rel:
+        raise HTTPException(404, "no image to crop")
+    src = _source_path(kind, entity_id)
+    if not src.exists():                       # set before originals were kept: crop what there is
+        src = get_settings().generated_dir / rel
+    data = await asyncio.to_thread(src.read_bytes)
+    await asyncio.to_thread(_normalize_image, data, get_settings().generated_dir / rel, ENTITY_IMAGE_MAX,
+                            (body.x, body.y, min(body.w, 1 - body.x), min(body.h, 1 - body.y)))
+    # touching the row bumps updated_at, which versions the image URL
+    await request.app.state.pool.execute(f"UPDATE {kind} SET image_path = image_path WHERE id = $1", entity_id)
+    return Response(status_code=204)
+
+
+async def get_entity_image_source(kind: str, entity_id: int, request: Request, acl: Acl):
+    """The uncropped original, for the crop tool."""
+    await _editable_entity(kind, entity_id, request, acl)
+    rel = await request.app.state.pool.fetchval(f"SELECT image_path FROM {kind} WHERE id = $1", entity_id)
+    if not rel:
+        raise HTTPException(404, "no image")
+    src = _source_path(kind, entity_id)
+    path = src if src.exists() else get_settings().generated_dir / rel
+    return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "private, no-cache"})
 
 
 async def _editable_entity(kind: str, entity_id: int, request: Request, acl: Acl) -> None:
@@ -708,6 +763,7 @@ async def delete_entity_image(kind: str, entity_id: int, request: Request, acl: 
         await conn.execute(f"UPDATE {kind} SET image_path = NULL WHERE id = $1", entity_id)
     if path:
         (get_settings().generated_dir / path).unlink(missing_ok=True)
+    _source_path(kind, entity_id).unlink(missing_ok=True)
     return Response(status_code=204)
 
 
@@ -751,7 +807,14 @@ def _entity_routes(kind: str) -> None:
                         _admin=Depends(require_admin)) -> Response:
         return await entity_image_from_path(kind, entity_id, body, request, acl)
 
+    async def crop(entity_id: int, body: Crop, request: Request, acl: Acl = Depends(get_acl)) -> Response:
+        return await crop_entity_image(kind, entity_id, body, request, acl)
+
+    async def source(entity_id: int, request: Request, acl: Acl = Depends(get_acl)):
+        return await get_entity_image_source(kind, entity_id, request, acl)
+
     for fn, method, path, code in ((delete, "DELETE", "", 204), (put_image, "PUT", "/image", 204),
+                                   (crop, "POST", "/image/crop", 204), (source, "GET", "/image/source", None),
                                    (delete_image, "DELETE", "/image", 204), (get_image, "GET", "/image", None),
                                    (from_url, "POST", "/image/from-url", 204),
                                    (from_library, "POST", "/image/from-library", 204),

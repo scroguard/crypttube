@@ -277,3 +277,47 @@ async def test_random_image_needs_edit_rights(client, login_as, indexed):
     perf = (await client.post("/api/performers", json={"name": "Guarded"})).json()["id"]
     viewer = await login_as("vera", "viewer")
     assert (await viewer.post(f"/api/performers/{perf}/image/random")).status_code == 403
+
+
+async def test_crop_a_performer_picture_and_recrop_without_loss(app, client, clean, login_as):
+    from app.config import get_settings
+    perf = (await client.post("/api/performers", json={"name": "Cropped"})).json()["id"]
+    # a 1600x800 picture: left half red, right half blue
+    im = Image.new("RGB", (1600, 800), "red")
+    im.paste(Image.new("RGB", (800, 800), "blue"), (800, 0))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    assert (await client.put(f"/api/performers/{perf}/image", content=buf.getvalue())).status_code == 204
+    whole = await served_image(client, "performers", perf)
+    assert whole.size == (1024, 512)                         # the whole picture, as before
+    src = await client.get(f"/api/performers/{perf}/image/source")
+    assert src.status_code == 200 and Image.open(io.BytesIO(src.content)).size == (1600, 800)
+    url_before = (await client.get(f"/api/performers/{perf}")).json()["image_url"]
+
+    # keep the right quarter, 2:3 portrait-ish: all blue
+    r = await client.post(f"/api/performers/{perf}/image/crop", json={"x": 0.75, "y": 0, "w": 0.25, "h": 1})
+    assert r.status_code == 204
+    url_after = (await client.get(f"/api/performers/{perf}")).json()["image_url"]
+    assert url_after != url_before                            # browsers fetch the new one
+    cut = await served_image(client, "performers", perf)
+    assert cut.size == (400, 800) and cut.convert("RGB").getpixel((200, 400))[2] > 200
+    # re-crop from the original: the left quarter is red again, at full resolution
+    await client.post(f"/api/performers/{perf}/image/crop", json={"x": 0, "y": 0, "w": 0.25, "h": 1})
+    cut = await served_image(client, "performers", perf)
+    assert cut.size == (400, 800) and cut.convert("RGB").getpixel((200, 400))[0] > 200
+
+    bad = await client.post(f"/api/performers/{perf}/image/crop", json={"x": 0.9, "y": 0, "w": 0.5, "h": 1})
+    assert bad.status_code == 422
+    viewer = await login_as("vera-crop", "viewer")
+    assert (await viewer.post(f"/api/performers/{perf}/image/crop", json={"x": 0, "y": 0, "w": 1, "h": 1})).status_code == 403
+    assert (await viewer.get(f"/api/performers/{perf}/image/source")).status_code == 403
+
+    # the original survives maintenance; it goes with the picture
+    from app import maintenance
+    gen = get_settings().generated_dir
+    report = await maintenance.sweep_generated(app.state.pool, gen, delete=True)
+    assert report["entity_images"]["files"] == 0 and (gen / f"entities/performers/{perf}.src.webp").exists()
+    assert (await client.delete(f"/api/performers/{perf}/image")).status_code == 204
+    assert not (gen / f"entities/performers/{perf}.src.webp").exists()
+    other = (await client.post("/api/performers", json={"name": "No picture"})).json()["id"]
+    assert (await client.post(f"/api/performers/{other}/image/crop", json={"x": 0, "y": 0, "w": 1, "h": 1})).status_code == 404

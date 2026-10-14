@@ -4,6 +4,7 @@ import { api, buildUrl } from "../api/client";
 import { useMe, useWrite } from "../api/hooks";
 import type { ImageItem, Page, SceneItem } from "../api/types";
 import type { BrowseResult } from "./DirectoryPicker";
+import ImageCropper, { type CropRect } from "./ImageCropper";
 import { ErrorBox, Field, Modal, Spinner, Tabs } from "./ui";
 
 type Kind = "performers" | "studios" | "tags";
@@ -19,13 +20,16 @@ export default function ImageSourceModal({ kind, id, onClose }: { kind: Kind; id
   const base = `/${kind}/${id}/image`;
   // Every source ends the same way: the server stores the picture, then we close.
   const apply = useWrite((run: () => Promise<unknown>) => run());
-  const done = { onSuccess: onClose };
+  // After a picture is chosen, offer to position and crop it.
+  const [adjusting, setAdjusting] = useState(false);
+  const done = { onSuccess: () => setAdjusting(true) };
   const tabs: Record<string, string> = { upload: "Upload", url: "From URL", library: "From library" };
   if (isAdmin) tabs.server = "Server files";
 
+  if (adjusting) return <CropModal kind={kind} id={id} onClose={onClose} fresh />;
   return (
     <Modal title="Choose an image" onClose={onClose} wide>
-      <RandomSource kind={kind} base={base} onClose={onClose} />
+      <RandomSource kind={kind} base={base} onClose={onClose} onAdjust={() => setAdjusting(true)} />
       <Tabs tabs={tabs as Record<Source, string>} value={tab} onChange={setTab} />
       {tab === "upload" && (
         <div className="py-6 text-center">
@@ -58,7 +62,7 @@ export default function ImageSourceModal({ kind, id, onClose }: { kind: Kind; id
  * "Surprise me": use a random one of the images assigned to this performer (or studio, or
  * tag). The dialog stays open so the button can be pressed again for a different one.
  */
-function RandomSource({ kind, base, onClose }: { kind: Kind; base: string; onClose: () => void }) {
+function RandomSource({ kind, base, onClose, onAdjust }: { kind: Kind; base: string; onClose: () => void; onAdjust: () => void }) {
   const pick = useWrite((exclude: number | null) =>
     api<{ image_id: number; thumbnail_url: string }>(`${base}/random`, { json: { exclude_image_id: exclude } }));
   const self = kind === "performers" ? "this performer's" : kind === "studios" ? "this studio's" : "this tag's";
@@ -77,6 +81,7 @@ function RandomSource({ kind, base, onClose }: { kind: Kind; base: string; onClo
           : pick.data ? "Saved. Not the one? Pick another."
           : `Use a random one of ${self} images.`}
       </span>
+      {pick.data && <button type="button" className="btn-ghost" onClick={onAdjust}>Adjust crop…</button>}
       {pick.data && <button type="button" className="btn-ghost" onClick={onClose}>Done</button>}
     </div>
   );
@@ -209,5 +214,38 @@ function ServerSource({ onPick }: { onPick: (path: string) => void }) {
         {!dir.entries.length && !dir.files.length && <p className="py-6 text-center text-sm text-zinc-500">No folders or images here.</p>}
       </div>
     </div>
+  );
+}
+
+/** The frame each kind's picture is shown in: performer cards are 2:3, studio logos 3:1. */
+const ASPECT: Record<Kind, number> = { performers: 2 / 3, studios: 3, tags: 1 };
+
+/** Position and crop an entity's picture, from the original it was made from. */
+export function CropModal({ kind, id, onClose, fresh = false }: {
+  kind: Kind; id: number; onClose: () => void;
+  /** Just chosen (so currently whole), rather than re-adjusting an existing crop. */
+  fresh?: boolean;
+}) {
+  const [rect, setRect] = useState<CropRect | null>(null);
+  const [stamp] = useState(() => Date.now());          // always the current original
+  const save = useWrite((r: CropRect) => api(`/${kind}/${id}/image/crop`, { json: r }));
+  return (
+    <Modal title="Adjust the picture" onClose={onClose}>
+      <ImageCropper src={buildUrl(`/${kind}/${id}/image/source`, { t: stamp })} aspect={ASPECT[kind]} onChange={setRect} />
+      {save.isError && <ErrorBox error={save.error} className="mt-3" />}
+      <div className="mt-4 flex justify-end gap-2">
+        {fresh ? <button className="btn-ghost" onClick={onClose}>Keep the whole picture</button> : (
+          <>
+            <button className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn-ghost" disabled={save.isPending}
+                    onClick={() => save.mutate({ x: 0, y: 0, w: 1, h: 1 }, { onSuccess: onClose })}>Use the whole picture</button>
+          </>
+        )}
+        <button className="btn-primary" disabled={!rect || save.isPending}
+                onClick={() => rect && save.mutate(rect, { onSuccess: onClose })}>
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </Modal>
   );
 }

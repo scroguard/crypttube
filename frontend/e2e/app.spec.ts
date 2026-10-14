@@ -654,6 +654,10 @@ test("performer image: from the library, from server files, by upload; unsafe UR
   await expect(dialog.getByTestId("source-item").first()).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/09e-image-from-library.png` });
   await dialog.getByTestId("source-item").first().click();
+  // after choosing, the picture can be positioned; here it is kept whole
+  const adjust = page.getByRole("dialog", { name: "Adjust the picture" });
+  await expect(adjust.getByTestId("crop-frame")).toBeVisible();
+  await adjust.getByRole("button", { name: "Keep the whole picture" }).click();
   await expect(dialog).toBeHidden();
   await expect(portrait).toBeVisible();
   const first = await portrait.getAttribute("src");
@@ -667,6 +671,7 @@ test("performer image: from the library, from server files, by upload; unsafe UR
   await expect(dialog.getByTestId("server-file")).toHaveCount(12);
   await page.screenshot({ path: `${SHOTS}/09f-image-from-server.png` });
   await dialog.getByTestId("server-file").nth(5).click();
+  await adjust.getByRole("button", { name: "Keep the whole picture" }).click();
   await expect(dialog).toBeHidden();
   await expect(portrait).not.toHaveAttribute("src", first!);
 
@@ -680,7 +685,31 @@ test("performer image: from the library, from server files, by upload; unsafe UR
   // by upload
   await dialog.getByRole("tab", { name: "Upload" }).click();
   await dialog.getByTestId("image-upload").setInputFiles("e2e/media/lib/pics/photo3.jpg");
+  // this time: zoom in, drag, save
+  const frame = adjust.getByTestId("crop-frame");
+  await expect(frame.locator("img")).toBeVisible();
+  const before = await portrait.getAttribute("src");
+  await adjust.getByLabel("Zoom").fill("2.5");
+  const box = (await frame.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2 + 30, { steps: 5 });
+  await page.mouse.up();
+  await page.screenshot({ path: `${SHOTS}/09h-crop.png` });
+  await adjust.getByRole("button", { name: "Save" }).click();
+  await expect(adjust).toBeHidden();
   await expect(dialog).toBeHidden();
+  await expect(portrait).not.toHaveAttribute("src", before!);
+  const shown = await portrait.evaluate((i: HTMLImageElement) => i.naturalWidth / i.naturalHeight);
+  expect(Math.abs(shown - 2 / 3)).toBeLessThan(0.02);              // cut to the card's shape
+  // and it can be adjusted again later from the performer page
+  const cropped = await portrait.getAttribute("src");
+  await page.getByRole("button", { name: "Adjust crop" }).click();
+  await expect(adjust.getByTestId("crop-frame")).toBeVisible();
+  await adjust.getByRole("button", { name: "Use the whole picture" }).click();   // undo the crop
+  await expect(adjust).toBeHidden();
+  await expect(portrait).not.toHaveAttribute("src", cropped!);
+  await expect.poll(() => portrait.evaluate((i: HTMLImageElement) => i.naturalWidth / i.naturalHeight)).toBeGreaterThan(1);
   await expect(portrait).toBeVisible();
 
   // random: one of the images assigned to her; "pick another" always gives a different one

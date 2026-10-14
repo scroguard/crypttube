@@ -300,13 +300,13 @@ async def sweep_generated(db, root: Path, *, delete: bool, ctx: jobs.JobContext 
                 if mtime < cutoff:
                     temp.add(size)
                     doomed.append(root / "entities" / kind / name)
-            elif f"entities/{kind}/{name}" not in referenced:
+            elif f"entities/{kind}/{name.replace('.src.webp', '.webp')}" not in referenced:   # (+ its original)
                 entity.add(size)
                 doomed.append(root / "entities" / kind / name)
         if delete:
             await asyncio.to_thread(_unlink, doomed)
         # The other direction: a row pointing at a picture that isn't there.
-        broken = sorted(referenced - {f"entities/{kind}/{name}" for name, *_ in entries})
+        broken = sorted(referenced - {f"entities/{kind}/{name}" for name, *_ in entries if not name.endswith(".src.webp")})
         links_fixed += len(broken)
         if delete and broken:
             await db.execute(f"UPDATE {kind} SET image_path = NULL WHERE image_path = ANY($1::text[])", broken)
