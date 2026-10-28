@@ -40,7 +40,7 @@ export default function StudioDetail() {
           </div>
         )}
       </div>
-      <EntityContent filter={{ studio_ids: [id] }} />
+      <EntityContent filter={{ studio_ids: [id] }} scope="this studio" />
       {editing && <StudioEditModal studio={s} onClose={() => setEditing(false)} />}
     </div>
   );

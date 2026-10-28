@@ -31,7 +31,11 @@ const triState = (v: unknown) => (v === undefined ? "" : v ? "1" : "0");
 const fromTri = (s: string) => (s === "" ? undefined : s === "1");
 
 /** Scene grid with URL-synced filters. `fixed` pins filters (e.g. a performer's page). */
-export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?: Query; groupable?: boolean }) {
+export default function SceneBrowser({ fixed = {}, groupable = false, scope }: {
+  fixed?: Query; groupable?: boolean;
+  /** On a studio/tag/performer page: what the search is limited to, e.g. "this studio". */
+  scope?: string;
+}) {
   const { canCreate, isAdmin } = useMe();
   const [f, update, reset] = useUrlFilters(SCENE_FILTERS, { sort: "created_at", desc: true });
   const [panel, setPanel] = useState(false);
@@ -77,7 +81,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false }: { fixed?
     <div>
       {marquee.overlay}
       <Toolbar>
-        <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search titles or folders…" />
+        <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder={scope ? `Search in ${scope}…` : "Search titles, folders, performers…"} />
         <SortControl sorts={SORTS} sort={f.sort as string} desc={f.desc as boolean}
                      onChange={(sort, desc) => update({ sort, desc })} />
         {groupable && <ViewToggle />}

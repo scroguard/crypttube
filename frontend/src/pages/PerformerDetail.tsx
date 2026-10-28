@@ -61,7 +61,7 @@ export default function PerformerDetail() {
           {p.details && <p className="mt-4 whitespace-pre-line text-sm text-zinc-300">{p.details}</p>}
         </div>
       </div>
-      <EntityContent filter={{ performer_ids: [id] }} />
+      <EntityContent filter={{ performer_ids: [id] }} scope="this performer" />
       {editing && <PerformerEditModal performer={p} onClose={() => setEditing(false)} />}
     </div>
   );

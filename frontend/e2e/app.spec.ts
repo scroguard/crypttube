@@ -485,6 +485,23 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await expect(page.getByTestId("image-tile")).toHaveCount(15);
 });
 
+test("on a performer's page, search stays within that performer and matches names", async () => {
+  await nav("Performers").click();
+  await page.getByTestId("performer-card").filter({ hasText: "Alice" }).click();
+  const search = page.getByPlaceholder("Search in this performer…");
+  await expect(search).toBeVisible();
+  await expect(page.getByTestId("scene-card").first()).toBeVisible();
+  const all = await page.getByTestId("scene-card").count();
+  await search.fill("alice");                       // her own name: all of her scenes, nothing else
+  await expect(page.getByTestId("scene-card")).toHaveCount(all);
+  await search.fill("zz-nothing-matches");
+  await expect(page.getByTestId("scene-card")).toHaveCount(0);
+  await search.fill("");
+  await page.getByRole("tab", { name: "Images" }).click();
+  await expect(page.getByPlaceholder("Search in this performer…")).toBeVisible();
+  await page.getByRole("tab", { name: "Scenes" }).click();
+});
+
 test("performer page lists their scenes", async () => {
   await nav("Performers").click();
   await page.getByTestId("performer-card").filter({ hasText: "Alice" }).click();

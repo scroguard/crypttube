@@ -3,6 +3,7 @@ import type { Query } from "../api/client";
 import { useInfiniteList, useMe, usePreferences } from "../api/hooks";
 import type { ImageItem } from "../api/types";
 import { useMarquee } from "../lib/useMarquee";
+import { SearchBox } from "./FilterBar";
 import BulkBar, { fetchMatchingIds } from "./BulkBar";
 import { ImageTile } from "./Cards";
 import InfiniteGrid from "./InfiniteGrid";
@@ -12,9 +13,13 @@ import { releaseFocus, useEscape } from "../lib/useEscape";
 /** Thumbnail grid + lightbox over any image list endpoint, with a select mode for
  * assigning performers/tags to many images at once. `selecting`/`onSelecting` let a
  * parent start in (and observe) select mode. */
-export default function ImageBrowser({ path, query = {}, selecting, onSelecting }: {
+export default function ImageBrowser({ path, query: given = {}, selecting, onSelecting, scope }: {
   path: string; query?: Query; selecting?: boolean; onSelecting?: (on: boolean) => void;
+  /** Show a search box limited to this list, e.g. "this studio" on a studio's page. */
+  scope?: string;
 }) {
+  const [q, setQ] = useState("");
+  const query = scope && q ? { ...given, q } : given;
   const { canCreate } = useMe();
   const list = useInfiniteList<ImageItem>(path, query, { limit: 120, withTotal: true });
   const [open, setOpen] = useState<number | null>(null);
@@ -62,11 +67,12 @@ export default function ImageBrowser({ path, query = {}, selecting, onSelecting 
   return (
     <>
       {marquee.overlay}
-      {canCreate && (list.items.length > 0 || selected) && (
+      {(scope || (canCreate && (list.items.length > 0 || selected))) && (
         // Sticks under the page's toolbar (or the site header where there is none), so
         // "Done selecting" is always at hand.
-        <div className="sticky z-20 -mx-4 mb-2 flex items-center justify-end gap-2 bg-zinc-950/90 px-4 py-1.5 backdrop-blur"
+        <div className="sticky z-20 -mx-4 mb-2 flex flex-wrap items-center justify-end gap-2 bg-zinc-950/90 px-4 py-1.5 backdrop-blur"
              style={{ top: "calc(3.5rem + var(--toolbar-h, 0px))" }} data-testid="select-top">
+          {scope && <span className="mr-auto"><SearchBox value={q} onChange={setQ} placeholder={`Search in ${scope}…`} /></span>}
           {note && <span className="text-xs text-amber-400">{note}</span>}
           {selected && (
           <>

@@ -44,7 +44,7 @@ class ListParams(BaseModel):
 
 
 class ContentFilter(ListParams):
-    q: str | None = Field(None, max_length=200, description="title or file path contains")
+    q: str | None = Field(None, max_length=200, description="title, file path, performer or studio name contains")
     tag_ids: list[int] = []
     tag_mode: Literal["all", "any"] = "all"
     exclude_tag_ids: list[int] = []
@@ -107,15 +107,25 @@ async def expand_hierarchies(pool, f: "ContentFilter") -> "ContentFilter":
 # Ids whose title or file path contains the text. Written as a UNION of single-column
 # searches so each one can use its trigram index (an OR across the joined tables would
 # scan). Paths: a scene's/image's file, an image's zip archive, a gallery's folder or zip.
+# Also: the names (and aliases) of the performers in it, and its studio's name, so
+# "katie" finds Katie's scenes even when no file is named after her.
+_BY_NAMES = """
+    UNION ALL SELECT x.id FROM {table} x WHERE x.performer_ids && ARRAY(
+        SELECT id FROM performers WHERE name ILIKE {p}
+        UNION SELECT performer_id FROM performer_aliases WHERE alias ILIKE {p})::bigint[]
+    UNION ALL SELECT x.id FROM {table} x JOIN studios st ON st.id = x.studio_id WHERE st.name ILIKE {p}"""
 _SEARCH_SOURCES = {
     "scene": """SELECT id FROM scenes WHERE title ILIKE {p}
-                UNION ALL SELECT x.id FROM files pf JOIN scenes x ON x.file_id = pf.id WHERE pf.path ILIKE {p}""",
+                UNION ALL SELECT x.id FROM files pf JOIN scenes x ON x.file_id = pf.id WHERE pf.path ILIKE {p}"""
+             + _BY_NAMES.replace("{table}", "scenes"),
     "image": """SELECT id FROM images WHERE title ILIKE {p}
                 UNION ALL SELECT x.id FROM files pf JOIN images x ON x.file_id = pf.id WHERE pf.path ILIKE {p}
                 UNION ALL SELECT x.id FROM files zf JOIN files m ON m.zip_file_id = zf.id
-                          JOIN images x ON x.file_id = m.id WHERE zf.path ILIKE {p}""",
+                          JOIN images x ON x.file_id = m.id WHERE zf.path ILIKE {p}"""
+             + _BY_NAMES.replace("{table}", "images"),
     "gallery": """SELECT id FROM galleries WHERE title ILIKE {p} OR folder_path ILIKE {p}
-                  UNION ALL SELECT x.id FROM files zf JOIN galleries x ON x.zip_file_id = zf.id WHERE zf.path ILIKE {p}""",
+                  UNION ALL SELECT x.id FROM files zf JOIN galleries x ON x.zip_file_id = zf.id WHERE zf.path ILIKE {p}"""
+               + _BY_NAMES.replace("{table}", "galleries"),
 }
 
 

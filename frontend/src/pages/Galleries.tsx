@@ -15,7 +15,7 @@ export default function Galleries() {
   return (
     <div>
       <Toolbar>
-        <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search titles or folders…" />
+        <SearchBox value={(f.q as string) ?? ""} onChange={(q) => update({ q }, true)} placeholder="Search titles, folders, performers…" />
         <SortControl sorts={SORTS} sort={f.sort as string} desc={f.desc as boolean} onChange={(sort, desc) => update({ sort, desc })} />
         <div className="w-64"><EntityPicker kind="tags" value={(f.tags as number[]) ?? []} onChange={(tags) => update({ tags })} placeholder="Filter by tag…" /></div>
         <PageSizeSelect />

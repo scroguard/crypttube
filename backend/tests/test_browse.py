@@ -607,3 +607,36 @@ async def test_offset_jumps_to_a_page(client, seed):
     assert (await client.get("/api/scenes", params={"limit": 1000})).status_code == 200
     assert (await client.get("/api/scenes", params={"limit": 1001})).status_code == 422
     assert (await client.get("/api/performers", params={"limit": 1, "offset": 1})).json()["items"][0]["name"]
+
+
+async def test_search_matches_performer_and_studio_names_within_a_scope(app, client, clean, library_dir):
+    """Searching "katie" finds Katie's scenes even when no title or file says so; on a
+    studio's page the same search stays within that studio."""
+    from app.scanner import Scanner
+    from app.config import get_settings
+    pool = app.state.pool
+    lid = await pool.fetchval("INSERT INTO library_paths (path) VALUES ($1) RETURNING id", str(library_dir))
+    await Scanner(pool, get_settings().generated_dir, settle_seconds=0).scan(lid)
+    scenes = [r["id"] for r in await pool.fetch("SELECT id FROM scenes ORDER BY id")]
+    images = [r["id"] for r in await pool.fetch("SELECT id FROM images ORDER BY id")]
+    katie = (await client.post("/api/performers", json={"name": "Katie Smith", "aliases": ["KS Doll"]})).json()["id"]
+    abc = (await client.post("/api/studios", json={"name": "ABC Studios"})).json()["id"]
+    xyz = (await client.post("/api/studios", json={"name": "XYZ Media"})).json()["id"]
+    await client.patch(f"/api/scenes/{scenes[0]}", json={"performer_ids": [katie], "studio_id": abc})
+    await client.patch(f"/api/scenes/{scenes[1]}", json={"performer_ids": [katie], "studio_id": xyz})
+    await client.patch(f"/api/scenes/{scenes[2]}", json={"studio_id": abc})
+    await client.patch(f"/api/images/{images[0]}", json={"performer_ids": [katie], "studio_id": abc})
+
+    ids = lambda r: {i["id"] for i in r.json()["items"]}  # noqa: E731
+    # everywhere (the main Scenes page)
+    assert ids(await client.get("/api/scenes", params={"q": "katie"})) == {scenes[0], scenes[1]}
+    assert ids(await client.get("/api/scenes", params={"q": "ks doll"})) == {scenes[0], scenes[1]}   # alias
+    assert ids(await client.get("/api/scenes", params={"q": "xyz"})) == {scenes[1]}                  # studio name
+    # on ABC Studios' page: only ABC's
+    assert ids(await client.get("/api/scenes", params={"q": "katie", "studio_ids": abc})) == {scenes[0]}
+    # on Katie's page: a studio name narrows her scenes
+    assert ids(await client.get("/api/scenes", params={"q": "abc", "performer_ids": katie})) == {scenes[0]}
+    assert ids(await client.get("/api/images", params={"q": "katie", "studio_ids": abc})) == {images[0]}
+    assert ids(await client.get("/api/images", params={"q": "katie", "studio_ids": xyz})) == set()
+    # "select all matching" follows the same rules
+    assert set((await client.get("/api/ids/scenes", params={"q": "katie", "studio_ids": abc})).json()["ids"]) == {scenes[0]}

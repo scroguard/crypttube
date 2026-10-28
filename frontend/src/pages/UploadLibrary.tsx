@@ -172,7 +172,7 @@ export default function UploadLibrary() {
       )}
 
       <Tabs tabs={{ content: "Content", files: `Files (${lib.file_count})` }} value={tab} onChange={setTab} />
-      {tab === "content" ? <EntityContent filter={{ library_ids: [id] }} /> : <FileList libraryId={id} />}
+      {tab === "content" ? <EntityContent filter={{ library_ids: [id] }} scope="this library" /> : <FileList libraryId={id} />}
       {settings && <LibrarySettings library={lib} onClose={() => setSettings(false)} />}
       {del.isError && <ErrorBox error={del.error} className="mt-3" />}
     </div>

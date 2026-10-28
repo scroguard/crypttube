@@ -40,7 +40,7 @@ export default function TagDetail() {
           </div>
         )}
       </div>
-      <EntityContent filter={{ tag_ids: [id] }} />
+      <EntityContent filter={{ tag_ids: [id] }} scope="this tag" />
       {dialog === "edit" && <TagEditModal tag={t} onClose={() => setDialog(null)} />}
       {dialog === "merge" && <TagMergeModal tag={t} onClose={() => setDialog(null)} />}
     </div>
