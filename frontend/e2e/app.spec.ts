@@ -1043,6 +1043,30 @@ test("import from Stash: review, approve selectively, reject, studio pictures by
   await expect(page.getByText("Stash Rooftop").first()).toBeVisible();   // her tag came along
 });
 
+test("unreadable files are listed with a reason and can be deleted", async () => {
+  const junk = "e2e/media/lib/videos/zz broken.mp4";
+  fs.writeFileSync(junk, Buffer.alloc(4000, 7));          // not a video at all
+  try {
+    await page.waitForTimeout(1500);
+    await page.goto("/admin/libraries");
+    await page.getByTestId("library").getByRole("button", { name: "Scan", exact: true }).click();
+    await expect(async () => {
+      await page.goto("/admin/maintenance");
+      await expect(page.getByTestId("unreadable-file")).toHaveCount(1, { timeout: 3000 });
+    }).toPass({ timeout: 40_000 });
+    const row = page.getByTestId("unreadable-file");
+    await expect(row).toContainText("/media/lib/videos/zz broken.mp4");
+    await expect(row).toContainText("Incomplete video");   // ffprobe reads a .mp4 by its name: "moov atom not found"
+    await page.screenshot({ path: `${SHOTS}/26-unreadable.png` });
+    page.once("dialog", (d) => d.accept());
+    await row.getByRole("button", { name: "Delete /media/lib/videos/zz broken.mp4" }).click();
+    await expect(page.getByTestId("unreadable")).toHaveCount(0);
+    expect(fs.existsSync(junk)).toBe(false);
+  } finally {
+    fs.rmSync(junk, { force: true });
+  }
+});
+
 test("maintenance: check, clean up media deleted outside the app, run routine maintenance", async () => {
   const extra = "e2e/media/lib/pics/zz-cleanup.jpg";
   fs.copyFileSync("e2e/media/lib/pics/photo1.jpg", extra);

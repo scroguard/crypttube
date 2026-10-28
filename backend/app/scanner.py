@@ -50,6 +50,7 @@ class ScanStats:
     reappeared: int = 0
     failed: int = 0
     unsettled: int = 0
+    unreadable: int = 0   # known unreadable files, unchanged since: skipped
     errors: list[str] = field(default_factory=list)
     # scenes whose content is new or changed, i.e. that need generated assets
     scene_ids: list[int] = field(default_factory=list)
@@ -57,7 +58,7 @@ class ScanStats:
     image_ids: list[int] = field(default_factory=list)
 
     def summary(self) -> str:
-        parts = [f"{v} {k}" for k, v in vars(self).items() if isinstance(v, int) and v]
+        parts = [f"{v} {k}" for k, v in vars(self).items() if isinstance(v, int) and v and k != "unreadable"]
         return ", ".join(parts) or "no changes"
 
 
@@ -125,6 +126,8 @@ class Scanner:
         self._folder_galleries: dict[str, int] = {}
         self._folder_locks: dict[str, asyncio.Lock] = {}
         self._affected_galleries: set[int] = set()
+        self._failures: list[tuple[Entry, str]] = []
+        self._indexed: list[str] = []
 
     async def scan(self, library_id: int, subpath: str | None = None) -> ScanStats:
         lib = await self.pool.fetchrow("SELECT * FROM library_paths WHERE id = $1", library_id)
@@ -156,12 +159,24 @@ class Scanner:
         settle_cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.settle_seconds)
         seen = {e.path for e in entries}
         vanished = [r for p, r in existing.items() if p not in seen]
+        # Files known to be unreadable are left alone until they change.
+        unreadable = {
+            r["path"]: (r["size"], r["mod_time"])
+            for r in await self.pool.fetch(
+                """SELECT path, size, mod_time FROM unreadable_files
+                   WHERE library_id = $1 AND (path = $2 OR starts_with(path, $3))""",
+                library_id, str(root), str(root).rstrip("/") + "/",
+            )
+        }
         new, changed, reappeared = [], [], []
         for e in entries:
             if e.mod_time > settle_cutoff:
                 self.stats.unsettled += 1
                 continue
             row = existing.get(e.path)
+            if row is None and unreadable.get(e.path) == (e.size, e.mod_time):
+                self.stats.unreadable += 1
+                continue
             if row is None:
                 new.append(e)
             elif row["size"] != e.size or row["mod_time"] != e.mod_time:
@@ -209,7 +224,22 @@ class Scanner:
 
         await self._finalize_galleries()
         await pair_live_photos(self.pool, library_id)
+        await self._record_unreadable(library_id, [p for p in unreadable if p not in seen])
         return self.stats
+
+    async def _record_unreadable(self, library_id: int, gone: list[str]) -> None:
+        """Remember what couldn't be read; forget what now could, or is no longer there."""
+        async with self.pool.acquire() as conn, conn.transaction():
+            if self._failures:
+                await conn.executemany(
+                    """INSERT INTO unreadable_files (path, library_id, size, mod_time, reason)
+                       VALUES ($1, $2, $3, $4, $5)
+                       ON CONFLICT (path) DO UPDATE SET library_id = EXCLUDED.library_id, size = EXCLUDED.size,
+                           mod_time = EXCLUDED.mod_time, reason = EXCLUDED.reason, last_seen = now()""",
+                    [(e.path, library_id, e.size, e.mod_time, reason) for e, reason in self._failures])
+            forget = self._indexed + gone
+            if forget:
+                await conn.execute("DELETE FROM unreadable_files WHERE path = ANY($1::text[])", forget)
 
     async def _hash_all(self, entries: list[Entry]) -> list[tuple[Entry, str | None]]:
         """Fingerprint new files, a few at a time. (Hashing everything at once put one
@@ -302,8 +332,11 @@ class Scanner:
                 else:
                     await self._upsert_archive(conn, file_id, library_id, e, probe)
             setattr(self.stats, how, getattr(self.stats, how) + 1)
+            self._indexed.append(e.path)
         except (media.ProbeError, OSError, ValueError, asyncpg.PostgresError) as exc:
             self._record_failure(e, exc)
+            if not isinstance(exc, asyncpg.PostgresError):     # a database hiccup isn't the file's fault
+                self._failures.append((e, str(exc).strip()[:1000] or type(exc).__name__))
 
     def _record_failure(self, e: Entry, exc: Exception) -> None:
         log.warning("failed to index %s: %s", e.path, exc)

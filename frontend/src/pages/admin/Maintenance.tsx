@@ -47,6 +47,7 @@ export default function Maintenance() {
       {q.isPending ? <Spinner /> : q.isError ? <ErrorBox error={q.error} /> : (
         <>
           <Encryption />
+          <Unreadable />
           <Cleanup data={q.data} />
           <Routine data={q.data} />
         </>
@@ -241,6 +242,66 @@ function Encryption() {
         </p>
       )}
       {run.isError && <ErrorBox error={run.error} className="mt-3" />}
+    </section>
+  );
+}
+
+interface UnreadableFile {
+  path: string; size: number; reason: string; explanation: string; ignored: boolean; last_seen: string;
+}
+
+/** Files the scanner couldn't read (main libraries): why, and what to do about them. */
+function Unreadable() {
+  const [showIgnored, setShowIgnored] = useState(false);
+  const q = useQuery({
+    queryKey: ["unreadable", showIgnored],
+    queryFn: () => api<{ items: UnreadableFile[]; total: number; ignored: number }>("/maintenance/unreadable",
+      { query: { show_ignored: showIgnored || undefined } }),
+  });
+  const act = useWrite(({ action, paths, ignored }: { action: "ignore" | "retry" | "delete"; paths: string[]; ignored?: boolean }) =>
+    api<{ problems?: string[] }>(`/maintenance/unreadable/${action}`, { json: { paths, ...(ignored === undefined ? {} : { ignored }) } }));
+  const data = q.data;
+  if (!data || (data.total === 0 && data.ignored === 0)) return null;
+  const all = data.items.filter((f) => !f.ignored).map((f) => f.path);
+  return (
+    <section className="card mb-6 p-5" data-testid="unreadable">
+      <h2 className="mb-1 text-lg font-semibold">Unreadable files ({data.total})</h2>
+      <p className="mb-3 text-sm text-zinc-400">
+        Files in the libraries that couldn't be read as a video or picture, usually because they are damaged or
+        incomplete. Scans skip them until they change. If one plays fine elsewhere, use “Try again”; if it's broken,
+        delete it or ignore it.
+      </p>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <Toggle checked={showIgnored} onChange={setShowIgnored} label={`Show ignored (${data.ignored})`} />
+        <span className="mr-auto" />
+        {all.length > 1 && (
+          <>
+            <button className="btn-ghost py-1" disabled={act.isPending} onClick={() => act.mutate({ action: "retry", paths: all })}>Try all again</button>
+            <button className="btn-danger py-1" disabled={act.isPending}
+                    onClick={() => confirm(`Delete all ${all.length} unreadable files from disk? This cannot be undone.`) && act.mutate({ action: "delete", paths: all })}>
+              Delete all…
+            </button>
+          </>
+        )}
+      </div>
+      {act.isError && <ErrorBox error={act.error} className="mb-3" />}
+      {act.data?.problems?.length ? <p className="mb-3 text-sm text-amber-300">Not deleted: {act.data.problems.join("; ")}</p> : null}
+      <ul className="divide-y divide-zinc-800 rounded-md border border-zinc-800">
+        {data.items.map((f) => (
+          <li key={f.path} className={`flex flex-wrap items-center gap-3 px-3 py-2 text-sm ${f.ignored ? "opacity-60" : ""}`} data-testid="unreadable-file">
+            <div className="min-w-0 flex-1">
+              <code className="block break-all text-xs text-zinc-300">{f.path}</code>
+              <span className="text-xs text-zinc-400" title={f.reason}>{f.explanation}</span>
+              <span className="ml-2 text-xs text-zinc-600">{formatBytes(f.size)}</span>
+            </div>
+            <button className="btn-ghost py-1 text-xs" disabled={act.isPending} onClick={() => act.mutate({ action: "retry", paths: [f.path] })}>Try again</button>
+            <button className="btn-ghost py-1 text-xs" disabled={act.isPending}
+                    onClick={() => act.mutate({ action: "ignore", paths: [f.path], ignored: !f.ignored })}>{f.ignored ? "Unignore" : "Ignore"}</button>
+            <button className="btn-danger py-1 text-xs" disabled={act.isPending} aria-label={`Delete ${f.path}`}
+                    onClick={() => confirm(`Delete ${f.path} from disk? This cannot be undone.`) && act.mutate({ action: "delete", paths: [f.path] })}>Delete</button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

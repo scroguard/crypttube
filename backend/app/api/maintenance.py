@@ -93,3 +93,108 @@ async def cleanup(request: Request, body: CleanupRequest | None = None) -> dict:
     body = body or CleanupRequest()
     return {"job_id": await jobs.enqueue(request.app.state.pool, maintenance.CLEANUP_KIND, body.model_dump(),
                                          dedupe_key=maintenance.CLEANUP_KIND)}
+
+
+# ---------------------------------------------------------------------------
+# Files the scanner couldn't read (main libraries only: users' own stay private)
+# ---------------------------------------------------------------------------
+
+EXPLANATIONS = (
+    ("moov atom not found", "Incomplete video: its index is missing. Usually an interrupted download or copy "
+                            "(or a file that isn't really an MP4/MOV)."),
+    ("invalid data found when processing input", "Not readable as a video: damaged, empty, or not really a video."),
+    ("no video stream", "The file has no video in it (audio only, or a broken video track)."),
+    ("timed out", "Reading it took too long (a very damaged file, or very slow storage)."),
+    ("unreadable image", "Not readable as a picture: damaged, incomplete, or not really an image."),
+    ("bad archive", "Not a readable zip archive (damaged or incomplete)."),
+    ("permission denied", "The server isn't allowed to read this file (check its permissions)."),
+    ("end of file", "The file ends early (incomplete)."),
+)
+
+
+def explain(reason: str) -> str:
+    low = reason.lower()
+    return next((text for needle, text in EXPLANATIONS if needle in low), "The file couldn't be read as media.")
+
+
+class UnreadableAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paths: list[str] = Field(min_length=1, max_length=5000)
+    ignored: bool = True
+
+
+MAIN_ONLY = "JOIN library_paths l ON l.id = u.library_id AND l.owner_id IS NULL"
+
+
+@router.get("/unreadable")
+async def unreadable(request: Request, show_ignored: bool = False, limit: int = 200, offset: int = 0) -> dict:
+    pool = request.app.state.pool
+    limit = max(1, min(limit, 1000))
+    rows = await pool.fetch(
+        f"""SELECT u.path, u.size, u.reason, u.ignored, u.first_seen, u.last_seen FROM unreadable_files u {MAIN_ONLY}
+            WHERE $1 OR NOT u.ignored ORDER BY u.path COLLATE natural_sort LIMIT $2 OFFSET $3""",
+        show_ignored, limit, max(0, offset))
+    counts = await pool.fetchrow(
+        f"""SELECT count(*) FILTER (WHERE NOT u.ignored) AS shown, count(*) FILTER (WHERE u.ignored) AS ignored
+            FROM unreadable_files u {MAIN_ONLY}""")
+    return {"items": [dict(r) | {"explanation": explain(r["reason"])} for r in rows],
+            "total": counts["shown"], "ignored": counts["ignored"]}
+
+
+async def _rows(pool, paths: list[str]):
+    return await pool.fetch(
+        f"""SELECT u.path, u.library_id, l.path AS library_path FROM unreadable_files u {MAIN_ONLY}
+            WHERE u.path = ANY($1::text[])""", paths)
+
+
+@router.post("/unreadable/ignore")
+async def ignore_unreadable(body: UnreadableAction, request: Request) -> dict:
+    """Hide (or show again) files in the list. They stay skipped by scans either way."""
+    pool = request.app.state.pool
+    paths = [r["path"] for r in await _rows(pool, body.paths)]
+    await pool.execute("UPDATE unreadable_files SET ignored = $2 WHERE path = ANY($1::text[])", paths, body.ignored)
+    return {"updated": len(paths)}
+
+
+@router.post("/unreadable/retry", status_code=202)
+async def retry_unreadable(body: UnreadableAction, request: Request) -> dict:
+    """Forget that these couldn't be read and scan their folders again (e.g. after fixing them)."""
+    from app.watcher import scan_dedupe_key
+    pool = request.app.state.pool
+    rows = await _rows(pool, body.paths)
+    await pool.execute("DELETE FROM unreadable_files WHERE path = ANY($1::text[])", [r["path"] for r in rows])
+    folders = {(r["library_id"], os.path.dirname(r["path"])) for r in rows}
+    for library_id, folder in sorted(folders):
+        await jobs.enqueue(pool, "scan", {"library_id": library_id, "path": folder, "settle": 0},
+                           dedupe_key=scan_dedupe_key(library_id, folder))
+    return {"retrying": len(rows), "scans": len(folders)}
+
+
+def _unlink(path: str) -> None:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+
+@router.post("/unreadable/delete")
+async def delete_unreadable(body: UnreadableAction, request: Request) -> dict:
+    """Delete unreadable files from disk (they have no entry, previews or details to lose)."""
+    pool = request.app.state.pool
+    deleted, problems = [], []
+    for r in await _rows(pool, body.paths):
+        if not r["path"].startswith(r["library_path"].rstrip("/") + "/"):
+            problems.append(f"{r['path']}: outside its library")
+            continue
+        try:
+            await asyncio.to_thread(_unlink, r["path"])
+        except OSError as e:
+            problems.append(f"{r['path']}: {e.strerror or e}")
+            continue
+        deleted.append(r["path"])
+    await pool.execute("DELETE FROM unreadable_files WHERE path = ANY($1::text[])", deleted)
+    if problems and not deleted:
+        raise HTTPException(409, "nothing was deleted: " + problems[0] + (
+            " (the media store must be writable: MEDIA_MODE=rw, and PUID allowed to delete there)"
+            if "read-only" in problems[0].lower() or "permission" in problems[0].lower() else ""))
+    return {"deleted": len(deleted), "problems": problems}

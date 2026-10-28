@@ -408,6 +408,11 @@ reports. Safeguards: a library that is disabled or whose folder isn't there (an 
 drive) is skipped; a file marked missing but present on disk is kept; and nothing is
 removed while files are still being copied. Originals are never touched.
 
+**Unreadable files** (main libraries) are listed with the reason in plain English, e.g.
+"Incomplete video: its index is missing" for ffprobe's "moov atom not found". Scans skip
+them until they change. Each can be tried again (after fixing it), ignored, or deleted.
+Unreadable files in users' own libraries show as "not indexed" on their Files tab.
+
 **Routine maintenance** runs once a day (default 04:00, in the time zone given by `TZ`),
 or on demand:
 

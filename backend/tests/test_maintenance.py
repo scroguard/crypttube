@@ -12,6 +12,7 @@ from app import generated, maintenance, worker
 from app.config import get_settings
 from app.jobs import JobContext
 from tests.test_media_api import indexed  # noqa: F401  (fixture)
+from tests.test_user_libraries import alice_lib, people  # noqa: F401  (fixtures)
 
 
 async def run_job(app, kind, payload):
@@ -290,3 +291,70 @@ async def test_cleanup_refuses_while_files_are_still_copying(app, client, indexe
     except worker.ScanError as e:
         assert "may still be copying; nothing was removed" in str(e)
     assert (await counts(app))[0] == 3
+
+
+async def test_unreadable_files_are_listed_skipped_and_manageable(app, client, indexed, login_as):
+    from app.scanner import Scanner
+    pool = app.state.pool
+    root = indexed["root"]
+    lid = await pool.fetchval("SELECT id FROM library_paths WHERE path = $1", str(root))
+    scan = lambda: Scanner(pool, get_settings().generated_dir, settle_seconds=0).scan(lid)  # noqa: E731
+    # an MP4 cut off before its index, garbage named .mkv, a broken picture
+    (root / "videos" / "cut off.mp4").write_bytes((root / "videos" / "h264.mp4").read_bytes()[:3000])
+    (root / "videos" / "junk.mkv").write_bytes(b"<html>not a video</html>" * 50)
+    (root / "pics" / "broken.jpg").write_bytes(b"\xff\xd8\xff\xe0 truncated")
+    stats = await scan()
+    assert stats.failed == 3
+
+    body = (await client.get("/api/maintenance/unreadable")).json()
+    assert body["total"] == 3 and body["ignored"] == 0
+    by_name = {Path(i["path"]).name: i for i in body["items"]}
+    assert by_name["cut off.mp4"]["explanation"].startswith("Incomplete video")
+    assert by_name["junk.mkv"]["explanation"].startswith("Not readable as a video")
+    assert by_name["broken.jpg"]["explanation"].startswith("Not readable as a picture")
+
+    # the next scan leaves them alone
+    stats = await scan()
+    assert stats.failed == 0 and stats.unreadable == 3 and stats.summary() == "no changes"
+
+    # ignore hides one; retry forgets one and queues a scan; delete removes one from disk
+    junk, cut, broken = (str(root / "videos" / "junk.mkv"), str(root / "videos" / "cut off.mp4"),
+                         str(root / "pics" / "broken.jpg"))
+    await client.post("/api/maintenance/unreadable/ignore", json={"paths": [junk]})
+    body = (await client.get("/api/maintenance/unreadable")).json()
+    assert body["total"] == 2 and body["ignored"] == 1
+    assert len((await client.get("/api/maintenance/unreadable", params={"show_ignored": True})).json()["items"]) == 3
+    r = await client.post("/api/maintenance/unreadable/delete", json={"paths": [broken]})
+    assert r.json()["deleted"] == 1 and not Path(broken).exists()
+
+    # the cut-off file gets fixed: a retry indexes it
+    (root / "videos" / "cut off.mp4").write_bytes((root / "videos" / "h264.mp4").read_bytes())
+    r = await client.post("/api/maintenance/unreadable/retry", json={"paths": [cut]})
+    assert r.status_code == 202 and r.json() == {"retrying": 1, "scans": 1}
+    from tests.test_user_libraries import drain
+    await drain(app)
+    assert await pool.fetchval("SELECT count(*) FROM files WHERE path = $1", cut) == 1
+    left = (await client.get("/api/maintenance/unreadable", params={"show_ignored": True})).json()
+    assert [Path(i["path"]).name for i in left["items"]] == ["junk.mkv"]
+    # a file that changes is tried again by the next scan; one that's removed is forgotten
+    Path(junk).unlink()
+    await scan()
+    assert (await client.get("/api/maintenance/unreadable", params={"show_ignored": True})).json()["items"] == []
+
+    viewer = await login_as("vera-unreadable", "viewer")
+    assert (await viewer.get("/api/maintenance/unreadable")).status_code == 403
+
+
+async def test_unreadable_uploads_are_not_listed_for_admins(app, people, alice_lib):
+    """Users' own libraries stay private: their unreadable files aren't in the admin list."""
+    from tests.test_user_libraries import upload
+    alice = people["alice"]
+    assert (await upload(alice, alice_lib["id"], "bad.mp4", b"not a video at all" * 100)).status_code == 201
+    await drain_all(app)
+    assert await app.state.pool.fetchval("SELECT count(*) FROM unreadable_files") == 1
+    assert (await people["admin"].get("/api/maintenance/unreadable")).json()["total"] == 0
+
+
+async def drain_all(app):
+    from tests.test_user_libraries import drain
+    await drain(app)

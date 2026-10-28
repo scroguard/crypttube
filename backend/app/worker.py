@@ -77,6 +77,8 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
             if isinstance(v, int):
                 setattr(total, k, getattr(total, k) + v)
     message = total.summary()
+    if total.unreadable:
+        message += f"; {total.unreadable} known unreadable files skipped (see Admin → Maintenance)"
     if unavailable:
         message += "; skipped: " + "; ".join(unavailable)
     return message
