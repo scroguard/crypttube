@@ -60,12 +60,12 @@ function JobLine({ job }: { job?: JobState }) {
   if (!job) return null;
   if (active(job)) {
     return (
-      <p className="mt-3 text-sm text-sky-300" role="status" data-testid="job-progress">
+      <p className="mt-3 text-sm text-info" role="status" data-testid="job-progress">
         {job.status === "queued" ? "Waiting to start…" : `Working… ${job.message?.split("\n")[0] ?? ""}`}
       </p>
     );
   }
-  if (job.status === "failed") return <p className="mt-3 whitespace-pre-line text-sm text-red-300" role="alert">{job.error}</p>;
+  if (job.status === "failed") return <p className="mt-3 whitespace-pre-line text-sm text-danger" role="alert">{job.error}</p>;
   return null;
 }
 
@@ -91,7 +91,7 @@ function Cleanup({ data }: { data: Overview }) {
   return (
     <section className="card p-5" data-testid="cleanup">
       <h2 className="mb-1 text-lg font-semibold">Clean up removed media</h2>
-      <p className="mb-4 text-sm text-zinc-400">
+      <p className="mb-4 text-sm text-text-muted">
         When files are deleted outside of this app, their entries stay (marked missing) so nothing is lost if they
         come back. A cleanup rescans the libraries, then removes the entries of files that are really gone, together
         with the previews and thumbnails made for them. Moved or renamed files are followed, not removed.
@@ -100,7 +100,7 @@ function Cleanup({ data }: { data: Overview }) {
       <div className="flex flex-wrap items-center gap-3">
         <button className="btn-primary" disabled={busy} onClick={() => start.mutate(true)}>Check what would be removed</button>
         <button className="btn-danger" disabled={busy} onClick={remove}>Clean up now…</button>
-        <label className="flex items-center gap-2 text-sm text-zinc-400">
+        <label className="flex items-center gap-2 text-sm text-text-muted">
           Only files missing for at least
           <input type="number" min={0} max={3650} className="input w-20" aria-label="Minimum days missing"
                  value={days} onChange={(e) => setDays(Math.max(0, Number(e.target.value) || 0))} />
@@ -110,8 +110,8 @@ function Cleanup({ data }: { data: Overview }) {
       {start.error && <ErrorBox error={start.error} className="mt-3" />}
       <JobLine job={data.jobs.cleanup} />
       {r && !active(data.jobs.cleanup) && (
-        <div className="mt-4 rounded-md border border-zinc-800 bg-zinc-950/40 p-4 text-sm" data-testid="cleanup-report">
-          <div className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
+        <div className="mt-4 rounded-md border border-border bg-bg/40 p-4 text-sm" data-testid="cleanup-report">
+          <div className="mb-1 text-xs uppercase tracking-wide text-text-subtle">
             {r.dry_run ? "Check" : "Cleanup"} · {formatDateTime(r.at)}
             {r.min_missing_days > 0 && ` · missing ${r.min_missing_days}+ days`}
           </div>
@@ -128,10 +128,10 @@ function Cleanup({ data }: { data: Overview }) {
             </ul>
           )}
           {r.removed.still_on_disk > 0 && (
-            <p className="mt-1 text-zinc-400">{r.removed.still_on_disk} files are marked missing but exist on disk (excluded by a pattern, or unreadable) and are kept.</p>
+            <p className="mt-1 text-text-muted">{r.removed.still_on_disk} files are marked missing but exist on disk (excluded by a pattern, or unreadable) and are kept.</p>
           )}
           {r.removed.libraries_skipped > 0 && (
-            <p className="mt-1 text-amber-300">{r.removed.libraries_skipped} disabled or unavailable libraries were left alone.</p>
+            <p className="mt-1 text-warning">{r.removed.libraries_skipped} disabled or unavailable libraries were left alone.</p>
           )}
           {r.dry_run && !nothingToDo(r) && (
             <button className="btn-danger mt-3" disabled={busy} onClick={remove}>Remove these…</button>
@@ -154,7 +154,7 @@ function Routine({ data }: { data: Overview }) {
   return (
     <section className="card mt-6 p-5" data-testid="routine">
       <h2 className="mb-1 text-lg font-semibold">Routine maintenance</h2>
-      <p className="mb-4 text-sm text-zinc-400">
+      <p className="mb-4 text-sm text-text-muted">
         Once a day: removes expired sign-ins and old job records, deletes generated files nothing refers to, and
         optimizes every database table (vacuum and fresh statistics) so browsing stays fast. It runs in the
         background and doesn't interrupt anyone.
@@ -167,26 +167,26 @@ function Routine({ data }: { data: Overview }) {
                   onChange={(e) => setForm({ ...form, hour: Number(e.target.value) })}>
             {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
           </select>
-          <span className="text-zinc-500">server time (now {data.server_time.slice(11, 16)})</span>
+          <span className="text-text-subtle">server time (now {data.server_time.slice(11, 16)})</span>
         </label>
         <label className="flex items-center gap-2">
           Forget files missing for more than
           <input type="number" min={0} max={3650} className="input w-20" aria-label="Forget missing files after days"
                  value={form.remove_missing_after_days}
                  onChange={(e) => setForm({ ...form, remove_missing_after_days: Math.max(0, Number(e.target.value) || 0) })} />
-          days <span className="text-zinc-500">(0 = never automatically)</span>
+          days <span className="text-text-subtle">(0 = never automatically)</span>
         </label>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button className="btn-primary" disabled={!dirty || save.isPending} onClick={() => save.mutate(form)}>Save</button>
         <button className="btn-ghost" disabled={busy} onClick={() => run.mutate(undefined)}>Run now</button>
-        <span className="ml-auto text-sm text-zinc-400">Database size: {formatBytes(data.database_bytes)}</span>
+        <span className="ml-auto text-sm text-text-muted">Database size: {formatBytes(data.database_bytes)}</span>
       </div>
       {(save.error || run.error) && <ErrorBox error={save.error || run.error} className="mt-3" />}
       <JobLine job={data.jobs.maintenance} />
       {r && !active(data.jobs.maintenance) && (
-        <div className="mt-4 rounded-md border border-zinc-800 bg-zinc-950/40 p-4 text-sm" data-testid="maintenance-report">
-          <div className="mb-1 text-xs uppercase tracking-wide text-zinc-500">Last run · {formatDateTime(r.at)} · took {r.seconds}s</div>
+        <div className="mt-4 rounded-md border border-border bg-bg/40 p-4 text-sm" data-testid="maintenance-report">
+          <div className="mb-1 text-xs uppercase tracking-wide text-text-subtle">Last run · {formatDateTime(r.at)} · took {r.seconds}s</div>
           <ul className="space-y-1">
             <li>Optimized {r.tables_optimized} tables; database {formatBytes(r.database_bytes_before)} → {formatBytes(r.database_bytes)}.</li>
             <li>Removed {r.sessions_removed} expired sign-ins and {r.jobs_removed} old job records.</li>
@@ -219,11 +219,11 @@ function Encryption() {
       <h2 className="mb-1 text-lg font-semibold">Encryption of user uploads</h2>
       {e.enabled ? (
         <>
-          <p className="text-sm text-zinc-300">
-            <span className="chip mr-2 bg-emerald-900/50 text-emerald-200">On</span>
+          <p className="text-sm text-text">
+            <span className="chip mr-2 bg-success-bg text-success">On</span>
             Files users upload, and the previews made from them, are stored encrypted (key {e.key_id}).
           </p>
-          <p className="mt-2 text-sm text-zinc-400" data-testid="encryption-counts">
+          <p className="mt-2 text-sm text-text-muted" data-testid="encryption-counts">
             {e.encrypted_files} of {e.uploaded_files} uploaded files encrypted
             {pending > 0 && !active(e.job ?? undefined) && " (the rest are encrypted by a background job)"}.
           </p>
@@ -232,10 +232,10 @@ function Encryption() {
                     onClick={() => run.mutate(undefined)}>Encrypt the rest now</button>
           )}
           <JobLine job={e.job ?? undefined} />
-          {e.job && !active(e.job) && e.job.message && <p className="mt-2 text-xs text-zinc-500">Last run: {e.job.message}</p>}
+          {e.job && !active(e.job) && e.job.message && <p className="mt-2 text-xs text-text-subtle">Last run: {e.job.message}</p>}
         </>
       ) : (
-        <p className="text-sm text-zinc-400">
+        <p className="text-sm text-text-muted">
           <span className="chip mr-2">Off</span>
           Uploads are stored as they are. To turn encryption on, give the stack a key file (UPLOADS_KEY_FILE, see the
           README); existing uploads are then encrypted automatically.
@@ -266,7 +266,7 @@ function Unreadable() {
   return (
     <section className="card mb-6 p-5" data-testid="unreadable">
       <h2 className="mb-1 text-lg font-semibold">Unreadable files ({data.total})</h2>
-      <p className="mb-3 text-sm text-zinc-400">
+      <p className="mb-3 text-sm text-text-muted">
         Files in the libraries that couldn't be read as a video or picture, usually because they are damaged or
         incomplete. Scans skip them until they change. If one plays fine elsewhere, use “Try again”; if it's broken,
         delete it or ignore it.
@@ -285,14 +285,14 @@ function Unreadable() {
         )}
       </div>
       {act.isError && <ErrorBox error={act.error} className="mb-3" />}
-      {act.data?.problems?.length ? <p className="mb-3 text-sm text-amber-300">Not deleted: {act.data.problems.join("; ")}</p> : null}
-      <ul className="divide-y divide-zinc-800 rounded-md border border-zinc-800">
+      {act.data?.problems?.length ? <p className="mb-3 text-sm text-warning">Not deleted: {act.data.problems.join("; ")}</p> : null}
+      <ul className="divide-y divide-border rounded-md border border-border">
         {data.items.map((f) => (
           <li key={f.path} className={`flex flex-wrap items-center gap-3 px-3 py-2 text-sm ${f.ignored ? "opacity-60" : ""}`} data-testid="unreadable-file">
             <div className="min-w-0 flex-1">
-              <code className="block break-all text-xs text-zinc-300">{f.path}</code>
-              <span className="text-xs text-zinc-400" title={f.reason}>{f.explanation}</span>
-              <span className="ml-2 text-xs text-zinc-600">{formatBytes(f.size)}</span>
+              <code className="block break-all text-xs text-text">{f.path}</code>
+              <span className="text-xs text-text-muted" title={f.reason}>{f.explanation}</span>
+              <span className="ml-2 font-mono text-xs text-text-subtle">{formatBytes(f.size)}</span>
             </div>
             <button className="btn-ghost py-1 text-xs" disabled={act.isPending} onClick={() => act.mutate({ action: "retry", paths: [f.path] })}>Try again</button>
             <button className="btn-ghost py-1 text-xs" disabled={act.isPending}

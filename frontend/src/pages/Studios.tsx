@@ -23,7 +23,7 @@ export default function Studios() {
           <input type="checkbox" className="accent-accent" checked={roots} onChange={(e) => set("roots", e.target.checked ? "1" : null)} /> Top-level only
         </label>
         <PageSizeSelect />
-        <span className="ml-auto text-sm text-zinc-500">{list.total != null && plural(list.total, "studio")}</span>
+        <span className="ml-auto text-sm text-text-subtle">{list.total != null && plural(list.total, "studio")}</span>
         {canCreate && <CreateEntityButton kind="studios" label="studio" />}
       </Toolbar>
       <InfiniteGrid list={list} layout="portrait" render={(s) => <StudioCard studio={s} />} empty="No studios yet." />

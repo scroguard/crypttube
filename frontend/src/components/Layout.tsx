@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, NavLink } from "react-router";
 import { useLogout, useMe } from "../api/hooks";
+import { LogoHorizontal, LogoMark } from "./Logo";
 
 const NAV = [
   ["/", "Home"],
@@ -18,14 +19,15 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState(false);
 
   const link = ({ isActive }: { isActive: boolean }) =>
-    `whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white"}`;
+    `whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? "bg-surface-raised text-text" : "text-text-muted hover:text-text"}`;
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1920px] items-center gap-4 px-4">
-          <Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
-            <img src="/favicon.svg" alt="" className="h-6 w-6" /> CryptTube
+          <Link to="/" className="shrink-0" aria-label="CryptTube home">
+            <LogoHorizontal className="hidden h-7 w-auto sm:block" />
+            <LogoMark className="h-7 w-7 sm:hidden" />
           </Link>
           <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="Main">
             {NAV.map(([to, label]) => (
@@ -39,10 +41,10 @@ export default function Layout({ children }: { children: ReactNode }) {
               {user?.username} ▾
             </button>
             {menu && (
-              <div role="menu" className="card absolute right-0 mt-2 w-44 bg-zinc-900 py-1 shadow-xl" onClick={() => setMenu(false)}>
-                <Link role="menuitem" to="/account" className="block px-4 py-2 text-sm hover:bg-zinc-800">Account</Link>
-                {isAdmin && <Link role="menuitem" to="/admin/users" className="block px-4 py-2 text-sm hover:bg-zinc-800">Users</Link>}
-                <button role="menuitem" onClick={() => logout()} className="block w-full px-4 py-2 text-left text-sm hover:bg-zinc-800">Log out</button>
+              <div role="menu" className="card absolute right-0 mt-2 w-44 bg-surface py-1 shadow-xl" onClick={() => setMenu(false)}>
+                <Link role="menuitem" to="/account" className="block px-4 py-2 text-sm hover:bg-surface-raised">Account</Link>
+                {isAdmin && <Link role="menuitem" to="/admin/users" className="block px-4 py-2 text-sm hover:bg-surface-raised">Users</Link>}
+                <button role="menuitem" onClick={() => logout()} className="block w-full px-4 py-2 text-left text-sm hover:bg-surface-raised">Log out</button>
               </div>
             )}
           </div>

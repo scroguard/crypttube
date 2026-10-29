@@ -70,10 +70,10 @@ export default function ImageBrowser({ path, query: given = {}, selecting, onSel
       {(scope || (canCreate && (list.items.length > 0 || selected))) && (
         // Sticks under the page's toolbar (or the site header where there is none), so
         // "Done selecting" is always at hand.
-        <div className="sticky z-20 -mx-4 mb-2 flex flex-wrap items-center justify-end gap-2 bg-zinc-950/90 px-4 py-1.5 backdrop-blur"
+        <div className="sticky z-20 -mx-4 mb-2 flex flex-wrap items-center justify-end gap-2 bg-bg/90 px-4 py-1.5 backdrop-blur"
              style={{ top: "calc(3.5rem + var(--toolbar-h, 0px))" }} data-testid="select-top">
           {scope && <span className="mr-auto"><SearchBox value={q} onChange={setQ} placeholder={`Search in ${scope}…`} /></span>}
-          {note && <span className="text-xs text-amber-400">{note}</span>}
+          {note && <span className="text-xs text-warning">{note}</span>}
           {selected && (
           <>
             <button className="btn-ghost" onClick={selectShown}

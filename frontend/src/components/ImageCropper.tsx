@@ -63,19 +63,19 @@ export default function ImageCropper({ src, aspect, onChange }: {
 
   return (
     <div className="flex flex-col items-center gap-3">
-      <div className="relative cursor-grab touch-none select-none overflow-hidden rounded-lg bg-zinc-950 ring-1 ring-zinc-700 active:cursor-grabbing"
+      <div className="relative cursor-grab touch-none select-none overflow-hidden rounded-lg bg-bg ring-1 ring-border-strong active:cursor-grabbing"
            style={{ width: frameW, height: frameH }} data-testid="crop-frame"
            onPointerDown={down} onPointerMove={move} onPointerUp={() => { drag.current = null; }}
            onWheel={(e) => zoomTo(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1))}>
         <img src={src} alt="" draggable={false} onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
              className="pointer-events-none absolute max-w-none" style={{ left: pos.x, top: pos.y, width: shownW || undefined, height: shownH || undefined }} />
       </div>
-      <label className="flex w-full max-w-xs items-center gap-2 text-xs text-zinc-400">
+      <label className="flex w-full max-w-xs items-center gap-2 text-xs text-text-muted">
         Zoom
         <input type="range" min={1} max={MAX_ZOOM} step={0.01} value={zoom} aria-label="Zoom"
                onChange={(e) => zoomTo(Number(e.target.value))} className="flex-1 accent-accent" />
       </label>
-      <p className="text-xs text-zinc-500">Drag the picture to choose what shows; zoom to get closer.</p>
+      <p className="text-xs text-text-subtle">Drag the picture to choose what shows; zoom to get closer.</p>
     </div>
   );
 }

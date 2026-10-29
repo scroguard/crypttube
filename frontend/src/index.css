@@ -1,37 +1,95 @@
 @import "tailwindcss";
+/* Fonts are bundled, never fetched from a font CDN (the app makes no outside requests). */
+@import "@fontsource/chakra-petch/600.css";
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
 
+/* Colors are named by role, never by hue, so a theme can change any of them. Values are
+   the brand's default "Crypt" theme. Tailwind's own palette is removed, so components
+   can only use these roles. */
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --color-accent: #e11d48;
-  --color-accent-hover: #f43f5e;
+  --color-*: initial;
+  --color-bg: #0B0B10;
+  --color-surface: #1E2230;
+  --color-surface-raised: #262B3B;
+  --color-surface-hover: #2A2F42;
+  --color-border: #2A2F40;
+  --color-border-strong: #6B7186;
+  --color-text: #E6E6F0;
+  --color-text-muted: #9AA0B4;
+  --color-text-subtle: #8C92A7;
+  --color-accent: #9164CA;
+  --color-accent-hover: #A47AD6;
+  --color-accent-fg: #0B0B10;
+  --color-primary: #2E1949;
+  --color-primary-hover: #3A2160;
+  --color-primary-fg: #FFFFFF;
+  --color-link: #9E77D0;
+  --color-focus: #9164CA;
+  --color-success: #A3E635;
+  --color-success-bg: #1A2410;
+  --color-warning: #F2B84B;
+  --color-warning-bg: #2A2112;
+  --color-danger: #F87171;
+  --color-danger-bg: #2C1416;
+  --color-info: #7DB4F5;
+  --color-info-bg: #121E2E;
+  --color-overlay: rgba(5, 5, 8, 0.72);
+  --color-danger-solid: #4A0D17;
+  --color-danger-solid-hover: #6E1423;
+  --color-danger-solid-fg: #FFFFFF;
+  --color-danger-solid-border: #D14B55;
+
+  --font-display: "Chakra Petch", "Inter Variable", system-ui, sans-serif;
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --radius-sm: 6px;   /* chips, inputs */
+  --radius-md: 10px;  /* buttons, thumbnails */
+  --radius-lg: 14px;  /* cards, modals */
 }
 
 html { color-scheme: dark; }
 body {
   min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text);
   /* The browser's scroll anchoring adjusts the scroll position when content above the
      viewport changes size; with virtualized lists that rerender as you scroll, the two
      can push each other back and forth. The lists keep their own position. */
   overflow-anchor: none;
 }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: .01em; }
+/* Every interactive element shows where keyboard focus is. */
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 
 /* Thin, unobtrusive scrollbars */
-* { scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
 
 @utility input {
-  @apply w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100
-         placeholder:text-zinc-500 focus:border-accent focus:outline-none;
+  @apply w-full rounded-sm border border-border-strong bg-surface px-3 py-2 text-sm text-text
+         placeholder:text-text-subtle focus:border-focus;
 }
+/* Every variant has a 1px border, so all buttons are the same size. */
 @utility btn {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium
          transition-colors disabled:cursor-not-allowed disabled:opacity-50;
 }
-@utility btn-primary { @apply btn bg-accent text-white hover:bg-accent-hover; }
-@utility btn-ghost { @apply btn bg-zinc-800 text-zinc-200 hover:bg-zinc-700; }
-@utility btn-danger { @apply btn bg-red-900/70 text-red-100 hover:bg-red-800; }
-@utility card { @apply rounded-lg border border-zinc-800 bg-zinc-900/60; }
-@utility chip {
-  @apply inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs text-zinc-200
-         hover:bg-zinc-700;
+@utility btn-primary { @apply btn border-accent bg-primary text-primary-fg hover:bg-primary-hover; }
+/* On hover the label turns to text: link on surface-raised is below 4.5:1. */
+@utility btn-ghost {
+  @apply btn border-border-strong bg-transparent text-link hover:bg-surface-raised hover:text-text;
 }
-@utility label { @apply mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400; }
+@utility btn-danger {
+  @apply btn border-danger-solid-border bg-danger-solid text-danger-solid-fg hover:bg-danger-solid-hover;
+}
+@utility card { @apply rounded-lg border border-border bg-surface; }
+@utility chip {
+  @apply inline-flex items-center gap-1 rounded-sm bg-surface-raised px-2.5 py-0.5 text-xs text-text
+         hover:bg-surface-hover;
+}
+/* Small uppercase labels use the display face. */
+@utility label {
+  @apply mb-1 block font-display text-[11px] uppercase tracking-[.12em] text-text-muted;
+}

@@ -33,7 +33,7 @@ export default function Performers() {
         </select>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-accent" checked={favorite} onChange={(e) => set("favorite", e.target.checked ? "1" : null)} /> Favorites</label>
         <PageSizeSelect />
-        <span className="ml-auto text-sm text-zinc-500">{list.total != null && plural(list.total, "performer")}</span>
+        <span className="ml-auto text-sm text-text-subtle">{list.total != null && plural(list.total, "performer")}</span>
         {canCreate && <CreateEntityButton kind="performers" label="performer" />}
       </Toolbar>
       <InfiniteGrid list={list} layout="portrait" render={(x) => <PerformerCard performer={x} />} empty="No performers yet." />

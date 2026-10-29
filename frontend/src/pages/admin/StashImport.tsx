@@ -40,7 +40,7 @@ export default function StashImportPage() {
     <div className="mx-auto max-w-5xl">
       <AdminNav />
       <h1 className="mb-1 text-xl font-semibold">Import from Stash</h1>
-      <p className="mb-5 text-sm text-zinc-400">
+      <p className="mb-5 text-sm text-text-muted">
         Bring tags, performers and studios over from a Stash database. Nothing is added until you approve it,
         and pictures are not copied from Stash.
       </p>
@@ -60,7 +60,7 @@ function Start() {
   const busy = upload.isPending || fromPath.isPending;
   return (
     <section className="card space-y-4 p-5">
-      <p className="text-sm text-zinc-300">
+      <p className="text-sm text-text">
         Choose your Stash database file (usually <code>stash-go.sqlite</code>). Use a backup made from Stash
         (Settings → Tasks → Backup), or stop Stash before copying the file, so the copy is complete.
         The file is read once and not kept.
@@ -71,7 +71,7 @@ function Start() {
         <button className="btn-primary" disabled={busy} onClick={() => file.current?.click()}>
           {upload.isPending ? "Reading…" : "Upload database…"}
         </button>
-        <span className="text-sm text-zinc-500">or read a copy on the server:</span>
+        <span className="text-sm text-text-subtle">or read a copy on the server:</span>
         <form className="flex min-w-64 flex-1 gap-2" onSubmit={(e) => { e.preventDefault(); if (path.trim()) fromPath.mutate(path.trim()); }}>
           <input className="input font-mono" placeholder="/media/stash-go.sqlite" aria-label="Path on the server"
                  value={path} onChange={(e) => setPath(e.target.value)} />
@@ -93,8 +93,8 @@ function Review({ imp }: { imp: StashImport }) {
   return (
     <section data-testid="stash-review">
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="mr-auto text-sm text-zinc-400">
-          <span className="font-medium text-zinc-200">{imp.filename ?? "Stash database"}</span>
+        <div className="mr-auto text-sm text-text-muted">
+          <span className="font-medium text-text">{imp.filename ?? "Stash database"}</span>
           {imp.stash_version != null && <> · schema {imp.stash_version}</>}
         </div>
         {importedAny ? (
@@ -170,23 +170,23 @@ function KindReview({ kind, counts }: { kind: Kind; counts: KindCounts }) {
           Import all {counts.pending}
         </button>
       </div>
-      <p className="mb-2 text-xs text-zinc-500" data-testid="stash-counts">
+      <p className="mb-2 text-xs text-text-subtle" data-testid="stash-counts">
         {counts.total} in Stash · {counts.imported} imported · {counts.existing} already here · {counts.pending} to review
       </p>
       {done && (
-        <p className="mb-2 rounded-md border border-emerald-900 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-200" role="status">
+        <p className="mb-2 rounded-md border border-success/40 bg-success-bg px-3 py-2 text-sm text-success" role="status">
           Imported {done.created} {label}{done.existing > 0 && `; ${done.existing} were already here and left as they are`}.
         </p>
       )}
       {apply.error && <ErrorBox error={apply.error} className="mb-2" />}
       <div className="card overflow-hidden">
-        <label className="flex items-center gap-3 border-b border-zinc-800 px-3 py-2 text-xs uppercase tracking-wide text-zinc-500">
+        <label className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs uppercase tracking-wide text-text-subtle">
           <input type="checkbox" className="h-4 w-4 accent-accent" checked={allTicked} disabled={!selectable.length}
                  onChange={toggleAll} aria-label="Select all shown" />
           <span className="mr-auto">Select all shown ({selectable.length})</span>
           <span>Used in Stash</span>
         </label>
-        {shown.length === 0 ? <p className="p-6 text-center text-sm text-zinc-500">Nothing to show.</p> : (
+        {shown.length === 0 ? <p className="p-6 text-center text-sm text-text-subtle">Nothing to show.</p> : (
           <Virtuoso style={{ height: "60vh" }} data={shown} computeItemKey={(_, i) => i.source_id}
                     itemContent={(_, i) => <Row kind={kind} item={i} checked={selected.has(i.source_id)} onToggle={toggle} />} />
         )}
@@ -208,22 +208,22 @@ function Row({ kind, item, checked, onToggle }: { kind: Kind; item: Item; checke
   ].filter(Boolean).join(" · ");
   const pending = item.status === "pending";
   return (
-    <label className={`flex items-center gap-3 border-b border-zinc-800/60 px-3 py-2 text-sm ${pending ? "cursor-pointer hover:bg-zinc-800/40" : "text-zinc-500"}`}
+    <label className={`flex items-center gap-3 border-b border-border/60 px-3 py-2 text-sm ${pending ? "cursor-pointer hover:bg-surface-raised/40" : "text-text-subtle"}`}
            data-testid="stash-item">
       <input type="checkbox" className="h-4 w-4 shrink-0 accent-accent" disabled={!pending}
              checked={pending && checked} onChange={() => onToggle(item.source_id)} aria-label={item.name} />
       <span className="min-w-0 flex-1">
         <span className="font-medium">{item.name}</span>
-        {info && <span className="ml-2 text-xs text-zinc-500">{info}</span>}
+        {info && <span className="ml-2 text-xs text-text-subtle">{info}</span>}
       </span>
       {!pending && (
         item.target_id != null
-          ? <Link to={`/${PATHS[kind]}/${item.target_id}`} className={`chip ${item.status === "imported" ? "bg-emerald-900/50 text-emerald-200" : ""}`}>
+          ? <Link to={`/${PATHS[kind]}/${item.target_id}`} className={`chip ${item.status === "imported" ? "bg-success-bg text-success" : ""}`}>
               {item.status === "imported" ? "Imported" : "Already here"}
             </Link>
           : <span className="chip">{item.status === "imported" ? "Imported" : "Already here"}</span>
       )}
-      <span className="w-14 shrink-0 text-right tabular-nums text-zinc-500">{item.usage}</span>
+      <span className="w-14 shrink-0 text-right tabular-nums text-text-subtle">{item.usage}</span>
     </label>
   );
 }
@@ -239,7 +239,7 @@ function ImagesFromFolder() {
   return (
     <section className="mt-10">
       <h2 className="mb-1 text-lg font-semibold">Pictures from a folder</h2>
-      <p className="mb-3 text-sm text-zinc-400">
+      <p className="mb-3 text-sm text-text-muted">
         Put one picture per studio in a folder of the media store, named after the studio
         (for example <code>Some Studio.png</code>), and they are matched by name. Case and punctuation are ignored.
         The folder is only read. Keep it outside your libraries, or the pictures will also show up as images.
@@ -258,12 +258,12 @@ function ImagesFromFolder() {
       </form>
       {run.error && <ErrorBox error={run.error} className="mt-3" />}
       {r && !run.isPending && (
-        <div className="mt-3 text-sm text-zinc-300" role="status" data-testid="images-result">
+        <div className="mt-3 text-sm text-text" role="status" data-testid="images-result">
           Assigned {r.matched} of {r.files} pictures
           {r.skipped > 0 && `; ${r.skipped} skipped because a picture was already set`}
           {r.failed > 0 && `; ${r.failed} could not be read`}.
           {r.unmatched_total > 0 && (
-            <details className="mt-1 text-zinc-400">
+            <details className="mt-1 text-text-muted">
               <summary className="cursor-pointer">{r.unmatched_total} files matched nothing</summary>
               <p className="mt-1 break-words text-xs">{r.unmatched.join(", ")}{r.unmatched_total > r.unmatched.length && " …"}</p>
             </details>

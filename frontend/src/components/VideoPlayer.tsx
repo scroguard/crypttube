@@ -235,33 +235,33 @@ export default function VideoPlayer({ sceneId, playback, poster, resumeTime }: {
 
   return (
     <div ref={container} data-testid="player"
-         className={`group relative aspect-video w-full overflow-hidden bg-black ${fullscreen ? "" : "rounded-lg"} ${showControls ? "" : "cursor-none"}`}
+         className={`group relative aspect-video w-full overflow-hidden bg-bg ${fullscreen ? "" : "rounded-lg"} ${showControls ? "" : "cursor-none"}`}
          onMouseMove={poke} onMouseLeave={() => playing && setControls(false)}>
       <video ref={video} src={src} poster={poster} preload="metadata" playsInline
              className="h-full w-full" onClick={toggle} onDoubleClick={toggleFullscreen} {...events} />
 
       {waiting && playing && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-white/20 border-t-white" />
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-text/20 border-t-text" />
         </div>
       )}
       {!playing && !waiting && (
         <button onClick={toggle} aria-label="Play"
-                className="absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-3xl text-white hover:bg-accent">
+                className="absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-overlay text-3xl text-text hover:bg-primary">
           ▶
         </button>
       )}
-      {error && <div className="absolute inset-x-0 top-4 mx-auto w-fit rounded bg-red-900/90 px-4 py-2 text-sm">{error}</div>}
+      {error && <div className="absolute inset-x-0 top-4 mx-auto w-fit rounded border border-danger bg-danger-bg px-4 py-2 text-sm text-danger">{error}</div>}
 
-      <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-3 pb-2 pt-10 transition-opacity ${showControls ? "opacity-100" : "pointer-events-none opacity-0"}`}>
+      <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-overlay via-overlay/60 to-transparent px-3 pb-2 pt-10 transition-opacity ${showControls ? "opacity-100" : "pointer-events-none opacity-0"}`}>
         {/* Seek bar */}
         <div ref={bar} className="relative h-4 cursor-pointer touch-none" data-testid="seekbar"
              onPointerMove={(e) => { setHover(timeAt(e.clientX)); if (dragging) setTime(timeAt(e.clientX).time); }}
              onPointerLeave={() => !dragging && setHover(null)}
              onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); setDragging(true); setTime(timeAt(e.clientX).time); }}
              onPointerUp={(e) => { setDragging(false); seek(timeAt(e.clientX).time); }}>
-          <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-white/25 group-hover:h-1.5">
-            <div className="absolute inset-y-0 left-0 rounded bg-white/40" style={{ width: pct(bufferedEnd) }} />
+          <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded bg-border group-hover:h-1.5">
+            <div className="absolute inset-y-0 left-0 rounded bg-border-strong" style={{ width: pct(bufferedEnd) }} />
             <div className="absolute inset-y-0 left-0 rounded bg-accent" style={{ width: pct(time) }} />
           </div>
           <div className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent" style={{ left: pct(time) }} />
@@ -269,12 +269,12 @@ export default function VideoPlayer({ sceneId, playback, poster, resumeTime }: {
             <div className="pointer-events-none absolute bottom-6 -translate-x-1/2 text-center"
                  style={{ left: Math.min(Math.max(hover.x, 90), (bar.current?.clientWidth ?? 0) - 90) }}>
               {preview && (
-                <div className="mb-1 overflow-hidden rounded border border-white/30 bg-black" style={{
+                <div className="mb-1 overflow-hidden rounded border border-border-strong bg-bg" style={{
                   width: preview.w, height: preview.h, backgroundImage: `url(${preview.url})`,
                   backgroundPosition: `-${preview.x}px -${preview.y}px`,
                 }} />
               )}
-              <span className="rounded bg-black/80 px-1.5 py-0.5 text-xs">{formatDuration(hover.time)}</span>
+              <span className="rounded bg-overlay px-1.5 py-0.5 font-mono text-xs">{formatDuration(hover.time)}</span>
             </div>
           )}
         </div>
@@ -282,28 +282,28 @@ export default function VideoPlayer({ sceneId, playback, poster, resumeTime }: {
         {/* Buttons */}
         <div className="mt-1 flex items-center gap-2 text-sm">
           <button onClick={toggle} className="w-8 text-xl" aria-label={playing ? "Pause" : "Play"}>{playing ? "❚❚" : "▶"}</button>
-          <button onClick={() => seek(absTime() - 10)} className="px-1 text-xs text-zinc-300 hover:text-white" aria-label="Back 10 seconds">−10</button>
-          <button onClick={() => seek(absTime() + 10)} className="px-1 text-xs text-zinc-300 hover:text-white" aria-label="Forward 10 seconds">+10</button>
+          <button onClick={() => seek(absTime() - 10)} className="px-1 text-xs text-text hover:text-text" aria-label="Back 10 seconds">−10</button>
+          <button onClick={() => seek(absTime() + 10)} className="px-1 text-xs text-text hover:text-text" aria-label="Forward 10 seconds">+10</button>
           <button onClick={() => setVol((s) => ({ ...s, muted: !s.muted }))} className="w-7" aria-label={muted ? "Unmute" : "Mute"}>
             {muted || volume === 0 ? "🔇" : "🔊"}
           </button>
           <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume} aria-label="Volume"
                  onChange={(e) => setVol({ volume: +e.target.value, muted: false })} className="w-20 accent-accent" />
-          <span className="tabular-nums text-zinc-200" data-testid="time">{formatDuration(time)} / {formatDuration(duration)}</span>
+          <span className="font-mono tabular-nums text-text" data-testid="time">{formatDuration(time)} / {formatDuration(duration)}</span>
           <div className="flex-1" />
           <div className="relative">
-            <button onClick={() => setMenu((m) => !m)} className="rounded px-2 py-0.5 text-xs font-semibold hover:bg-white/10"
+            <button onClick={() => setMenu((m) => !m)} className="rounded px-2 py-0.5 text-xs font-semibold hover:bg-text/10"
                     aria-haspopup="menu" aria-expanded={menu} data-testid="quality">
               {sourceLabel(source)}
             </button>
             {menu && (
-              <div role="menu" className="absolute bottom-8 right-0 w-40 rounded-md border border-zinc-700 bg-zinc-900/95 py-1 shadow-xl">
-                <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-zinc-500">Quality</div>
+              <div role="menu" className="absolute bottom-8 right-0 w-40 rounded-md border border-border-strong bg-surface/95 py-1 shadow-xl">
+                <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-text-subtle">Quality</div>
                 {qualityOptions.map((o) => {
                   const active = o.mode === source.mode && o.height === source.height;
                   return (
                     <button key={`${o.mode}-${o.height}`} role="menuitemradio" aria-checked={active} onClick={() => choose(o)}
-                            className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-zinc-800 ${active ? "text-accent-hover" : ""}`}>
+                            className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-raised ${active ? "text-link" : ""}`}>
                       {active ? "✓ " : ""}{sourceLabel(o)}
                     </button>
                   );

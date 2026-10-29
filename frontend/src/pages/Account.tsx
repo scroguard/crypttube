@@ -30,14 +30,14 @@ export default function Account() {
     <div className="mx-auto max-w-2xl space-y-8">
       <div>
         <h1 className="text-2xl font-semibold">{user?.username}</h1>
-        <p className="text-sm capitalize text-zinc-400">{user?.role}</p>
+        <p className="text-sm capitalize text-text-muted">{user?.role}</p>
       </div>
       <section className="card p-5">
         <h2 className="mb-4 font-semibold">Change password</h2>
         <form onSubmit={submit} className="space-y-3">
           <Field label="Current password"><input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required /></Field>
           <Field label="New password (8+ characters)"><input className="input" type="password" autoComplete="new-password" minLength={8} value={next} onChange={(e) => setNext(e.target.value)} required /></Field>
-          {done && <p className="text-sm text-emerald-400">Password changed. Other devices were signed out.</p>}
+          {done && <p className="text-sm text-success">Password changed. Other devices were signed out.</p>}
           <FormButtons busy={change.isPending} error={change.error} label="Change password" />
         </form>
       </section>
@@ -49,14 +49,14 @@ export default function Account() {
           <button className="btn-ghost" onClick={() => logout(true)}>Sign out everywhere</button>
         </div>
         {sessions.isError && <ErrorBox error={sessions.error} />}
-        <ul className="divide-y divide-zinc-800">
+        <ul className="divide-y divide-border">
           {sessions.data?.map((s) => (
             <li key={s.id} className="flex items-center gap-3 py-2 text-sm">
               <div className="min-w-0 flex-1">
                 <div className="truncate">{s.user_agent || "Unknown device"}</div>
-                <div className="text-xs text-zinc-500">Last active {formatDateTime(s.last_seen_at)}</div>
+                <div className="text-xs text-text-subtle">Last active {formatDateTime(s.last_seen_at)}</div>
               </div>
-              {s.current ? <span className="text-xs text-emerald-400">this device</span>
+              {s.current ? <span className="text-xs text-success">this device</span>
                 : <button className="btn-ghost py-1" onClick={() => revoke.mutate(s.id)}>Sign out</button>}
             </li>
           ))}
@@ -100,7 +100,7 @@ function ContentFilters() {
   return (
     <section className="card p-5" data-testid="content-filters">
       <h2 className="mb-1 font-semibold">Content filters</h2>
-      <p className="mb-4 text-sm text-zinc-400">
+      <p className="mb-4 text-sm text-text-muted">
         Shape what you see, for you only. Tags include the tags under them. Switch the filters off to see
         everything again without losing your choices.
       </p>
@@ -108,17 +108,17 @@ function ContentFilters() {
       <div className="space-y-3">
         <Toggle checked={enabled} onChange={(v) => { setEnabled(v); setSaved(false); }} label="Apply my filters" />
         <h3 className="pt-2 text-sm font-medium">Only show</h3>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-text-subtle">
           If you choose anything here, you only see scenes, galleries and images that have at least one of these
           tags or performers. Leave both empty to see everything.
         </p>
         <Field label="Only these tags">{picker("only_tags", "Add a tag to show…")}</Field>
         <Field label="Only these performers">{picker("only_performers", "Add a performer to show…")}</Field>
         <h3 className="pt-2 text-sm font-medium">Hide</h3>
-        <p className="text-xs text-zinc-500">Anything with these tags or featuring these performers disappears, even if it matches "Only show".</p>
+        <p className="text-xs text-text-subtle">Anything with these tags or featuring these performers disappears, even if it matches "Only show".</p>
         <Field label="Hide these tags">{picker("tags", "Add a tag to hide…")}</Field>
         <Field label="Hide these performers">{picker("performers", "Add a performer to hide…")}</Field>
-        {saved && !dirty && <p className="text-sm text-emerald-400" role="status">Filters saved.</p>}
+        {saved && !dirty && <p className="text-sm text-success" role="status">Filters saved.</p>}
         {save.error && <ErrorBox error={save.error} />}
         <div className="flex justify-end">
           <button className="btn-primary" disabled={!dirty || save.isPending}
@@ -149,7 +149,7 @@ function SelectionPreferences() {
   return (
     <section className="card p-5" data-testid="selection-preferences">
       <h2 className="mb-1 font-semibold">Selecting</h2>
-      <p className="mb-3 text-sm text-zinc-400">
+      <p className="mb-3 text-sm text-text-muted">
         When a list is shown page by page (Items per page), moving to another page normally starts with nothing
         selected. Switch this on to keep collecting items across pages instead.
       </p>

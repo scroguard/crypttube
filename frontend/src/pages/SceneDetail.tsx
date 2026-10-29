@@ -54,18 +54,18 @@ export default function SceneDetail() {
       {playback.data ? (
         <VideoPlayer key={id} sceneId={id} playback={playback.data} poster={s.screenshot_url} resumeTime={s.resume_time} />
       ) : playback.isError ? (
-        <div className="flex aspect-video items-center justify-center rounded-lg bg-zinc-900 text-zinc-400">
+        <div className="flex aspect-video items-center justify-center rounded-lg bg-surface text-text-muted">
           {s.file.missing_since ? "The video file is missing from the library." : "Playback unavailable."}
         </div>
       ) : (
-        <div className="aspect-video rounded-lg bg-zinc-900" />
+        <div className="aspect-video rounded-lg bg-surface" />
       )}
-      {playback.data?.notice && <p className="mt-2 text-xs text-zinc-400" data-testid="playback-notice">{playback.data.notice}</p>}
+      {playback.data?.notice && <p className="mt-2 text-xs text-text-muted" data-testid="playback-notice">{playback.data.notice}</p>}
 
       <div className="mt-4 flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold" data-testid="scene-title">{s.title || "Untitled"}</h1>
-          <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-zinc-400">{meta.map((m, i) => <span key={i}>{m}</span>)}</div>
+          <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-text-muted">{meta.map((m, i) => <span key={i}>{m}</span>)}</div>
         </div>
         <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} />
         {canEdit && <button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button>}
@@ -84,7 +84,7 @@ export default function SceneDetail() {
           {s.performers.length > 0 && (
             <div className="flex flex-wrap gap-3">
               {s.performers.map((p) => (
-                <Link key={p.id} to={`/performers/${p.id}`} className="flex items-center gap-2 rounded-full bg-zinc-900 py-1 pl-1 pr-3 hover:bg-zinc-800">
+                <Link key={p.id} to={`/performers/${p.id}`} className="flex items-center gap-2 rounded-full bg-surface py-1 pl-1 pr-3 hover:bg-surface-raised">
                   {p.image_url
                     ? <img src={p.image_url} alt="" className="h-8 w-8 rounded-full object-cover" />
                     : <Initials name={p.name} className="h-8 w-8 rounded-full text-xs" />}
@@ -112,20 +112,20 @@ export default function SceneDetail() {
           ) : (
             <Chips items={s.tags} to="tags" />
           )}
-          {s.details && <p className="whitespace-pre-line text-sm leading-relaxed text-zinc-300">{s.details}</p>}
+          {s.details && <p className="whitespace-pre-line text-sm leading-relaxed text-text">{s.details}</p>}
           {s.urls.length > 0 && (
             <ul className="text-sm">
-              {s.urls.map((u) => <li key={u}><a href={u} target="_blank" rel="noreferrer noopener" className="text-accent-hover hover:underline">{u}</a></li>)}
+              {s.urls.map((u) => <li key={u}><a href={u} target="_blank" rel="noreferrer noopener" className="text-link hover:underline">{u}</a></li>)}
             </ul>
           )}
         </div>
         <dl className="card h-fit space-y-2 p-4 text-sm">
-          {s.studio && <Row label="Studio"><Link to={`/studios/${s.studio.id}`} className="hover:text-accent-hover">{s.studio.name}</Link></Row>}
+          {s.studio && <Row label="Studio"><Link to={`/studios/${s.studio.id}`} className="hover:text-link">{s.studio.name}</Link></Row>}
           <Row label="Added">{formatDateTime(s.created_at)}</Row>
           {s.last_played_at && <Row label="Last played">{formatDateTime(s.last_played_at)}</Row>}
           <Row label="Organized">{s.organized ? "Yes" : "No"}</Row>
           {s.mine && <Row label="Library">Your upload</Row>}
-          {s.file.path && <Row label="File"><span className="break-all font-mono text-xs text-zinc-400">{s.file.path}</span></Row>}
+          {s.file.path && <Row label="File"><span className="break-all font-mono text-xs text-text-muted">{s.file.path}</span></Row>}
         </dl>
       </div>
 
@@ -137,7 +137,7 @@ export default function SceneDetail() {
 export function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[7rem_1fr] gap-2">
-      <dt className="text-zinc-500">{label}</dt>
+      <dt className="text-text-subtle">{label}</dt>
       <dd className="min-w-0">{children}</dd>
     </div>
   );

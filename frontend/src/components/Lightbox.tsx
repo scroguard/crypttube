@@ -73,32 +73,32 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
 
   if (!image) return null;
   return (
-    <div ref={frame} tabIndex={-1} className="fixed inset-0 z-50 flex flex-col bg-black/95 outline-none"
+    <div ref={frame} tabIndex={-1} className="fixed inset-0 z-50 flex flex-col bg-bg/95 outline-none"
          role="dialog" aria-modal="true" aria-label="Image viewer" data-testid="lightbox">
-      <div className="flex items-center gap-4 px-4 py-2 text-sm text-zinc-300">
+      <div className="flex items-center gap-4 px-4 py-2 text-sm text-text">
         <span className="tabular-nums" data-testid="lightbox-counter">{index + 1} / {total ?? images.length}</span>
         <span className="truncate">{image.title}</span>
-        <span className="text-zinc-500">{image.width}×{image.height}</span>
+        <span className="text-text-subtle">{image.width}×{image.height}</span>
         {detail && detail.id === image.id && (
           <span className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="lightbox-meta">
             {detail.performers.map((p) => (
-              <Link key={`p${p.id}`} to={`/performers/${p.id}`} className="chip bg-accent/20 text-rose-200">{p.name}</Link>
+              <Link key={`p${p.id}`} to={`/performers/${p.id}`} className="chip bg-accent/20 text-text">{p.name}</Link>
             ))}
             {detail.tags.map((t) => <Link key={`t${t.id}`} to={`/tags/${t.id}`} className="chip">{t.name}</Link>)}
           </span>
         )}
         <div className="flex-1" />
         {detail?.can_edit && detail.id === image.id && (
-          <button onClick={() => setEditing(true)} className="hover:text-white">Edit</button>
+          <button onClick={() => setEditing(true)} className="hover:text-text">Edit</button>
         )}
         {image.live_url && (
           <button onClick={() => setMoving((m) => !m)} aria-pressed={moving} data-testid="live-button"
-                  className={`rounded px-2 py-0.5 text-xs font-semibold tracking-wide ${moving ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`}>
+                  className={`rounded px-2 py-0.5 text-xs font-semibold tracking-wide ${moving ? "bg-text text-bg" : "bg-text/15 text-text hover:bg-text/25"}`}>
             LIVE
           </button>
         )}
-        <a href={`${image.file_url}${image.file_url.includes("?") ? "&" : "?"}raw=1`} target="_blank" rel="noreferrer" className="hover:text-white">Original</a>
-        <button onClick={onClose} className="text-xl hover:text-white" aria-label="Close">✕</button>
+        <a href={`${image.file_url}${image.file_url.includes("?") ? "&" : "?"}raw=1`} target="_blank" rel="noreferrer" className="hover:text-text">Original</a>
+        <button onClick={onClose} className="text-xl hover:text-text" aria-label="Close">✕</button>
       </div>
       <div className={`relative flex-1 ${zoom ? "overflow-auto" : "overflow-hidden"}`}
            onPointerDown={(e) => { swipe.current = e.clientX; }}
@@ -126,20 +126,20 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
         )}
         {index > 0 && (
           <button onClick={() => go(-1)} aria-label="Previous"
-                  className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-2xl text-white hover:bg-black/80">‹</button>
+                  className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-overlay px-3 py-2 text-2xl text-text hover:bg-bg">‹</button>
         )}
         {index < images.length - 1 && (
           <button onClick={() => go(1)} aria-label="Next"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/50 px-3 py-2 text-2xl text-white hover:bg-black/80">›</button>
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-overlay px-3 py-2 text-2xl text-text hover:bg-bg">›</button>
         )}
       </div>
       {detail && detail.id === image.id && detail.file?.path && (
-        <div className="flex flex-wrap items-center gap-x-3 px-4 py-1.5 text-xs text-zinc-400" data-testid="lightbox-file">
-          <span className="uppercase tracking-wide text-zinc-500">File</span>
+        <div className="flex flex-wrap items-center gap-x-3 px-4 py-1.5 text-xs text-text-muted" data-testid="lightbox-file">
+          <span className="uppercase tracking-wide text-text-subtle">File</span>
           <span className="select-all break-all font-mono">
             {detail.file.zip_path ? `${detail.file.zip_path} → ${detail.file.path}` : detail.file.path}
           </span>
-          <span>{formatBytes(detail.file.size)}</span>
+          <span className="font-mono">{formatBytes(detail.file.size)}</span>
         </div>
       )}
       {editing && detail && <ContentEditModal kind="images" item={detail} onClose={() => setEditing(false)} />}

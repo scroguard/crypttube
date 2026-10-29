@@ -106,9 +106,9 @@ export default function SceneBrowser({ fixed = {}, groupable = false, scope }: {
             <button className="btn-ghost" onClick={deselectAll} disabled={!selected?.size}>Deselect all</button>
           </>
         )}
-        {note && <span className="text-xs text-amber-400">{note}</span>}
+        {note && <span className="text-xs text-warning">{note}</span>}
         {!grouped && <PageSizeSelect />}
-        <span className="ml-auto text-sm text-zinc-500" data-testid="total">
+        <span className="ml-auto text-sm text-text-subtle" data-testid="total">
           {!grouped && list.total != null && plural(list.total, "scene")}
         </span>
       </Toolbar>
@@ -128,7 +128,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false, scope }: {
           {!fixed.performer_ids && (
             <Field label="Performers">
               <EntityPicker kind="performers" value={(f.performers as number[]) ?? []} onChange={(performers) => update({ performers })} />
-              <label className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+              <label className="mt-1 flex items-center gap-2 text-xs text-text-muted">
                 <input type="checkbox" className="accent-accent" checked={f.unassigned === true}
                        onChange={(e) => update({ unassigned: e.target.checked ? true : undefined })} />
                 Only scenes with no performer

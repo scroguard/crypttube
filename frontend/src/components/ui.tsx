@@ -4,7 +4,7 @@ import { ApiError } from "../api/client";
 export function Spinner({ className = "" }: { className?: string }) {
   return (
     <div className={`flex justify-center ${className}`} role="status" aria-label="Loading">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-700 border-t-accent" />
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-border-strong border-t-accent" />
     </div>
   );
 }
@@ -12,14 +12,14 @@ export function Spinner({ className = "" }: { className?: string }) {
 export function ErrorBox({ error, className = "" }: { error: unknown; className?: string }) {
   const msg = error instanceof ApiError ? error.message : error instanceof Error ? error.message : String(error);
   return (
-    <div className={`rounded-md border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-200 ${className}`} role="alert">
+    <div className={`rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-sm text-danger ${className}`} role="alert">
       {msg}
     </div>
   );
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="py-16 text-center text-sm text-zinc-500">{children}</p>;
+  return <p className="py-16 text-center text-sm text-text-subtle">{children}</p>;
 }
 
 export function Modal({ title, onClose, children, wide = false }: {
@@ -46,13 +46,13 @@ export function Modal({ title, onClose, children, wide = false }: {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 pt-[10vh]"
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-overlay p-4 pt-[10vh]"
          onMouseDown={(e) => e.target === e.currentTarget && close.current()}>
       <div role="dialog" aria-label={title}
-           className={`card w-full ${wide ? "max-w-3xl" : "max-w-md"} bg-zinc-900 p-5 shadow-2xl`}>
+           className={`card w-full ${wide ? "max-w-3xl" : "max-w-md"} bg-surface p-5 shadow-2xl`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
-          <button className="text-zinc-400 hover:text-white" onClick={() => close.current()} aria-label="Close">✕</button>
+          <button className="text-text-muted hover:text-text" onClick={() => close.current()} aria-label="Close">✕</button>
         </div>
         <div ref={body}>{children}</div>
       </div>
@@ -77,7 +77,7 @@ export function Rating({ value, onChange }: { value: number | null; onChange?: (
       {[1, 2, 3, 4, 5].map((n) => (
         <button key={n} type="button" disabled={!onChange}
                 onClick={() => onChange?.(stars === n ? null : n * 20)}
-                className={`px-0.5 text-lg leading-none ${n <= stars ? "text-amber-400" : "text-zinc-600"} ${onChange ? "hover:text-amber-300" : "cursor-default"}`}>
+                className={`px-0.5 text-lg leading-none ${n <= stars ? "text-warning" : "text-text-subtle"} ${onChange ? "hover:text-warning" : "cursor-default"}`}>
           ★
         </button>
       ))}
@@ -97,16 +97,16 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
 export function Initials({ name, className = "" }: { name: string; className?: string }) {
   const initials = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   return (
-    <div className={`flex items-center justify-center bg-zinc-800 font-semibold text-zinc-500 ${className}`}>{initials}</div>
+    <div className={`flex items-center justify-center bg-surface-raised font-semibold text-text-subtle ${className}`}>{initials}</div>
   );
 }
 
 export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: Record<T, string>; value: T; onChange: (t: T) => void }) {
   return (
-    <div className="mb-4 flex gap-1 border-b border-zinc-800" role="tablist">
+    <div className="mb-4 flex gap-1 border-b border-border" role="tablist">
       {(Object.entries(tabs) as [T, string][]).map(([k, label]) => (
         <button key={k} role="tab" aria-selected={value === k} onClick={() => onChange(k)}
-                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${value === k ? "border-accent text-white" : "border-transparent text-zinc-400 hover:text-white"}`}>
+                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${value === k ? "border-accent text-text" : "border-transparent text-text-muted hover:text-text"}`}>
           {label}
         </button>
       ))}

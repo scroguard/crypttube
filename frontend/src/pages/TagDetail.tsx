@@ -24,10 +24,10 @@ export default function TagDetail() {
         {t.image_url && <img src={t.image_url} alt="" className="h-24 w-24 rounded-lg object-cover" />}
         <div className="min-w-0 flex-1 space-y-2">
           <h1 className="text-3xl font-semibold">{t.name}</h1>
-          {t.description && <p className="text-sm text-zinc-300">{t.description}</p>}
+          {t.description && <p className="text-sm text-text">{t.description}</p>}
           {t.parents.length > 0 && <div><span className="label">Parents</span><Chips items={t.parents} to="tags" /></div>}
           {t.children.length > 0 && <div><span className="label">Sub-tags</span><Chips items={t.children} to="tags" /></div>}
-          <p className="text-xs text-zinc-500">{t.performer_count} performers carry this tag</p>
+          <p className="text-xs text-text-subtle">{t.performer_count} performers carry this tag</p>
         </div>
         {canEdit && (
           <div className="flex flex-col items-end gap-2">
@@ -74,7 +74,7 @@ function TagMergeModal({ tag, onClose }: { tag: Tag; onClose: () => void }) {
   return (
     <Modal title={`Merge into “${tag.name}”`} onClose={onClose}>
       <form onSubmit={(e) => { e.preventDefault(); merge.mutate(undefined, { onSuccess: onClose }); }} className="space-y-3">
-        <p className="text-sm text-zinc-400">The selected tags are deleted; their scenes, galleries, images, performers and sub-tags move to “{tag.name}”.</p>
+        <p className="text-sm text-text-muted">The selected tags are deleted; their scenes, galleries, images, performers and sub-tags move to “{tag.name}”.</p>
         <Field label="Tags to merge"><EntityPicker kind="tags" value={sources} onChange={(ids) => setSources(ids.filter((i) => i !== tag.id))} /></Field>
         <FormButtons busy={merge.isPending} error={merge.error} onCancel={onClose} label="Merge" />
       </form>
