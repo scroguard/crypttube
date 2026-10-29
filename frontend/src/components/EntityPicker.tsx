@@ -129,7 +129,7 @@ export default function EntityPicker({ kind, value, onChange, single = false, pl
           ))}
           {canCreate && (
             <li role="option" aria-selected={active === options.length}
-                className={`cursor-pointer px-3 py-1.5 text-sm text-link ${active === options.length ? "bg-surface-raised" : ""}`}
+                className={`cursor-pointer px-3 py-1.5 text-sm ${active === options.length ? "bg-surface-raised text-text" : "text-link"}`}
                 onMouseDown={(e) => { e.preventDefault(); create(); }}>
               Create “{debounced}”
             </li>
