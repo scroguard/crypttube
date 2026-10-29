@@ -4,13 +4,13 @@
 - `main` has every feature to date (see README), plus the fixes from CodeRabbit's
   full-repository review (PR #1, closed) and its review of those fixes (PR #2, merged).
   Backend 314 passed, e2e 41 passed.
-- Renamed to CryptTube (branch `rename-crypttube`): containers, images, network and UI
+- Renamed to CryptTube (PR #3, merged; repo is now `scroguard/crypttube`): containers, images, network and UI
   text. Kept on purpose: volume names (`goon-streamer_*`, pinned, `VOLUME_PREFIX`), the
   database user/name `goon` (fixed when Postgres first created it) and the upload key-id
   label in `crypto.key_id` (part of every encrypted file's header).
 
 ## Next steps
-1. Merge the rename PR, then rename the GitHub repo to `crypttube` and update the remote.
+1. Point Dockhand at `https://github.com/scroguard/crypttube`.
 2. Server: stop the old stack *before* deploying the renamed one (two Postgres containers
    must never share `pgdata`), check volume names, then redeploy with a rebuild.
 3. Behind a reverse proxy, set `TRUSTED_PROXY` (the proxy's own address) on the stack so
