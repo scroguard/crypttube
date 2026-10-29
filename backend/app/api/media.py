@@ -207,8 +207,11 @@ async def stream_converted(
             # An encrypted upload reaches ffmpeg through crypto's loopback stream.
             with crypto.ffmpeg_input(s["path"]) as src:
                 # aclosing: closing this body closes the stream too, which stops ffmpeg
-                async with aclosing(streaming.ffmpeg_stream(
-                        streaming.ffmpeg_args(src, mode, start, height, s["video_codec"]), release)) as chunks:
+                args = streaming.ffmpeg_args(src, mode, start, height, s["video_codec"])
+                # A GPU encode that fails on this video is retried on the CPU.
+                cpu = (streaming.ffmpeg_args(src, mode, start, height, s["video_codec"], accel="none")
+                       if mode == "transcode" and streaming.hw_accel() != "none" else None)
+                async with aclosing(streaming.ffmpeg_stream(args, release, cpu)) as chunks:
                     async for chunk in chunks:
                         yield chunk
         finally:

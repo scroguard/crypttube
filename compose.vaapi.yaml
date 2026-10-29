@@ -1,0 +1,17 @@
+# Optional: transcode on an AMD or Intel GPU (VAAPI). See README, "Hardware transcoding".
+#
+#   COMPOSE_FILE=compose.yaml:compose.vaapi.yaml           (in .env / stack env)
+#   RENDER_GID=<host's render group id: getent group render | cut -d: -f3>
+#   HW_DEVICE=/dev/dri/renderD129                           (only with several GPUs)
+#
+# If the GPU can't be used, the API logs why and transcodes on the CPU as before.
+services:
+  crypttube-api:
+    environment:
+      HW_ACCEL: vaapi
+      HW_DEVICE: ${HW_DEVICE:-/dev/dri/renderD128}
+    devices:
+      - /dev/dri:/dev/dri
+    # The app runs as PUID, which needs the render group to open the GPU.
+    group_add:
+      - "${RENDER_GID:?set RENDER_GID to the host's render group id (getent group render)}"

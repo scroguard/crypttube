@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -35,6 +36,10 @@ class Settings(BaseSettings):
     # Allow "set image from URL" (the app's only outbound request, made on explicit request).
     url_image_fetch: bool = True
     max_transcodes: int = 2
+    # GPU encoder for live transcodes (README: "Hardware transcoding"); set by the
+    # compose.vaapi.yaml / compose.nvidia.yaml overrides. Falls back to the CPU if it can't start.
+    hw_accel: Literal["none", "vaapi", "nvenc"] = "none"
+    hw_device: str = "/dev/dri/renderD128"   # VAAPI render node (another one with several GPUs)
     generate_concurrency: int = 2   # scenes one generate job works on at once
     generate_jobs: int = 1          # generate jobs at once (default; admins can change it in the UI)
 

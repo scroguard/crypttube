@@ -8,6 +8,8 @@
   text. Kept on purpose: volume names (`goon-streamer_*`, pinned, `VOLUME_PREFIX`), the
   database user/name `goon` (fixed when Postgres first created it) and the upload key-id
   label in `crypto.key_id` (part of every encrypted file's header).
+- GPU transcoding (branch `gpu-transcoding`): opt-in via `compose.vaapi.yaml` (AMD/Intel)
+  or `compose.nvidia.yaml`. Untested on real hardware: no GPU here or on the server yet.
 
 ## Next steps
 1. Point Dockhand at `https://github.com/scroguard/crypttube`.
@@ -18,7 +20,9 @@
 4. Local cleanup (once no session runs from the old path): `rm "/var/home/claude/personal
    projects/goon-streamer"` (a link to `crypttube`) and
    `rm -r ~/.claude/projects/-var-home-claude-personal-projects-goon-streamer` (copied).
-5. Known limits: no key rotation for upload encryption; performer pictures taken from private
+5. When a GPU is installed: follow README "Hardware transcoding", check the API log for
+   `hardware encoding on: ...`, then try a transcode (player quality menu: 720p).
+6. Known limits: no key rotation for upload encryption; performer pictures taken from private
    uploads aren't encrypted; uploads aren't resumable.
 
 ## Context & architecture
@@ -36,6 +40,11 @@
 - Volumes are named explicitly (`${VOLUME_PREFIX:-goon-streamer}_*`), so the Compose
   project name no longer decides them; `compose.e2e.yaml` names its own (`crypttube-e2e_*`), so a
   hand-run `down -v` there can't touch real data.
+- GPU transcoding: only the encode runs on the GPU (`streaming._encoder`); decode/scale
+  stay on the CPU so any source works. `detect_hw_accel` test-encodes at API startup and
+  stays on the CPU if it fails; `ffmpeg_stream` retries a GPU stream on the CPU if it
+  fails before any output. Live Photo clips stay on the CPU. The image carries the VAAPI
+  drivers (mesa, Intel iHD from non-free); NVIDIA's come from the host's container toolkit.
 - Full-repo CodeRabbit review: an empty orphan base branch plus a snapshot branch on top of
   it, then comment `@coderabbitai full review` on the PR (a branch identical to `main` gives
   no diff).
