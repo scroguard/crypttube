@@ -342,7 +342,8 @@ async def cleanup(pool: asyncpg.Pool, root: Path, ctx: jobs.JobContext | None, *
             if dry_run:
                 swept = await sweep_generated(conn, root, delete=False, ctx=ctx)
         except BaseException:              # failed or cancelled: keep nothing half done
-            with contextlib.suppress(Exception):   # (a dropped connection: report the first error)
+            # A dropped connection or a second cancellation: report the first failure.
+            with contextlib.suppress(Exception, asyncio.CancelledError):
                 await tx.rollback()
             raise
         if dry_run:
