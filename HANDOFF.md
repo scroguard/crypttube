@@ -15,7 +15,10 @@
    must never share `pgdata`), check volume names, then redeploy with a rebuild.
 3. Behind a reverse proxy, set `TRUSTED_PROXY` (the proxy's own address) on the stack so
    logins are throttled per visitor (see README, "Reaching it from elsewhere").
-4. Known limits: no key rotation for upload encryption; performer pictures taken from private
+4. Local cleanup (once no session runs from the old path): `rm "/var/home/claude/personal
+   projects/goon-streamer"` (a link to `crypttube`) and
+   `rm -r ~/.claude/projects/-var-home-claude-personal-projects-goon-streamer` (copied).
+5. Known limits: no key rotation for upload encryption; performer pictures taken from private
    uploads aren't encrypted; uploads aren't resumable.
 
 ## Context & architecture
