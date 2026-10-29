@@ -17,4 +17,4 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu, video, compute, utility]
+              capabilities: [gpu]   # which libraries: NVIDIA_DRIVER_CAPABILITIES above
