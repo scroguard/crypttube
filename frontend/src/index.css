@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-accent: #e11d48;
+  --color-accent-hover: #f43f5e;
+}
+
+html { color-scheme: dark; }
+body {
+  min-height: 100vh;
+  /* The browser's scroll anchoring adjusts the scroll position when content above the
+     viewport changes size; with virtualized lists that rerender as you scroll, the two
+     can push each other back and forth. The lists keep their own position. */
+  overflow-anchor: none;
+}
+
+/* Thin, unobtrusive scrollbars */
+* { scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+
+@utility input {
+  @apply w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100
+         placeholder:text-zinc-500 focus:border-accent focus:outline-none;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium
+         transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary { @apply btn bg-accent text-white hover:bg-accent-hover; }
+@utility btn-ghost { @apply btn bg-zinc-800 text-zinc-200 hover:bg-zinc-700; }
+@utility btn-danger { @apply btn bg-red-900/70 text-red-100 hover:bg-red-800; }
+@utility card { @apply rounded-lg border border-zinc-800 bg-zinc-900/60; }
+@utility chip {
+  @apply inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs text-zinc-200
+         hover:bg-zinc-700;
+}
+@utility label { @apply mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400; }

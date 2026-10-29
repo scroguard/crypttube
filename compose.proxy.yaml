@@ -1,0 +1,18 @@
+# Optional: let a reverse proxy that runs in Docker (Nginx Proxy Manager, Traefik, Caddy,
+# cloudflared, ...) reach the app over a shared Docker network instead of a host port.
+#
+#   PROXY_NETWORK=<name of your proxy's existing network>      (in .env / stack env)
+#   COMPOSE_FILE=compose.yaml:compose.proxy.yaml               (or add this file to the stack)
+#
+# Then point the proxy at  http://goonstreamer-web:80 . The network must already exist;
+# this stack only joins it, so redeploying the stack never detaches the proxy.
+services:
+  goonstreamer-web:
+    networks:
+      - goonstreamer
+      - proxy
+
+networks:
+  proxy:
+    name: ${PROXY_NETWORK:?set PROXY_NETWORK to the name of your reverse proxy's Docker network}
+    external: true

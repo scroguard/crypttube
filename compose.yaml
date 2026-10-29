@@ -1,0 +1,140 @@
+name: goon-streamer
+
+x-backend: &backend
+  # The API and the worker run the same image: built once, under one name.
+  build:
+    context: ./backend
+  image: goonstreamer-backend:${BACKEND_TAG:-latest}
+  # Run as a host user that can read MEDIA_ROOT. Generated content lives in the
+  # `generated` volume, which any PUID can write to.
+  user: "${PUID:-1000}:${PGID:-1000}"
+  restart: unless-stopped
+  depends_on:
+    goonstreamer-db:
+      condition: service_healthy
+  environment:
+    # Passed as separate values (never as a URL), so the password may contain any characters.
+    POSTGRES_HOST: goonstreamer-db
+    POSTGRES_USER: ${POSTGRES_USER:-goon}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    POSTGRES_DB: ${POSTGRES_DB:-goon}
+    GENERATED_DIR: /data/generated
+    MEDIA_DIR: /media
+    # Time zone for the daily maintenance hour (e.g. America/Chicago).
+    TZ: ${TZ:-UTC}
+    WATCHER_POLLING: ${WATCHER_POLLING:-false}
+    # How many files a scan reads/probes at once, and how many scenes get previews at once.
+    SCAN_PROBE_CONCURRENCY: ${SCAN_PROBE_CONCURRENCY:-4}
+    GENERATE_CONCURRENCY: ${GENERATE_CONCURRENCY:-2}
+    COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    # "Set image from URL" makes the server download a picture when a user asks for it
+    # (public internet addresses only). Set to false to forbid any outbound request.
+    URL_IMAGE_FETCH: ${URL_IMAGE_FETCH:-true}
+    # Only nginx (goonstreamer-web) can reach the API in production, so trust its X-Forwarded-For
+    # (login throttling is keyed on the real client address).
+    FORWARDED_ALLOW_IPS: "*"
+  volumes:
+    # Read-write so admins can delete files (Delete buttons, duplicate removal). The app
+    # never modifies or moves a file, and deletes only on an admin's explicit request.
+    # Set MEDIA_MODE=ro to make deletion impossible; everything else works the same.
+    - ${MEDIA_ROOT:-./media}:/media:${MEDIA_MODE:-rw}
+    # Thumbnails, scrub sprites, performer/studio/tag images. Rebuildable from the
+    # media except uploaded entity images; back it up together with pgdata.
+    - generated:/data/generated
+    # Users' own libraries (uploaded through the UI).
+    - uploads:/uploads
+  networks: [goonstreamer]
+  # Key for encrypting users' uploads (README: "Encrypting user uploads"). Without
+  # UPLOADS_KEY_FILE this is an empty file and encryption is off.
+  secrets:
+    - uploads_key
+
+# Service and container names are prefixed so they can't collide with other stacks
+# (container names are global; on a shared network so are service hostnames).
+services:
+  goonstreamer-db:
+    container_name: goonstreamer-db
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-goon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-goon}
+    # Tuned for an OLTP-ish workload of many small indexed reads on SSD.
+    # JIT is disabled: it adds planning latency to the short list queries we run.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=2GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - jit=off
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [goonstreamer]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No published ports: the database is reachable only from the goonstreamer network.
+
+  goonstreamer-api:
+    <<: *backend
+    container_name: goonstreamer-api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # Not published: reached through goonstreamer-web.
+
+  # The single entry point: serves the React app and proxies /api (same-origin).
+  goonstreamer-web:
+    container_name: goonstreamer-web
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on: [goonstreamer-api]
+    networks: [goonstreamer]
+    # WEB_BIND chooses the host interface: 127.0.0.1 (default, this machine only),
+    # 0.0.0.0 (all interfaces) or a specific LAN address. A reverse proxy running in
+    # Docker can instead reach this container directly: see compose.proxy.yaml.
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8420}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # Scans, file watching and ffmpeg generation. Single instance: the
+  # watcher and stale-job recovery assume one worker.
+  goonstreamer-worker:
+    <<: *backend
+    container_name: goonstreamer-worker
+    command: ["python", "-m", "app.worker"]
+    stop_grace_period: 30s
+    # Hard ceilings for indexing and preview generation, so a big scan can never take the
+    # machine down. Raise them on a strong server to index faster.
+    cpus: ${WORKER_CPUS:-2}
+    mem_limit: ${WORKER_MEMORY:-2g}
+    pids_limit: 512
+
+networks:
+  goonstreamer:
+
+secrets:
+  uploads_key:
+    file: ${UPLOADS_KEY_FILE:-/dev/null}
+
+volumes:
+  pgdata:
+  generated:
+  uploads:

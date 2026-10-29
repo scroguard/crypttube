@@ -1,0 +1,45 @@
+# Development overrides (opt-in): docker compose -f compose.yaml -f compose.dev.yaml up -d
+# or set COMPOSE_FILE=compose.yaml:compose.dev.yaml in .env. Never applied automatically,
+# so deploying compose.yaml alone (e.g. from a stack manager) always gets production.
+services:
+  goonstreamer-api:
+    image: goonstreamer-backend:dev   # with test tools; never replaces the production tag
+    build:
+      args:
+        INSTALL_DEV: "1"
+    volumes:
+      - ./backend:/app
+      - ${MEDIA_ROOT:-./media}:/media:${MEDIA_MODE:-rw}
+      - generated:/data/generated
+      - uploads:/uploads
+    ports:
+      - "127.0.0.1:${API_PORT:-8421}:8000"  # direct API access for debugging (dev only)
+    # --reload-dir keeps the reloader watching source only, never data or cache dirs.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "app"]
+
+  goonstreamer-worker:
+    image: goonstreamer-backend:dev   # with test tools; never replaces the production tag
+    build:
+      args:
+        INSTALL_DEV: "1"
+    volumes:
+      - ./backend:/app
+      - ${MEDIA_ROOT:-./media}:/media:${MEDIA_MODE:-rw}
+      - generated:/data/generated
+      - uploads:/uploads
+    command: ["watchfiles", "--filter", "python", "python -m app.worker", "app"]
+
+  goonstreamer-web:
+    build: !reset null
+    image: node:22-alpine
+    user: "${PUID:-1000}:${PGID:-1000}"
+    working_dir: /app
+    environment:
+      HOME: /tmp
+      API_URL: http://goonstreamer-api:8000
+    volumes:
+      - ./frontend:/app
+    command: ["sh", "-c", "npm install --no-audit --no-fund && npm run dev"]
+    healthcheck: !reset null
+    ports: !override
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8420}:5173"

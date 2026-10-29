@@ -1,0 +1,14 @@
+.env
+data/
+media/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+test-results/
+playwright-report/
+frontend/e2e/media/
+samples/
+frontend/e2e/.uploads-key
+*.key

@@ -1,0 +1,37 @@
+# Isolated end-to-end test stack. Run via scripts/e2e.sh, which uses its own project
+# name (goon-e2e), so its database and generated-content volumes are its own; no
+# published ports, and generated fixture media instead of your library.
+# Fixed container names are global, so the test stack gets its own.
+services:
+  goonstreamer-db:
+    container_name: goonstreamer-e2e-db
+  goonstreamer-api:
+    container_name: goonstreamer-e2e-api
+    environment:
+      SCAN_SETTLE_SECONDS: "1"
+    volumes:
+      - ./frontend/e2e/media:/media
+  goonstreamer-worker:
+    container_name: goonstreamer-e2e-worker
+    environment:
+      SCAN_SETTLE_SECONDS: "1"
+      WATCHER_QUIET_SECONDS: "1"
+    volumes:
+      - ./frontend/e2e/media:/media
+  goonstreamer-web:
+    container_name: goonstreamer-e2e-web
+    ports: !reset []
+  goonstreamer-e2e:
+    container_name: goonstreamer-e2e-runner
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    depends_on: [goonstreamer-web]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    working_dir: /app
+    environment:
+      HOME: /tmp
+      BASE_URL: http://goonstreamer-web
+      CI: "1"
+    volumes:
+      - ./frontend:/app
+    networks: [goonstreamer]
+    command: ["npx", "playwright", "test"]
