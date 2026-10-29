@@ -10,9 +10,8 @@
   label in `crypto.key_id` (part of every encrypted file's header).
 - GPU transcoding (PR #4, merged): opt-in via `compose.vaapi.yaml` (AMD/Intel) or
   `compose.nvidia.yaml`. Untested on real hardware: no GPU here or on the server yet.
-- Theming, three stacked PRs awaiting approval (merge in order; rebase each onto main after
-  the one below merges): #5 roles, fonts, logo (`theming-roles`); #6 server stylesheet
-  `CUSTOM_CSS_FILE` (`theming-custom-css`); #7 Admin → Theme editor (`theming-editor`).
+- Theming merged (#5 roles, fonts, logo; #6 server stylesheet `CUSTOM_CSS_FILE`; #7
+  Admin → Theme editor with Crypt, Crypt Lime and Ossuary presets).
 
 ## Next steps
 1. Point Dockhand at `https://github.com/scroguard/crypttube`.
@@ -23,9 +22,11 @@
 4. Local cleanup (once no session runs from the old path): `rm "/var/home/claude/personal
    projects/goon-streamer"` (a link to `crypttube`) and
    `rm -r ~/.claude/projects/-var-home-claude-personal-projects-goon-streamer` (copied).
-5. When a GPU is installed: follow README "Hardware transcoding", check the API log for
+5. Redeploy with a rebuild for the theming changes (web and API images both changed); then
+   try Admin → Theme. Optional: `CUSTOM_CSS_FILE` for a server stylesheet (README, "Theme").
+6. When a GPU is installed: follow README "Hardware transcoding", check the API log for
    `hardware encoding on: ...`, then try a transcode (player quality menu: 720p).
-6. Known limits: no key rotation for upload encryption; performer pictures taken from private
+7. Known limits: no key rotation for upload encryption; performer pictures taken from private
    uploads aren't encrypted; uploads aren't resumable.
 
 ## Context & architecture
