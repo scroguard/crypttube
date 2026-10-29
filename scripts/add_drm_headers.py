@@ -13,9 +13,17 @@ b = bytearray(open(src, "rb").read())
 off, moov = 0, None
 while off < len(b):
     size, typ = struct.unpack(">I4s", b[off:off + 8])
+    if size == 1:                      # 64-bit size follows (an mdat over 4 GiB)
+        size = struct.unpack(">Q", b[off + 8:off + 16])[0]
+    elif size == 0:                    # runs to the end of the file
+        size = len(b) - off
+    if size < 8:
+        sys.exit(f"bad box size {size} at offset {off}")
     if typ == b"moov":
         moov = (off, size)
     off += size
+if moov is None:
+    sys.exit("no moov box found")
 mo, ms = moov
 assert mo + ms == len(b), "moov must be the last box"
 extra = pssh(WIDEVINE, b"\x08\x01\x12\x10" + bytes(16)) + pssh(PLAYREADY, bytes(32))

@@ -86,15 +86,25 @@ async def fetch_image_bytes(
     *,
     max_bytes: int,
     timeout: float = 15.0,
+    deadline: float = 60.0,
     resolve: Resolver = resolve_host,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> bytes:
-    """Download `url` (following validated redirects) and return its body."""
+    """Download `url` (following validated redirects) and return its body. `timeout`
+    applies to each step; `deadline` to the whole download, lookups included."""
     try:
         current = httpx.URL(url.strip())
     except (httpx.InvalidURL, ValueError) as e:
         raise FetchError("that is not a valid URL") from e
+    try:
+        async with asyncio.timeout(deadline):
+            return await _fetch(current, max_bytes, timeout, resolve, transport)
+    except TimeoutError as e:
+        raise FetchError("the server took too long to respond") from e
 
+
+async def _fetch(current: httpx.URL, max_bytes: int, timeout: float, resolve: Resolver,
+                 transport: httpx.AsyncBaseTransport | None) -> bytes:
     async with httpx.AsyncClient(
         follow_redirects=False, trust_env=False, timeout=httpx.Timeout(timeout, connect=8.0),
         headers={"User-Agent": USER_AGENT, "Accept": "image/*"}, transport=transport,

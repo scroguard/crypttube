@@ -11,11 +11,14 @@ router = APIRouter(tags=["jobs"])
 
 def _redact(job: dict) -> dict:
     """Admins manage the queue but don't get to see inside users' libraries: folder
-    names under the uploads volume are replaced."""
+    names under the uploads volume are replaced, and so are messages that mention one."""
     uploads = str(get_settings().uploads_dir)
     path = job["payload"].get("path") if isinstance(job["payload"], dict) else None
     if isinstance(path, str) and (path == uploads or path.startswith(uploads + "/")):
         job["payload"] = {**job["payload"], "path": "(user library)"}
+    for field in ("message", "error"):
+        if isinstance(job.get(field), str) and uploads in job[field]:
+            job[field] = "(user library)"
     return job
 
 COLUMNS = """id, kind, payload, status, progress, message, error, attempts,

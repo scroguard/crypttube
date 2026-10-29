@@ -1,4 +1,5 @@
 """Setting performer/studio/tag images from a URL, the library, or the media store."""
+import asyncio
 
 import io
 
@@ -115,6 +116,14 @@ async def test_fetch_limits_size_and_reports_errors():
     empty = httpx.MockTransport(lambda r: httpx.Response(200, content=b""))
     with pytest.raises(fetch.FetchError, match="empty"):
         await fetch.fetch_image_bytes("https://a.example/x", max_bytes=1000, resolve=hosts, transport=empty)
+
+
+async def test_fetch_has_an_overall_deadline():
+    async def slow(host, port):             # each step may be quick; the whole is capped
+        await asyncio.sleep(5)
+        return ["93.184.216.34"]
+    with pytest.raises(fetch.FetchError, match="too long"):
+        await fetch.fetch_image_bytes("https://a.example/x", max_bytes=10, deadline=0.1, resolve=slow)
 
 
 # --- endpoints -------------------------------------------------------------------------

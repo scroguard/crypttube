@@ -255,6 +255,8 @@ class DeleteCopy(BaseModel):
     id: int
     # Delete even if not byte-identical to another copy (the admin looked and decided).
     force: bool = False
+    # The copy to keep (the forced follow-up of a set delete names the survivor it was shown).
+    keeper_id: int | None = None
 
 
 @router.post("/delete")
@@ -265,14 +267,16 @@ async def delete_copy(body: DeleteCopy, request: Request) -> dict:
         raise HTTPException(409, str(e)) from e
 
 
-async def clean_set(pool, kind: str, any_id: int, progress=None, force: bool = False) -> dict:
+async def clean_set(pool, kind: str, any_id: int, progress=None, force: bool = False,
+                    keeper_id: int | None = None) -> dict:
     """Delete the extra copies in the set `any_id` belongs to, keeping one.
 
     The copies are grouped by identical content (byte for byte), and one copy of the
     largest group is kept, preferring the first indexed ("Suggested to keep"). The rest of
     that group is deleted. A copy that matches none of them (often a damaged one, or a
     different file with the same fingerprint) is left alone and reported, unless `force`:
-    then every copy but the kept one is deleted (the admin's override)."""
+    then every copy but the kept one is deleted (the admin's override). `keeper_id` names
+    the copy to keep instead of choosing one."""
     table = TABLE[kind]
     rows = await pool.fetch(
         f"""SELECT c.id, f.path, f.size FROM {CANDIDATES.format(table=table)} AND (f.oshash, f.size) =
@@ -298,7 +302,13 @@ async def clean_set(pool, kind: str, any_id: int, progress=None, force: bool = F
                    for (a, b), v in verdicts.items())
     # The largest group of identical copies wins; on a tie, one that doesn't look damaged;
     # then the earliest indexed (max() keeps the first of equals).
-    winner = max(groups, key=lambda g: (len(g), not looks_damaged(g)))
+    if keeper_id is not None:
+        winner = next((g for g in groups if any(r["id"] == keeper_id for r in g)), None)
+        if winner is None:
+            raise HTTPException(404, "the copy to keep is not in this set")
+        winner.sort(key=lambda r: r["id"] != keeper_id)       # stable: the rest keep their order
+    else:
+        winner = max(groups, key=lambda g: (len(g), not looks_damaged(g)))
     keeper = winner[0]
 
     def why(row) -> str:
@@ -335,7 +345,7 @@ async def clean_set(pool, kind: str, any_id: int, progress=None, force: bool = F
 async def delete_set(body: DeleteCopy, request: Request) -> dict:
     """Delete the extra copies of one set (see clean_set)."""
     try:
-        r = await clean_set(request.app.state.pool, body.kind, body.id, force=body.force)
+        r = await clean_set(request.app.state.pool, body.kind, body.id, force=body.force, keeper_id=body.keeper_id)
     except DeleteError as e:
         raise HTTPException(409, str(e)) from e
     return {"deleted": r["deleted"], "bytes": r["bytes"], "kept": len(r["kept"]),

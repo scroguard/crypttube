@@ -359,3 +359,39 @@ async def test_bulk_override_deletes_differing_copies_too(app, client, indexed):
     assert good_path.exists() and not (root / "other" / "bad.mp4").exists()
     r = await client.post("/api/duplicates/delete-extras", json={"kind": "scene", "force": True})
     assert (await pool.fetchval("SELECT payload FROM jobs WHERE id = $1", r.json()["job_id"]))["force"] is True
+
+
+async def test_forced_follow_up_keeps_the_copy_it_was_shown(app, client, indexed):
+    """[A] and [B, C]: A differs (not damaged-looking), B and C agree, so B is kept and C
+    deleted. The forced follow-up names B as the keeper; on its own, A and B would tie and
+    A (indexed first) would win, deleting B."""
+    import subprocess
+    root = indexed["root"]
+    original = root / "videos" / "long.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=duration=4:size=640x360:rate=25",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-b:v", "2M", str(original)], check=True)
+    good = original.read_bytes()
+    different = bytearray(good)
+    middle = len(good) // 2
+    different[middle:middle + 5000] = b"\x01" * 5000    # differs, but no empty bytes
+    original.write_bytes(bytes(different))
+    await rescan(app)
+    (root / "other").mkdir()
+    for name in ("b.mp4", "c.mp4"):
+        (root / "other" / name).write_bytes(good)
+    await rescan(app)
+    group = (await client.get("/api/duplicates")).json()["groups"][0]
+    first = next(i for i in group["items"] if i["keep"])
+    assert first["path"] == str(original)
+
+    r = (await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": first["id"]})).json()
+    assert r["deleted"] == 1 and r["kept"] == 1
+    keeper = r["keeper"]
+    assert keeper["path"].startswith(str(root / "other"))
+    r = await client.post("/api/duplicates/delete-set",
+                          json={"kind": "scene", "id": keeper["id"], "keeper_id": 999999, "force": True})
+    assert r.status_code == 404 and original.exists()
+    r = await client.post("/api/duplicates/delete-set",
+                          json={"kind": "scene", "id": keeper["id"], "keeper_id": keeper["id"], "force": True})
+    assert r.status_code == 200 and r.json()["keeper"]["id"] == keeper["id"], r.text
+    assert os.path.exists(keeper["path"]) and not original.exists()

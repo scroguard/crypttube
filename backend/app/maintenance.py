@@ -340,11 +340,13 @@ async def cleanup(pool: asyncpg.Pool, root: Path, ctx: jobs.JobContext | None, *
             removed = await remove_missing(conn, min_missing_days)
             if dry_run:
                 swept = await sweep_generated(conn, root, delete=False, ctx=ctx)
-        finally:
-            if dry_run:
-                await tx.rollback()
-            else:
-                await tx.commit()
+        except BaseException:              # failed or cancelled: keep nothing half done
+            await tx.rollback()
+            raise
+        if dry_run:
+            await tx.rollback()
+        else:
+            await tx.commit()
     if not dry_run:
         # Only after the removal is committed: never delete the assets of rows that still exist.
         swept = await sweep_generated(pool, root, delete=True, ctx=ctx)

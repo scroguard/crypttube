@@ -362,6 +362,13 @@ async def test_paths_are_not_exposed_to_non_owners(app, people, alice_lib):
     jobs = (await admin.get("/api/jobs", params={"limit": 50})).json()["items"]
     paths = [j["payload"].get("path") for j in jobs if j["kind"] == "scan"]
     assert "(user library)" in paths and not any(p and "album" in p for p in paths)
+    # nor do messages that mention such a folder
+    uploads = str(get_settings().uploads_dir)
+    await app.state.pool.execute(
+        "INSERT INTO jobs (kind, payload, status, error) VALUES ('scan', '{}', 'failed', $1)",
+        f"cannot read {uploads}/7/album/x.mp4")
+    jobs = (await admin.get("/api/jobs", params={"limit": 50})).json()["items"]
+    assert not any("album" in (j["error"] or "") for j in jobs)
 
 
 async def test_identical_upload_never_adopts_another_owners_missing_file(app, people, library_dir, sample_media):

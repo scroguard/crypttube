@@ -103,6 +103,10 @@ services:
     restart: unless-stopped
     depends_on: [goonstreamer-api]
     networks: [goonstreamer]
+    environment:
+      # Behind a reverse proxy: its address or network (CIDR), so the visitor's own
+      # address is used for the login throttle instead of the proxy's.
+      TRUSTED_PROXY: ${TRUSTED_PROXY:-127.0.0.1}
     # WEB_BIND chooses the host interface: 127.0.0.1 (default, this machine only),
     # 0.0.0.0 (all interfaces) or a specific LAN address. A reverse proxy running in
     # Docker can instead reach this container directly: see compose.proxy.yaml.

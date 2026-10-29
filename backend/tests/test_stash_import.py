@@ -133,6 +133,12 @@ def test_reader_copes_with_old_schemas(tmp_path):
     assert s["studios"][0]["data"]["url"] == "https://studio.example" and s["studios"][0]["data"]["rating"] == 100
 
 
+def test_reader_opens_paths_with_uri_characters(tmp_path):
+    (tmp_path / "backup #2 ?50%").mkdir()
+    db = make_stash(tmp_path / "backup #2 ?50%" / "stash-go.sqlite")
+    assert read_stash(str(db))["version"] == 85
+
+
 def test_reader_rejects_other_files(tmp_path):
     (tmp_path / "x.sqlite").write_bytes(b"definitely not sqlite")
     with pytest.raises(StashError, match="not an SQLite database"):
