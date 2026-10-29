@@ -4,7 +4,9 @@
 #   RENDER_GID=<host's render group id: getent group render | cut -d: -f3>
 #   HW_DEVICE=/dev/dri/renderD129                           (only with several GPUs)
 #
-# If the GPU can't be used, the API logs why and transcodes on the CPU as before.
+# If the GPU is there but can't encode, the API logs why and transcodes on the CPU. If
+# /dev/dri doesn't exist, Docker won't start the API at all: take this file out of
+# COMPOSE_FILE and redeploy.
 services:
   crypttube-api:
     environment:
