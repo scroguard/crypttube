@@ -174,7 +174,9 @@ class Scanner:
                 self.stats.unsettled += 1
                 continue
             row = existing.get(e.path)
-            if row is None and unreadable.get(e.path) == (e.size, e.mod_time):
+            # (also when it has an entry: an indexed file that was later overwritten
+            # with a damaged copy must not be re-read on every scan either)
+            if unreadable.get(e.path) == (e.size, e.mod_time):
                 self.stats.unreadable += 1
                 continue
             if row is None:

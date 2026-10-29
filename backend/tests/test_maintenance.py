@@ -358,3 +358,48 @@ async def test_unreadable_uploads_are_not_listed_for_admins(app, people, alice_l
 async def drain_all(app):
     from tests.test_user_libraries import drain
     await drain(app)
+
+
+async def test_unreadable_review_fixes(app, client, indexed, monkeypatch):
+    """From the code review: an indexed file damaged later is skipped too; Delete keeps a
+    file that changed since and removes a stale entry; Try again forgets nothing if it
+    can't queue the scan."""
+    from app import jobs
+    from app.scanner import Scanner
+    pool = app.state.pool
+    root = indexed["root"]
+    lid = await pool.fetchval("SELECT id FROM library_paths WHERE path = $1", str(root))
+    scan = lambda: Scanner(pool, get_settings().generated_dir, settle_seconds=0).scan(lid)  # noqa: E731
+    video = root / "videos" / "h264.mp4"
+    sid = indexed["scenes"]["h264"]
+
+    # an indexed video overwritten with a damaged copy: recorded once, then skipped
+    video.write_bytes(b"\0" * 5000)
+    assert (await scan()).failed == 1
+    stats = await scan()
+    assert stats.failed == 0 and stats.unreadable == 1
+
+    # Try again: if the scan can't be queued, it is not forgotten
+    async def broken(*a, **k):
+        raise RuntimeError("queue down")
+    monkeypatch.setattr(jobs, "enqueue", broken)
+    try:
+        await client.post("/api/maintenance/unreadable/retry", json={"paths": [str(video)]})
+    except RuntimeError:
+        pass
+    monkeypatch.undo()
+    assert await pool.fetchval("SELECT count(*) FROM unreadable_files WHERE path = $1", str(video)) == 1
+
+    # Delete refuses a file that changed since it was found unreadable (e.g. re-downloaded)
+    video.write_bytes(b"\0" * 6000)
+    r = await client.post("/api/maintenance/unreadable/delete", json={"paths": [str(video)]})
+    assert r.status_code == 409 and "has changed since" in r.json()["detail"]
+    assert video.exists()
+    assert await pool.fetchval("SELECT count(*) FROM jobs WHERE kind = 'scan' AND status = 'queued'") == 1
+
+    # once recorded as it is now, Delete removes the file and its old entry
+    await pool.execute("DELETE FROM jobs")
+    await scan()
+    r = await client.post("/api/maintenance/unreadable/delete", json={"paths": [str(video)]})
+    assert r.status_code == 200 and r.json()["deleted"] == 1 and not video.exists()
+    assert (await client.get(f"/api/scenes/{sid}")).status_code == 404

@@ -2,12 +2,12 @@
 
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import crypto, jobs, maintenance
+from app import counts, crypto, jobs, maintenance
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
@@ -141,10 +141,10 @@ async def unreadable(request: Request, show_ignored: bool = False, limit: int = 
             "total": counts["shown"], "ignored": counts["ignored"]}
 
 
-async def _rows(pool, paths: list[str]):
-    return await pool.fetch(
-        f"""SELECT u.path, u.library_id, l.path AS library_path FROM unreadable_files u {MAIN_ONLY}
-            WHERE u.path = ANY($1::text[])""", paths)
+async def _rows(db, paths: list[str]):
+    return await db.fetch(
+        f"""SELECT u.path, u.library_id, u.size, u.mod_time, l.path AS library_path
+            FROM unreadable_files u {MAIN_ONLY} WHERE u.path = ANY($1::text[])""", paths)
 
 
 @router.post("/unreadable/ignore")
@@ -160,39 +160,63 @@ async def ignore_unreadable(body: UnreadableAction, request: Request) -> dict:
 async def retry_unreadable(body: UnreadableAction, request: Request) -> dict:
     """Forget that these couldn't be read and scan their folders again (e.g. after fixing them)."""
     from app.watcher import scan_dedupe_key
-    pool = request.app.state.pool
-    rows = await _rows(pool, body.paths)
-    await pool.execute("DELETE FROM unreadable_files WHERE path = ANY($1::text[])", [r["path"] for r in rows])
-    folders = {(r["library_id"], os.path.dirname(r["path"])) for r in rows}
-    for library_id, folder in sorted(folders):
-        await jobs.enqueue(pool, "scan", {"library_id": library_id, "path": folder, "settle": 0},
-                           dedupe_key=scan_dedupe_key(library_id, folder))
+    # Forget them and queue the scans together: if queueing fails, nothing is forgotten.
+    async with request.app.state.pool.acquire() as conn, conn.transaction():
+        rows = await _rows(conn, body.paths)
+        await conn.execute("DELETE FROM unreadable_files WHERE path = ANY($1::text[])", [r["path"] for r in rows])
+        folders = {(r["library_id"], os.path.dirname(r["path"])) for r in rows}
+        for library_id, folder in sorted(folders):
+            await jobs.enqueue(conn, "scan", {"library_id": library_id, "path": folder, "settle": 0},
+                               dedupe_key=scan_dedupe_key(library_id, folder))
     return {"retrying": len(rows), "scans": len(folders)}
 
 
-def _unlink(path: str) -> None:
+EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _unlink_if_unchanged(path: str, size: int, mod_time: datetime) -> bool:
+    """Delete the file only if it is still the one found unreadable (same size and time,
+    as the scanner records them). False if it has changed since, e.g. been repaired."""
     try:
-        os.unlink(path)
+        st = os.stat(path)
     except FileNotFoundError:
-        pass
+        return True
+    if st.st_size != size or EPOCH + timedelta(microseconds=st.st_mtime_ns // 1000) != mod_time:
+        return False
+    os.unlink(path)
+    return True
 
 
 @router.post("/unreadable/delete")
 async def delete_unreadable(body: UnreadableAction, request: Request) -> dict:
-    """Delete unreadable files from disk (they have no entry, previews or details to lose)."""
+    """Delete unreadable files from disk, with whatever entry they have (a file that was
+    indexed fine and later damaged still has its old scene or image)."""
+    from app.watcher import scan_dedupe_key
     pool = request.app.state.pool
-    deleted, problems = [], []
+    deleted, problems, changed = [], [], set()
     for r in await _rows(pool, body.paths):
         if not r["path"].startswith(r["library_path"].rstrip("/") + "/"):
             problems.append(f"{r['path']}: outside its library")
             continue
         try:
-            await asyncio.to_thread(_unlink, r["path"])
+            if not await asyncio.to_thread(_unlink_if_unchanged, r["path"], r["size"], r["mod_time"]):
+                problems.append(f"{r['path']}: it has changed since it was found unreadable, so it was kept "
+                                "and is being checked again")
+                changed.add((r["library_id"], os.path.dirname(r["path"])))
+                continue
         except OSError as e:
             problems.append(f"{r['path']}: {e.strerror or e}")
             continue
         deleted.append(r["path"])
-    await pool.execute("DELETE FROM unreadable_files WHERE path = ANY($1::text[])", deleted)
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("DELETE FROM unreadable_files WHERE path = ANY($1::text[])", deleted)
+        # its entry (if it had one) goes too; previews left behind are swept by maintenance
+        gone = await conn.execute("DELETE FROM files WHERE zip_file_id IS NULL AND path = ANY($1::text[])", deleted)
+        for library_id, folder in sorted(changed):
+            await jobs.enqueue(conn, "scan", {"library_id": library_id, "path": folder, "settle": 0},
+                               dedupe_key=scan_dedupe_key(library_id, folder))
+    if gone != "DELETE 0":
+        await counts.request_refresh(pool)
     if problems and not deleted:
         raise HTTPException(409, "nothing was deleted: " + problems[0] + (
             " (the media store must be writable: MEDIA_MODE=rw, and PUID allowed to delete there)"
