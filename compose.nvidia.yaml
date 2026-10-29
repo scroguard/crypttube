@@ -3,7 +3,9 @@
 #
 #   COMPOSE_FILE=compose.yaml:compose.nvidia.yaml          (in .env / stack env)
 #
-# If the GPU can't be used, the API logs why and transcodes on the CPU as before.
+# If the GPU is there but can't encode, the API logs why and transcodes on the CPU. If
+# Docker can't provide the GPU (no card, driver or toolkit), it won't start the API at
+# all: take this file out of COMPOSE_FILE and redeploy.
 services:
   crypttube-api:
     environment:

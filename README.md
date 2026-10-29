@@ -211,8 +211,10 @@ with any others, e.g. `compose.yaml:compose.proxy.yaml:compose.nvidia.yaml`) and
 
 At startup the API runs a short test encode. Its log then says either
 `hardware encoding on: vaapi` / `nvenc`, or `hardware encoding (...) unavailable,
-transcoding on the CPU: <ffmpeg's reason>`, so a missing or misconfigured GPU never breaks
-playback. A video the GPU encoder can't handle (e.g. larger than it supports at
+transcoding on the CPU: <ffmpeg's reason>`, so a GPU that can't encode never breaks
+playback. That needs Docker to hand the device over, though: if the GPU itself is missing
+(no `/dev/dri`, or no NVIDIA card, driver or toolkit), Docker refuses to start the API.
+Take the override out of `COMPOSE_FILE` and redeploy to get it back. A video the GPU encoder can't handle (e.g. larger than it supports at
 "Original" quality) is retried on the CPU. With a GPU you can usually raise
 `MAX_TRANSCODES` (default 2).
 
