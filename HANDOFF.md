@@ -1,20 +1,16 @@
 # Handoff
 
 ## Current status
-- `main` @ `349fff8`: all features to date (see README), including Unreadable files and scoped search.
-- Branch `review-fixes`: fixes for the 15 findings of CodeRabbit's full-repository review
-  (PR #1, `full-review` → `review-base`, review-only). Backend 313 passed; e2e 40 passed
-  before the last small follow-up (transcode slot release on source-open failure, live-clip
-  temp file only for unencrypted output), which backend tests cover.
-- Not yet merged to `main`.
+- `main` has every feature to date (see README), plus the fixes from CodeRabbit's
+  full-repository review (PR #1, closed) and its review of those fixes (PR #2, merged).
+  Backend 314 passed, e2e 41 passed.
+- Nothing in progress.
 
 ## Next steps
-1. Merge `review-fixes` into `main` and push; redeploy with a rebuild.
-2. Behind a reverse proxy, set `TRUSTED_PROXY` (the proxy's own address) on the
-   stack so logins are throttled per visitor (see README, "Reaching it from elsewhere").
-3. Close PR #1 and delete `full-review` and `review-base`:
-   `gh pr close 1 --delete-branch && git push origin --delete review-base`.
-4. Known limits: no key rotation for upload encryption; performer pictures taken from private
+1. Redeploy with a rebuild (the web image changed).
+2. Behind a reverse proxy, set `TRUSTED_PROXY` (the proxy's own address) on the stack so
+   logins are throttled per visitor (see README, "Reaching it from elsewhere").
+3. Known limits: no key rotation for upload encryption; performer pictures taken from private
    uploads aren't encrypted; uploads aren't resumable.
 
 ## Context & architecture
