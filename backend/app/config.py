@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Connection parameters are kept separate and handed to asyncpg as-is, never
     # interpolated into a URL: passwords containing @ # / ? : would corrupt a URL.
-    postgres_host: str = "goonstreamer-db"
+    postgres_host: str = "crypttube-db"
     postgres_port: int = 5432
     postgres_user: str = "goon"
     postgres_password: str = ""

@@ -117,6 +117,7 @@ def enabled() -> bool:
 
 
 def key_id(key: bytes | None = None) -> bytes:
+    # The label keeps the project's old name: it is part of every encrypted file's header.
     return hashlib.sha256(b"goonstreamer uploads key id" + (key or master_key() or b"")).digest()[:8]
 
 

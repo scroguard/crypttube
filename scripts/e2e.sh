@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end UI tests against a throwaway stack (project "goon-e2e").
+# End-to-end UI tests against a throwaway stack (project "crypttube-e2e").
 # Usage: scripts/e2e.sh [--keep]   (--keep leaves the stack up for inspection)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -81,10 +81,10 @@ KEY=frontend/e2e/.uploads-key
 [ -f "$KEY" ] || { python3 -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())" > "$KEY"; chmod 400 "$KEY"; }
 export UPLOADS_KEY_FILE="$PWD/$KEY"
 export BACKEND_TAG=e2e   # its own image tag, so a test build never replaces the real one
-compose=(docker compose -p goon-e2e -f compose.yaml -f compose.e2e.yaml)
+compose=(docker compose -p crypttube-e2e -f compose.yaml -f compose.e2e.yaml)
 cleanup() { [ "${1:-}" = "--keep" ] || "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1; }
 trap 'cleanup "${1:-}"' EXIT
 "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
-"${compose[@]}" build goonstreamer-api goonstreamer-worker goonstreamer-web
-"${compose[@]}" up -d goonstreamer-db goonstreamer-api goonstreamer-worker goonstreamer-web
-"${compose[@]}" run --rm goonstreamer-e2e
+"${compose[@]}" build crypttube-api crypttube-worker crypttube-web
+"${compose[@]}" up -d crypttube-db crypttube-api crypttube-worker crypttube-web
+"${compose[@]}" run --rm crypttube-e2e

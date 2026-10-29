@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="goon-streamer",
+    title="CryptTube",
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url=None,

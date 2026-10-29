@@ -1,6 +1,6 @@
 """Benchmark the list API against a large synthetic library.
 
-    docker compose run --rm goonstreamer-api python -m scripts.bench_browse [--scenes 200000]
+    docker compose run --rm crypttube-api python -m scripts.bench_browse [--scenes 200000]
 
 Creates (and afterwards drops) a separate database, so real data is untouched.
 """
@@ -14,7 +14,7 @@ import time
 import asyncpg
 from httpx import ASGITransport, AsyncClient
 
-BENCH_DB = "goon_bench"
+BENCH_DB = "crypttube_bench"
 
 SEED_SQL = """
 INSERT INTO library_paths (path) VALUES ('/media/bench');
