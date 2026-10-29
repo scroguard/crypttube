@@ -303,7 +303,7 @@ export default function VideoPlayer({ sceneId, playback, poster, resumeTime }: {
                   const active = o.mode === source.mode && o.height === source.height;
                   return (
                     <button key={`${o.mode}-${o.height}`} role="menuitemradio" aria-checked={active} onClick={() => choose(o)}
-                            className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-raised ${active ? "text-link" : ""}`}>
+                            className={`block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-raised ${active ? "text-link hover:text-text" : ""}`}>
                       {active ? "✓ " : ""}{sourceLabel(o)}
                     </button>
                   );
