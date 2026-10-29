@@ -7,7 +7,8 @@ from app import auth
 from tests.conftest import TEST_ADMIN
 from tests.test_browse import seed  # noqa: F401  (fixture)
 
-PUBLIC = {"/api/health", "/api/auth/status", "/api/auth/setup", "/api/auth/login"}
+PUBLIC = {"/api/health", "/api/auth/status", "/api/auth/setup", "/api/auth/login",
+          "/api/theme.css"}   # colors only; the sign-in page is themed too
 
 
 async def test_every_route_requires_a_session(app, anon):

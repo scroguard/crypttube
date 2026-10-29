@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 
 from app.api import (browse, delete, move, duplicates, edit, entities, filters, groups, health, home, jobs, libraries, maintenance, media, preferences,
-                     my_libraries, session, stash, users)
+                     my_libraries, session, stash, theme, users)
 from app.auth import require_admin, require_user
 from app import crypto
 from app.config import get_settings
@@ -36,14 +36,15 @@ app = FastAPI(
     redoc_url=None,
     openapi_url="/api/openapi.json",
 )
-# Every router is mounted with the minimum role it needs; only health and the auth
-# endpoints (which do their own checks) are reachable without a session.
+# Every router is mounted with the minimum role it needs; only health, the auth
+# endpoints (which do their own checks) and the theme's stylesheet are reachable without
+# a session.
 ROUTES = [
-    ((health.router, session.router), []),
+    ((health.router, session.router, theme.public_router), []),
     ((browse.router, entities.router, groups.router, media.router, edit.read_router, edit.router,
       my_libraries.router, home.router, filters.router, preferences.router, delete.router, move.router),
      [Depends(require_user)]),
-    ((libraries.router, jobs.router, users.router, stash.router, maintenance.router, duplicates.router), [Depends(require_admin)]),
+    ((libraries.router, jobs.router, users.router, stash.router, maintenance.router, duplicates.router, theme.router), [Depends(require_admin)]),
 ]
 for routers, deps in ROUTES:
     for r in routers:

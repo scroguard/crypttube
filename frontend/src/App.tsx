@@ -28,6 +28,7 @@ const AdminUserEdit = lazy(() => import("./pages/admin/UserEdit"));
 const AdminStashImport = lazy(() => import("./pages/admin/StashImport"));
 const AdminDuplicates = lazy(() => import("./pages/admin/Duplicates"));
 const AdminMaintenance = lazy(() => import("./pages/admin/Maintenance"));
+const AdminTheme = lazy(() => import("./pages/admin/Theme"));
 
 export default function App() {
   const status = useAuthStatus();
@@ -75,6 +76,7 @@ function AdminRoutes() {
       <Route path="import" element={<AdminStashImport />} />
       <Route path="duplicates" element={<AdminDuplicates />} />
       <Route path="maintenance" element={<AdminMaintenance />} />
+      <Route path="theme" element={<AdminTheme />} />
     </Routes>
   );
 }

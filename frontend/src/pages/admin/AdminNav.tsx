@@ -11,6 +11,7 @@ export default function AdminNav() {
       <NavLink to="/admin/import" className={cls}>Import</NavLink>
       <NavLink to="/admin/duplicates" className={cls}>Duplicates</NavLink>
       <NavLink to="/admin/maintenance" className={cls}>Maintenance</NavLink>
+      <NavLink to="/admin/theme" className={cls}>Theme</NavLink>
     </nav>
   );
 }

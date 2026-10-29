@@ -103,7 +103,17 @@ component can't use a raw color. The default values are the brand's "Crypt" them
 fonts (Chakra Petch for headings and small labels, Inter for text, JetBrains Mono for
 paths, durations and sizes) are bundled with the app, never loaded from a font service;
 their licences are served at `/fonts/`. The logo is drawn inline (`components/Logo.tsx`), so
-it follows the theme.
+it follows the theme. Precedence, lowest first: built-in colors, the admin's saved theme,
+your own CSS.
+
+**Admin → Theme** sets one theme for everyone: start from a preset (Crypt, the default;
+Crypt Lime; Ossuary, true black for OLED screens) and adjust any role with a color picker,
+previewed live across the app. Pairs that become hard to read are flagged while you edit,
+following the brand's rules: the text roles, link and each label on its button or status
+background at 4.5:1; outlines, accent, focus and the delete-button edge at 3:1 against the
+backgrounds they sit on. They are warnings, not blocks. Saving stores the 30 colors on the server, served to every page
+as `/api/theme.css` (sign-in included); *Use the built-in theme* removes them. Fonts and
+corner radii are part of the brand and not editable.
 
 **Your own CSS.** Set `CUSTOM_CSS_FILE` to a `.css` file on the host (readable by
 everyone) and redeploy; it is served as `/custom.css` and loaded after the app's styles, so
