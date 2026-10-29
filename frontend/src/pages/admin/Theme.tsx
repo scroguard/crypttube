@@ -35,7 +35,10 @@ export default function AdminTheme() {
 
   const customCss = useQuery({
     queryKey: ["custom-css"],
-    queryFn: async () => (await (await fetch("/custom.css")).text()).replace(/\/\*[\s\S]*?\*\//g, "").trim().length > 0,
+    queryFn: async () => {
+      const r = await fetch("/custom.css");
+      return r.ok && (await r.text()).replace(/\/\*[\s\S]*?\*\//g, "").trim().length > 0;
+    },
     staleTime: Infinity,
   });
 
@@ -52,15 +55,13 @@ export default function AdminTheme() {
   const dirty = draft.preset !== saved.preset || ROLES.some((r) => draft.colors[r] !== saved.colors[r]);
   const set = (r: Role, v: string) => setDraft({ ...draft, colors: { ...draft.colors, [r]: v } });
 
-  async function onSave() {
-    await save.mutateAsync(draft!);
-    reloadThemeCss();
-  }
-  async function onReset() {
-    await reset.mutateAsync(undefined);
-    setDraft({ preset: BUILT_IN.id, colors: BUILT_IN.colors });
-    reloadThemeCss();
-  }
+  const onSave = () => save.mutate(draft, { onSuccess: reloadThemeCss });
+  const onReset = () => reset.mutate(undefined, {
+    onSuccess: () => {
+      setDraft({ preset: BUILT_IN.id, colors: BUILT_IN.colors });
+      reloadThemeCss();
+    },
+  });
 
   return (
     <>
@@ -75,7 +76,7 @@ export default function AdminTheme() {
         One theme for every user. Changes preview here as you make them; nobody else sees them until you save.
         {customCss.data && <> A server stylesheet (<code className="font-mono">CUSTOM_CSS_FILE</code>) is also loaded and wins over these colors.</>}
       </p>
-      {save.error ? <ErrorBox error={save.error} className="mb-4" /> : null}
+      {save.error || reset.error ? <ErrorBox error={save.error ?? reset.error} className="mb-4" /> : null}
 
       <section className="mb-6" aria-label="Presets">
         <h2 className="label">Preset</h2>
