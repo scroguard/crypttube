@@ -23,7 +23,7 @@ from urllib.parse import urljoin
 import httpx
 
 MAX_REDIRECTS = 4
-USER_AGENT = "goon-streamer image fetch"
+USER_AGENT = "CryptTube image fetch"
 
 
 class FetchError(Exception):

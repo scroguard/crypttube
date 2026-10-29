@@ -21,7 +21,7 @@ function saveResume(sceneId: number, time: number | null, keepalive = false) {
   // keepalive lets the final save complete while the page is being left.
   return fetch(`/api/scenes/${sceneId}/resume`, {
     method: "PUT", keepalive, credentials: "same-origin",
-    headers: { "Content-Type": "application/json", "X-Requested-With": "goon" },
+    headers: { "Content-Type": "application/json", "X-Requested-With": "CryptTube" },
     body: JSON.stringify({ time: time == null ? null : Math.max(0, time) }),
   }).catch(() => undefined);
 }

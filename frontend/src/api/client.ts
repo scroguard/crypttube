@@ -35,7 +35,7 @@ interface Options {
 }
 
 export async function api<T>(path: string, opts: Options = {}): Promise<T> {
-  const headers: Record<string, string> = { "X-Requested-With": "goon", ...opts.headers };
+  const headers: Record<string, string> = { "X-Requested-With": "CryptTube", ...opts.headers };
   let body = opts.body;
   if (opts.json !== undefined) {
     headers["Content-Type"] = "application/json";

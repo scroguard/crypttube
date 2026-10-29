@@ -22,7 +22,7 @@ export function uploadFile(libraryId: number, item: PendingFile, onProgress: (fr
   const xhr = new XMLHttpRequest();
   const promise = new Promise<void>((resolve, reject) => {
     xhr.open("PUT", buildUrl(`/my/libraries/${libraryId}/files`, { path: item.path }));
-    xhr.setRequestHeader("X-Requested-With", "goon");
+    xhr.setRequestHeader("X-Requested-With", "CryptTube");
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     xhr.onload = () => {

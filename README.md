@@ -1,4 +1,4 @@
-# goon-streamer
+# CryptTube
 
 Self-hosted, privacy-first media organizer (Stash-inspired). FastAPI + PostgreSQL + FFmpeg
 backend, React + Tailwind frontend. Everything runs via Docker Compose; no telemetry, no
@@ -27,7 +27,7 @@ the API and database are internal. `compose.yaml` is self-contained, so stack ma
 - For a reverse proxy running in Docker on the same host (Nginx Proxy Manager, Traefik,
   Caddy, cloudflared…), set `PROXY_NETWORK=<the proxy's existing network>` and
   `COMPOSE_FILE=compose.yaml:compose.proxy.yaml`, then point the proxy at
-  `http://goonstreamer-web:80`. The stack joins that network; redeploying never
+  `http://crypttube-web:80`. The stack joins that network; redeploying never
   detaches the proxy.
 - Set `TRUSTED_PROXY` to the reverse proxy's own address (e.g. `172.18.0.5`), so failed
   logins are counted per visitor. Without it every visitor looks like the proxy, and one
@@ -52,15 +52,15 @@ docker compose -f compose.yaml -f compose.dev.yaml up -d --build
 Tests:
 
 ```sh
-docker compose run --rm goonstreamer-api pytest                     # backend (134 tests; needs the dev compose)
-docker compose run --rm goonstreamer-web npx vitest run             # frontend unit tests (dev compose)
-docker compose run --rm goonstreamer-api python -m scripts.bench_browse # list API on 200k scenes
+docker compose run --rm crypttube-api pytest                     # backend (134 tests; needs the dev compose)
+docker compose run --rm crypttube-web npx vitest run             # frontend unit tests (dev compose)
+docker compose run --rm crypttube-api python -m scripts.bench_browse # list API on 200k scenes
 scripts/e2e.sh                                           # Playwright, isolated stack
 ```
 
 `scripts/e2e.sh` generates fixture media and runs the full UI journey (setup, scan,
 playback/seek/transcode, editing, filters, lightbox, restricted user) against the
-production build in a separate compose project (`goon-e2e`) with its own database; it
+production build in a separate compose project (`crypttube-e2e`) with its own database; it
 never touches your data. Screenshots land in `frontend/test-results/screens/`.
 Behind HTTPS (reverse proxy with TLS), set `COOKIE_SECURE=true`.
 
@@ -73,17 +73,22 @@ Docker volumes: `pgdata` (database), `uploads` (users' own libraries) and `gener
 three; `generated` is rebuildable from the media except uploaded entity images. Neither the database nor
 the API has a published port; only the other containers on the stack's network reach them.
 
+The volumes are named `goon-streamer_pgdata`, `goon-streamer_uploads` and
+`goon-streamer_generated` (the project's former name), so installs from before the rename
+keep their data. If yours carry another prefix (`docker volume ls`), set
+`VOLUME_PREFIX` to it.
+
 ## Services
 
-Service and container names share the `goonstreamer-` prefix so they can't collide with
+Service and container names share the `crypttube-` prefix so they can't collide with
 other stacks on the same Docker host.
 
 | service / container    | role |
 |------------------------|------|
-| `goonstreamer-web`     | nginx: React app + `/api` proxy on `127.0.0.1:${WEB_PORT:-8420}` (dev: Vite) |
-| `goonstreamer-api`     | FastAPI (docs at `/api/docs`), internal |
-| `goonstreamer-db`      | PostgreSQL 17, internal |
-| `goonstreamer-worker`  | job queue runner + filesystem watcher (single instance) |
+| `crypttube-web`     | nginx: React app + `/api` proxy on `127.0.0.1:${WEB_PORT:-8420}` (dev: Vite) |
+| `crypttube-api`     | FastAPI (docs at `/api/docs`), internal |
+| `crypttube-db`      | PostgreSQL 17, internal |
+| `crypttube-worker`  | job queue runner + filesystem watcher (single instance) |
 
 ## Frontend
 
@@ -326,9 +331,9 @@ them).
 1. Create a key file on the Docker host, readable by the user the app runs as (`PUID`):
 
    ```sh
-   openssl rand -base64 32 > /root/goonstreamer-uploads.key
-   chown 1000:1000 /root/goonstreamer-uploads.key   # your PUID:PGID
-   chmod 400 /root/goonstreamer-uploads.key
+   openssl rand -base64 32 > /root/crypttube-uploads.key
+   chown 1000:1000 /root/crypttube-uploads.key   # your PUID:PGID
+   chmod 400 /root/crypttube-uploads.key
    ```
 
    (Docker hands the containers that one file, so the folder it's in can stay closed to
@@ -337,7 +342,7 @@ them).
 2. **Back the key up** somewhere safe and separate (a password manager is fine: it's one
    line of text). **If the key is lost, encrypted uploads can never be read again.**
 
-3. Set `UPLOADS_KEY_FILE=/root/goonstreamer-uploads.key` in the stack's environment and
+3. Set `UPLOADS_KEY_FILE=/root/crypttube-uploads.key` in the stack's environment and
    redeploy **recreating the containers** (`docker compose up -d --force-recreate`, or a
    forced redeploy in a stack manager): Compose doesn't notice a new secret file on its own. It's passed to the api and worker as a Docker secret (`/run/secrets/uploads_key`),
    so it doesn't appear in the environment or in `docker inspect`.
@@ -375,7 +380,7 @@ Rejecting the import discards the staged data.
 
 ## Resource use
 
-Scans and preview generation run in `goonstreamer-worker`, which is deliberately gentle:
+Scans and preview generation run in `crypttube-worker`, which is deliberately gentle:
 it runs at low CPU priority, its ffmpeg/ffprobe helpers at the lowest CPU and I/O priority
 with one decoder thread each, and it reads only a few files at a time. The container is
 also capped (`WORKER_CPUS`, default 2; `WORKER_MEMORY`, default 2g). To index faster on a

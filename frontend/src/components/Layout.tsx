@@ -25,7 +25,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1920px] items-center gap-4 px-4">
           <Link to="/" className="flex items-center gap-2 font-bold tracking-tight">
-            <img src="/favicon.svg" alt="" className="h-6 w-6" /> goon
+            <img src="/favicon.svg" alt="" className="h-6 w-6" /> CryptTube
           </Link>
           <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="Main">
             {NAV.map(([to, label]) => (

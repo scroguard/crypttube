@@ -4,12 +4,12 @@
 #   PROXY_NETWORK=<name of your proxy's existing network>      (in .env / stack env)
 #   COMPOSE_FILE=compose.yaml:compose.proxy.yaml               (or add this file to the stack)
 #
-# Then point the proxy at  http://goonstreamer-web:80 . The network must already exist;
+# Then point the proxy at  http://crypttube-web:80 . The network must already exist;
 # this stack only joins it, so redeploying the stack never detaches the proxy.
 services:
-  goonstreamer-web:
+  crypttube-web:
     networks:
-      - goonstreamer
+      - crypttube
       - proxy
 
 networks:

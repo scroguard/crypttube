@@ -9,7 +9,7 @@ import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-TEST_DB = "goon_test"
+TEST_DB = "crypttube_test"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -22,7 +22,7 @@ async def test_database():
     await admin.execute(f"CREATE DATABASE {TEST_DB}")
     os.environ["POSTGRES_DB"] = TEST_DB
     os.environ.pop("DATABASE_URL", None)
-    scratch = Path(tempfile.mkdtemp(prefix="goon-test-"))
+    scratch = Path(tempfile.mkdtemp(prefix="crypttube-test-"))
     os.environ["MEDIA_DIR"] = str(scratch / "media")
     os.environ["GENERATED_DIR"] = str(scratch / "generated")
     os.environ["UPLOADS_DIR"] = str(scratch / "uploads")
@@ -117,7 +117,7 @@ def _ffmpeg(*args: str) -> None:
 @pytest.fixture(scope="session")
 def sample_media(test_database) -> Path:
     """Tiny real media files, generated once per session."""
-    d = Path(tempfile.mkdtemp(prefix="goon-samples-"))
+    d = Path(tempfile.mkdtemp(prefix="crypttube-samples-"))
     src = ["-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=25",
            "-f", "lavfi", "-i", "sine=duration=1"]
     _ffmpeg(*src, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(d / "h264.mp4"))
