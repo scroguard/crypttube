@@ -10,8 +10,9 @@
   label in `crypto.key_id` (part of every encrypted file's header).
 - GPU transcoding (PR #4, merged): opt-in via `compose.vaapi.yaml` (AMD/Intel) or
   `compose.nvidia.yaml`. Untested on real hardware: no GPU here or on the server yet.
-- Theming step 1 (branch `theming-roles`): 30 color roles, bundled brand fonts, inline logo,
-  new favicon. Steps 2 (runtime custom.css) and 3 (admin theme editor) are queued.
+- Theming, three stacked PRs awaiting approval (merge in order; rebase each onto main after
+  the one below merges): #5 roles, fonts, logo (`theming-roles`); #6 server stylesheet
+  `CUSTOM_CSS_FILE` (`theming-custom-css`); #7 Admin → Theme editor (`theming-editor`).
 
 ## Next steps
 1. Point Dockhand at `https://github.com/scroguard/crypttube`.
@@ -47,6 +48,11 @@
   stays on the CPU if it fails; `ffmpeg_stream` retries a GPU stream on the CPU if it
   fails before any output. Live Photo clips stay on the CPU. The image carries the VAAPI
   drivers (mesa, Intel iHD from non-free); NVIDIA's come from the host's container toolkit.
+- Theme layers, lowest first: built-in Crypt colors in index.css (Tailwind `@layer theme`),
+  the admin's saved theme (`/api/theme.css`, unlayered, in <head>, stored in system_state
+  key `theme`), then `/custom.css` (end of <body>). Presets live only in
+  `frontend/src/lib/themes.ts`; a vitest checks index.css matches Crypt and every preset
+  passes the contrast rules in `lib/contrast.ts`.
 - Theme: design decisions come from Ink, the user's branding agent (via the "jarvis"
   session, which relays both ways). Roles, preset values and UI rules: Ink's handoff v0.1
   and update v0.2 (presets Crypt, Crypt Lime, Ossuary; dark only). Brand source files are in

@@ -1390,3 +1390,33 @@ test("the server's own stylesheet loads last and overrides theme roles", async (
   });
   expect(css).toEqual(["loaded", "#9e77d1"]);
 });
+
+test("admin theme: a preset saved for everyone, contrast warnings, back to built-in", async () => {
+  const bodyBg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  await page.goto("/admin/theme");
+  await expect(page.getByRole("heading", { name: "Theme" })).toBeVisible();
+  expect(await bodyBg()).toBe("rgb(11, 11, 16)");                        // built-in Crypt
+
+  await page.getByRole("button", { name: /Ossuary/ }).click();
+  expect(await bodyBg()).toBe("rgb(0, 0, 0)");                           // live preview
+  await nav("Scenes").click();                                           // leaving without saving undoes the preview
+  await expect(page).toHaveURL(/\/scenes/);
+  await expect.poll(bodyBg).toBe("rgb(11, 11, 16)");                    // once the editor has unmounted
+  await page.goBack();
+  await page.getByRole("button", { name: /Ossuary/ }).click();
+  await page.getByLabel("text muted", { exact: true }).fill("#202020");  // unreadable on black
+  await expect(page.getByTestId("contrast-warnings")).toContainText("text muted on bg");
+  await page.getByLabel("text muted", { exact: true }).fill("#A0A0A0");
+  await expect(page.getByTestId("contrast-warnings")).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS}/21-theme-editor.png`, fullPage: true });
+  await page.getByRole("button", { name: "Save for everyone" }).click();
+  await expect(page.getByRole("button", { name: "Save for everyone" })).toBeDisabled();
+
+  await page.goto("/scenes");                                            // a fresh page load: from /api/theme.css
+  expect(await bodyBg()).toBe("rgb(0, 0, 0)");
+  await page.goto("/admin/theme");
+  await page.getByRole("button", { name: "Use the built-in theme" }).click();
+  await expect(page.getByRole("button", { name: "Use the built-in theme" })).toBeDisabled();
+  await page.goto("/scenes");
+  expect(await bodyBg()).toBe("rgb(11, 11, 16)");
+});
