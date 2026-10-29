@@ -7,12 +7,11 @@ exactly as it does in the browse API.
 import asyncio
 import mimetypes
 import os
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
-from starlette.background import BackgroundTask
 from starlette.concurrency import iterate_in_threadpool
 
 from app import crypto, generated, jobs, streaming
@@ -207,15 +206,16 @@ async def stream_converted(
         try:
             # An encrypted upload reaches ffmpeg through crypto's loopback stream.
             with crypto.ffmpeg_input(s["path"]) as src:
-                async for chunk in streaming.ffmpeg_stream(
-                        streaming.ffmpeg_args(src, mode, start, height, s["video_codec"]), release):
-                    yield chunk
+                # aclosing: closing this body closes the stream too, which stops ffmpeg
+                async with aclosing(streaming.ffmpeg_stream(
+                        streaming.ffmpeg_args(src, mode, start, height, s["video_codec"]), release)) as chunks:
+                    async for chunk in chunks:
+                        yield chunk
         finally:
             release()                  # also when opening the source fails
 
-    # The background release covers a response dropped before its body started.
-    return StreamingResponse(
-        body(), media_type="video/mp4", background=BackgroundTask(release),
+    return streaming.TranscodeResponse(
+        body(), release, media_type="video/mp4",
         headers={"Cache-Control": "no-store", "X-Stream-Start": f"{start:.3f}"},
     )
 

@@ -12,7 +12,8 @@ export default function Studios() {
   const { canCreate } = useMe();
   const q = p.get("q") ?? "";
   const roots = p.get("roots") === "1";
-  const set = (k: string, v: string | null) => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); setP(n, { replace: k === "q" }); };
+  // From the live URL, not this render's params: the search box calls this 300 ms late.
+  const set = (k: string, v: string | null) => { const n = new URLSearchParams(window.location.search); if (v) n.set(k, v); else n.delete(k); setP(n, { replace: k === "q" }); };
   const list = useInfiniteList<StudioItem>("/studios", { q: q || undefined, root_only: roots || undefined }, { withTotal: true });
   return (
     <div>

@@ -11,6 +11,8 @@ import logging
 import os
 from collections.abc import AsyncIterator, Callable
 
+from starlette.responses import StreamingResponse
+
 log = logging.getLogger(__name__)
 
 MIME_TYPES = {
@@ -93,6 +95,25 @@ class TranscodeLimiter:
                 released = True
                 self.active -= 1
         return release
+
+
+class TranscodeResponse(StreamingResponse):
+    """A transcode stream that gives back its slot only once ffmpeg is gone: when the
+    response ends for any reason (a viewer who disconnects mid-chunk included), the body
+    is closed, which stops ffmpeg, and then the slot is released."""
+
+    def __init__(self, body: AsyncIterator[bytes], release: Callable[[], None], **kwargs):
+        super().__init__(body, **kwargs)
+        self.release = release
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            try:
+                await self.body_iterator.aclose()
+            finally:
+                self.release()
 
 
 async def ffmpeg_stream(args: list[str], release: Callable[[], None]) -> AsyncIterator[bytes]:

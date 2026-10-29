@@ -1372,3 +1372,12 @@ test("move files to another folder, choosing a new name on a clash", async () =>
     fs.rmSync(`${base}/Trip`, { recursive: true, force: true });
   }
 });
+
+test("studios: a search typed just before ticking Top-level only keeps both", async () => {
+  await page.goto("/studios");
+  await page.getByRole("searchbox", { name: "Search" }).fill("a");
+  await page.getByLabel("Top-level only").click();               // within the search's 300 ms delay
+  await expect(page).toHaveURL(/[?&]q=a(&|$)/);
+  await expect(page).toHaveURL(/[?&]roots=1(&|$)/);
+  await expect(page.getByLabel("Top-level only")).toBeChecked();
+});

@@ -15,6 +15,7 @@ Reports contain counts only, so they reveal nothing about users' private librari
 """
 
 import asyncio
+import contextlib
 import os
 import re
 import time
@@ -341,7 +342,8 @@ async def cleanup(pool: asyncpg.Pool, root: Path, ctx: jobs.JobContext | None, *
             if dry_run:
                 swept = await sweep_generated(conn, root, delete=False, ctx=ctx)
         except BaseException:              # failed or cancelled: keep nothing half done
-            await tx.rollback()
+            with contextlib.suppress(Exception):   # (a dropped connection: report the first error)
+                await tx.rollback()
             raise
         if dry_run:
             await tx.rollback()

@@ -27,5 +27,8 @@ if moov is None:
 mo, ms = moov
 assert mo + ms == len(b), "moov must be the last box"
 extra = pssh(WIDEVINE, b"\x08\x01\x12\x10" + bytes(16)) + pssh(PLAYREADY, bytes(32))
-b[mo:mo + 4] = struct.pack(">I", ms + len(extra))
+if struct.unpack(">I", b[mo:mo + 4])[0] == 1:     # 64-bit size field
+    b[mo + 8:mo + 16] = struct.pack(">Q", ms + len(extra))
+else:
+    b[mo:mo + 4] = struct.pack(">I", ms + len(extra))
 open(dest, "wb").write(bytes(b) + extra)

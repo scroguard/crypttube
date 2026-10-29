@@ -10,7 +10,7 @@
 
 ## Next steps
 1. Merge `review-fixes` into `main` and push; redeploy with a rebuild.
-2. Behind a reverse proxy, set `TRUSTED_PROXY` (the proxy's address or network, CIDR) on the
+2. Behind a reverse proxy, set `TRUSTED_PROXY` (the proxy's own address) on the
    stack so logins are throttled per visitor (see README, "Reaching it from elsewhere").
 3. Close PR #1 and delete `full-review` and `review-base`:
    `gh pr close 1 --delete-branch && git push origin --delete review-base`.
@@ -27,8 +27,8 @@
 - nginx config is an image template (`/etc/nginx/templates/`): `${TRUSTED_PROXY}` is filled
   in at start; other `$vars` are nginx's own. nginx sends the API a single
   `X-Forwarded-For` (the resolved visitor address); uvicorn trusts it (`FORWARDED_ALLOW_IPS=*`).
-- Transcode slots: `TranscodeLimiter.acquire()` in the route; released by the stream, the
-  route's body generator, or the response's background task (release is idempotent).
+- Transcode slots: `TranscodeLimiter.acquire()` in the route; `TranscodeResponse` closes the
+  body (stopping ffmpeg) and then releases, whatever ends the response (release is idempotent).
 - Full-repo CodeRabbit review: an empty orphan base branch plus a snapshot branch on top of
   it, then comment `@coderabbitai full review` on the PR (a branch identical to `main` gives
   no diff).

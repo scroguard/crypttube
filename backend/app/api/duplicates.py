@@ -306,16 +306,17 @@ async def clean_set(pool, kind: str, any_id: int, progress=None, force: bool = F
         winner = next((g for g in groups if any(r["id"] == keeper_id for r in g)), None)
         if winner is None:
             raise HTTPException(404, "the copy to keep is not in this set")
-        winner.sort(key=lambda r: r["id"] != keeper_id)       # stable: the rest keep their order
+        keeper = next(r for r in winner if r["id"] == keeper_id)
     else:
         winner = max(groups, key=lambda g: (len(g), not looks_damaged(g)))
-    keeper = winner[0]
+        keeper = winner[0]
+    rep_kept = winner[0]               # what the other groups were compared with
 
     def why(row) -> str:
         rep = next(g[0] for g in groups if row in g)
-        if (v := verdicts.get((rep["id"], keeper["id"]))) is not None:
+        if (v := verdicts.get((rep["id"], rep_kept["id"]))) is not None:
             this_side = "a"                  # compared as identical(this copy, kept copy)
-        elif (v := verdicts.get((keeper["id"], rep["id"]))) is not None:
+        elif (v := verdicts.get((rep_kept["id"], rep["id"]))) is not None:
             this_side = "b"
         else:
             return "differs from the copy kept"
@@ -328,7 +329,7 @@ async def clean_set(pool, kind: str, any_id: int, progress=None, force: bool = F
     async with pool.acquire() as conn, conn.transaction():
         await _combine(conn, kind, [r["id"] for r in rows])
     others = [r for g in groups if g is not winner for r in g]
-    extras = [r["id"] for r in winner[1:]] + ([r["id"] for r in others] if force else [])
+    extras = [r["id"] for r in winner if r is not keeper] + ([r["id"] for r in others] if force else [])
     for r in others if force else []:
         log.info("deleting %s anyway (admin override): %s", r["path"], why(r))
     result = await delete_content(pool, get_settings().generated_dir, table, extras, None) if extras else \
