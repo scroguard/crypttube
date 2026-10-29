@@ -1,3 +1,4 @@
+import asyncio
 import re
 
 import pytest
@@ -194,6 +195,16 @@ async def test_security_headers(client, anon):
         assert r.headers["referrer-policy"] == "no-referrer"
         assert r.headers["x-frame-options"] == "DENY"
         assert r.headers["cache-control"] == "no-store"
+
+
+async def test_concurrent_guesses_are_throttled(app, anon, login_as, monkeypatch):
+    """Guesses sent at once are counted before the slow password check, so they can't
+    all get past the throttle."""
+    monkeypatch.setattr(auth, "throttle", auth.LoginThrottle(clock=lambda: 0.0))
+    await login_as("cora", "viewer")
+    bad = {"username": "cora", "password": "wrong-password"}
+    codes = [r.status_code for r in await asyncio.gather(*(anon.post("/api/auth/login", json=bad) for _ in range(10)))]
+    assert codes.count(401) == auth.LoginThrottle.FREE_ATTEMPTS + 1 and codes.count(429) == 6
 
 
 def test_throttle_backoff_caps():

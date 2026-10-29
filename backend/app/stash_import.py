@@ -9,6 +9,7 @@ Image blobs are ignored on purpose; this system generates its own.
 import re
 import sqlite3
 from datetime import date
+from urllib.parse import quote
 
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
@@ -64,8 +65,9 @@ def _int(value, lo: int, hi: int) -> int | None:
 class _Db:
     def __init__(self, path: str):
         try:
-            # immutable=1: no locks, no journal/WAL files created next to a read-only file
-            self.con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+            # immutable=1: no locks, no journal/WAL files created next to a read-only file.
+            # Quoted: '?', '#' and '%' mean something in a URI.
+            self.con = sqlite3.connect(f"file:{quote(path)}?mode=ro&immutable=1", uri=True)
             self.con.row_factory = sqlite3.Row
             self.tables = {r[0] for r in self.con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         except sqlite3.DatabaseError as e:

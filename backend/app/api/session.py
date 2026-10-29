@@ -80,10 +80,12 @@ async def login(body: Credentials, request: Request, response: Response) -> dict
     wait = auth.throttle.retry_after(key)
     if wait > 0:
         raise HTTPException(429, "too many failed attempts", headers={"Retry-After": str(int(wait) + 1)})
+    # Counted before the slow check, so concurrent guesses can't all slip past the
+    # throttle; a successful login clears it again.
+    auth.throttle.failure(key)
     pool = request.app.state.pool
     user_id = await auth.check_credentials(pool, body.username, body.password)
     if user_id is None:
-        auth.throttle.failure(key)
         raise HTTPException(401, "invalid username or password")
     auth.throttle.success(key)
     token = await auth.create_session(pool, user_id, request.headers.get("user-agent"))

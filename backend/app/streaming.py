@@ -9,7 +9,7 @@ not byte-seekable, so the player seeks by re-requesting with `start=<seconds>`.
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 log = logging.getLogger(__name__)
 
@@ -78,14 +78,27 @@ class TranscodeLimiter:
         self.limit = limit
         self.active = 0
 
-    def available(self) -> bool:
-        return self.active < self.limit
+    def acquire(self) -> Callable[[], None] | None:
+        """Take a slot now, or None when all are in use. Check and take happen with no
+        await in between, so a burst of requests can't all get in. Returns the slot's
+        release, which is safe to call more than once."""
+        if self.active >= self.limit:
+            return None
+        self.active += 1
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            if not released:
+                released = True
+                self.active -= 1
+        return release
 
 
-async def ffmpeg_stream(args: list[str], limiter: TranscodeLimiter) -> AsyncIterator[bytes]:
-    """Yield ffmpeg's stdout. The process is killed as soon as the consumer goes away
-    (client disconnect cancels this generator), so abandoned seeks don't leak CPU."""
-    limiter.active += 1
+async def ffmpeg_stream(args: list[str], release: Callable[[], None]) -> AsyncIterator[bytes]:
+    """Yield ffmpeg's stdout, then give back the transcode slot taken for it. The
+    process is killed as soon as the consumer goes away (client disconnect cancels this
+    generator), so abandoned seeks don't leak CPU."""
     proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -95,7 +108,7 @@ async def ffmpeg_stream(args: list[str], limiter: TranscodeLimiter) -> AsyncIter
         while chunk := await proc.stdout.read(CHUNK):
             yield chunk
     finally:
-        limiter.active -= 1
         if proc is not None and proc.returncode is None:
             proc.kill()
             await proc.wait()
+        release()

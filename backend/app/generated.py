@@ -92,22 +92,29 @@ async def make_live_clip(path: str, dest: Path) -> None:
     """Convert a Live Photo's short video (often HEVC with uncompressed audio, which most
     browsers can't play) to a small MP4 that starts instantly everywhere."""
     ensure_dir(dest.parent)
-    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".tmp-", suffix=".mp4")
-    os.close(fd)
+    tmp = None
     try:
         with crypto.ffmpeg_input(path) as src:
             scale = (f"scale='min({LIVE_CLIP_MAX},iw)':'min({LIVE_CLIP_MAX},ih)'"
                      ":force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p")
-            await _run_ffmpeg(["-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-threads", "2",
-                               "-vf", scale, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-                               "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-movflags", "+faststart",
-                               "-y", "-f", "mp4", tmp], timeout=120)
-        data = await asyncio.to_thread(Path(tmp).read_bytes)
+            args = ["-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-threads", "2",
+                    "-vf", scale, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                    "-c:a", "aac", "-b:a", "128k", "-ac", "2"]
+            if crypto.outputs_private():
+                # Never on disk unencrypted: a fragmented MP4 can be written to a pipe.
+                data = await _run_ffmpeg([*args, "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+                                          "-f", "mp4", "pipe:1"], timeout=120)
+            else:
+                fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".tmp-", suffix=".mp4")
+                os.close(fd)
+                await _run_ffmpeg([*args, "-movflags", "+faststart", "-y", "-f", "mp4", tmp], timeout=120)
+                data = await asyncio.to_thread(Path(tmp).read_bytes)
         if not data:
             raise ProbeError("no clip produced")
         await asyncio.to_thread(_atomic_write, dest, lambda f: f.write(data))
     finally:
-        Path(tmp).unlink(missing_ok=True)
+        if tmp:
+            Path(tmp).unlink(missing_ok=True)
 
 
 def display_path(root: Path, version: str) -> Path:

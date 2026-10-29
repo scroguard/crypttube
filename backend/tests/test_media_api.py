@@ -134,10 +134,37 @@ async def test_transcode_process_killed_when_consumer_stops(indexed):
     from app import streaming
     limiter = streaming.TranscodeLimiter(1)
     path = str(indexed["root"] / "videos" / "vp9.webm")
-    gen = streaming.ffmpeg_stream(streaming.ffmpeg_args(path, "transcode", 0, None, "vp9"), limiter)
+    gen = streaming.ffmpeg_stream(streaming.ffmpeg_args(path, "transcode", 0, None, "vp9"), limiter.acquire())
     await gen.__anext__()
     assert limiter.active == 1
     await gen.aclose()  # what a client disconnect does
+    assert limiter.active == 0
+
+
+async def test_transcode_slot_freed_when_the_source_cannot_be_opened(app, client, indexed, monkeypatch):
+    from contextlib import contextmanager
+    from app import crypto
+
+    @contextmanager
+    def broken(path):
+        raise OSError("cannot decrypt")
+        yield
+    monkeypatch.setattr(crypto, "ffmpeg_input", broken)
+    try:
+        await client.get(f"/api/scenes/{indexed['scenes']['vp9']}/stream.mp4")
+    except OSError:
+        pass                                    # the test client re-raises app errors
+    assert app.state.transcodes.active == 0
+
+
+def test_transcode_slot_is_taken_at_once_and_released_once():
+    from app import streaming
+    limiter = streaming.TranscodeLimiter(2)
+    first, second = limiter.acquire(), limiter.acquire()
+    assert limiter.acquire() is None          # a burst can't get past the limit
+    first(); first()                          # released twice (stream and background)
+    assert limiter.active == 1
+    second()
     assert limiter.active == 0
 
 

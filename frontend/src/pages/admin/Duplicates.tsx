@@ -45,8 +45,8 @@ export default function Duplicates() {
       return await api("/duplicates/delete", { json: { kind, id, force: true } });
     }
   });
-  const removeSet = useWrite(({ id, force = false }: { id: number; force?: boolean }) =>
-    api<SetResult>("/duplicates/delete-set", { json: { kind, id, force } }));
+  const removeSet = useWrite(({ id, force = false, keeper_id }: { id: number; force?: boolean; keeper_id?: number }) =>
+    api<SetResult>("/duplicates/delete-set", { json: { kind, id, force, keeper_id } }));
   const [override, setOverride] = useState(false);
   const removeAll = useWrite(async () => {
     const r = await api<{ job_id: number }>("/duplicates/delete-extras", { json: { kind, force: override } });
@@ -125,7 +125,7 @@ export default function Duplicates() {
               {removeSet.data.kept_copies.length > 0 && (
                 <button className="btn-danger mt-2 py-1" disabled={removeSet.isPending}
                         onClick={() => confirm(`Delete ${removeSet.data!.kept_copies.length === 1 ? "that copy" : `those ${removeSet.data!.kept_copies.length} copies`} anyway, keeping only ${removeSet.data!.keeper.path}? They are not identical to it. This cannot be undone.`)
-                          && removeSet.mutate({ id: removeSet.data!.keeper.id, force: true })}>
+                          && removeSet.mutate({ id: removeSet.data!.keeper.id, keeper_id: removeSet.data!.keeper.id, force: true })}>
                   Delete {removeSet.data.kept_copies.length === 1 ? "it" : "them"} anyway
                 </button>
               )}

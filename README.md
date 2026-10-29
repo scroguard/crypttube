@@ -2,7 +2,8 @@
 
 Self-hosted, privacy-first media organizer (Stash-inspired). FastAPI + PostgreSQL + FFmpeg
 backend, React + Tailwind frontend. Everything runs via Docker Compose; no telemetry, no
-outbound calls, no external fonts/CDNs.
+external fonts/CDNs, and no outbound calls except "set a picture from a URL", when someone
+asks for it (`URL_IMAGE_FETCH=false` turns it off).
 
 ## Running
 
@@ -28,6 +29,10 @@ the API and database are internal. `compose.yaml` is self-contained, so stack ma
   `COMPOSE_FILE=compose.yaml:compose.proxy.yaml`, then point the proxy at
   `http://goonstreamer-web:80`. The stack joins that network; redeploying never
   detaches the proxy.
+- Set `TRUSTED_PROXY` to the reverse proxy's address or network (CIDR, e.g. the proxy's
+  Docker network `172.18.0.0/16`), so failed logins are counted per visitor. Without it
+  every visitor looks like the proxy, and one person's wrong passwords slow down
+  everyone's logins for that username. Addresses sent by anything else are ignored.
 - With HTTPS at the proxy set `COOKIE_SECURE=true`. Allow large request bodies and long
   timeouts on the proxy for uploads and streaming (e.g. nginx `client_max_body_size 0;`
   — Cloudflare's free plan caps uploads at 100 MB per request).
@@ -63,8 +68,8 @@ writable (`MEDIA_MODE=rw`, the default) and `PUID` to have permission. `MEDIA_MO
 makes deletion impossible. Everything the app writes lives in three
 Docker volumes: `pgdata` (database), `uploads` (users' own libraries) and `generated`
 (thumbnails, sprites, performer/studio/tag images, at `/data/generated`). Back up all
-three; `generated` is rebuildable from the media except uploaded entity images. The database has no published port, and the API
-listens only on `127.0.0.1`.
+three; `generated` is rebuildable from the media except uploaded entity images. Neither the database nor
+the API has a published port; only the other containers on the stack's network reach them.
 
 ## Services
 
@@ -101,7 +106,7 @@ scroll position), filters kept in the URL. Highlights:
   same filters/sort/ACL as the lists, performers paged by name, strategy chosen by how
   many items match (~55 ms per page at 200k scenes).
 - **Paging**: lists scroll continuously by default; an *items per page* selector
-  (10/20/30/50/100/200, remembered per browser) switches every list to pages with
+  (10/20/30/50/100/200/500/1000, remembered per browser) switches every list to pages with
   Previous/Next.
 - **Grids**: hover-scrub previews on scene cards, bulk select (tags, performers, rating,
   organized), lazy-loaded WebP thumbnails.
@@ -111,7 +116,7 @@ scroll position), filters kept in the URL. Highlights:
   lightbox (Edit), or in bulk on any scene or image grid (Select → add/remove performers
   and tags). **Select all matching** selects everything that matches the current search and
   filters, loaded or not (`GET /api/ids/{scenes,images}`, editable items only, up to
-  20,000), so "search a performer's folder → select all → add performer" is three steps.
+  100,000), so "search a performer's folder → select all → add performer" is three steps.
 - **Editing** (editors/admins): scenes, galleries, images, performers (incl. images),
   studios, tags (hierarchy, merge); create tags/performers/studios inline from pickers.
 - **Admin**: libraries (watch, exclusions, scan), live job monitor, users and per-user
@@ -181,7 +186,7 @@ Uploaded performer/studio/tag images are never touched.
 ## Browse API
 
 `GET /api/{scenes,galleries,images,performers,studios,tags}` and `/{id}` for details;
-`GET /api/galleries/{id}/images` in gallery order. Lists take `limit` (≤200), `sort`,
+`GET /api/galleries/{id}/images` in gallery order. Lists take `limit` (≤1000), `sort`,
 `desc`, `cursor` (from `next_cursor`), `with_total`, `thumb_w`, plus filters (`q`: title
 **or file path** contains, so a folder name finds everything in it;
 `tag_ids` + `tag_mode=all|any` + `include_sub_tags`, `exclude_tag_ids`, `performer_ids`,
