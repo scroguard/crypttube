@@ -7,10 +7,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOME=/tmp \
     USER=crypttube
 
+# VAAPI drivers for GPU transcoding (AMD: mesa; Intel: iHD, which needs non-free).
+# NVIDIA's libraries come from the host via the NVIDIA container toolkit.
 # Retry downloads: a mirror hiccup during a deploy shouldn't fail the whole build.
 RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries \
+    && sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+    && { grep -q non-free /etc/apt/sources.list.d/debian.sources || { echo 'could not enable non-free'; exit 1; }; } \
     && apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
+        mesa-va-drivers intel-media-va-driver-non-free \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

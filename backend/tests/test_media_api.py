@@ -477,3 +477,38 @@ async def test_live_photos_are_paired(app, client, clean, library_dir, sample_me
 def _write(path, data: bytes) -> str:
     path.write_bytes(data)
     return str(path)
+
+
+# --- hardware transcoding --------------------------------------------------------
+
+def test_gpu_encoder_args():
+    from app import streaming
+    vaapi = streaming.ffmpeg_args("in.mkv", "transcode", 5, 720, "vp9", accel="vaapi")
+    assert vaapi.index("-vaapi_device") < vaapi.index("-i")         # a global option, before the input
+    assert "h264_vaapi" in vaapi and "scale=-2:'min(720,ih)',format=nv12,hwupload" in vaapi
+    nvenc = streaming.ffmpeg_args("in.mkv", "transcode", 0, None, "vp9", accel="nvenc")
+    assert "h264_nvenc" in nvenc and "format=yuv420p" in nvenc
+    assert "libx264" in streaming.ffmpeg_args("in.mkv", "transcode", 0, None, "vp9")   # default: CPU
+    remux = streaming.ffmpeg_args("in.mkv", "remux", 0, None, "h264", accel="vaapi")
+    assert "-vaapi_device" not in remux and remux[remux.index("-c:v") + 1] == "copy"
+
+
+async def test_missing_gpu_falls_back_to_the_cpu(caplog):
+    """A GPU that can't be opened: the startup check must keep transcoding on the CPU."""
+    from app import streaming
+    assert await streaming.detect_hw_accel("vaapi", "/dev/dri/no-such-gpu") == "none"
+    assert streaming.hw_accel() == "none"
+    assert "unavailable, transcoding on the CPU" in caplog.text
+    assert await streaming.detect_hw_accel("none", "/dev/dri/renderD128") == "none"
+
+
+async def test_failed_gpu_encode_is_retried_on_the_cpu(indexed, tmp_path):
+    from app import streaming
+    limiter = streaming.TranscodeLimiter(1)
+    path = str(indexed["root"] / "videos" / "vp9.webm")
+    gpu = streaming.ffmpeg_args(path, "transcode", 0, None, "vp9", accel="nvenc")
+    gpu[gpu.index("h264_nvenc")] = "no_such_encoder"           # a GPU encode that always fails
+    cpu = streaming.ffmpeg_args(path, "transcode", 0, None, "vp9", accel="none")
+    data = b"".join([c async for c in streaming.ffmpeg_stream(gpu, limiter.acquire(), cpu)])
+    assert _probe_bytes(tmp_path, data) == "h264,yuv420p"
+    assert limiter.active == 0

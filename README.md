@@ -190,6 +190,32 @@ new files instead of their year-long-cached copies. Failures are listed with rea
 the job (Admin → Jobs); if the `generated` volume isn't writable the job fails saying so.
 Uploaded performer/studio/tag images are never touched.
 
+### Hardware transcoding
+
+Live transcodes (the `transcode` mode above) can be encoded on a GPU instead of the CPU.
+Direct play and remux never encode, so they're unaffected; Live Photo clips and previews
+stay on the CPU. Decoding and scaling also stay on the CPU, so every source format works.
+Nothing in `compose.yaml` needs editing: add one override file through `COMPOSE_FILE` (together
+with any others, e.g. `compose.yaml:compose.proxy.yaml:compose.nvidia.yaml`) and redeploy.
+
+- **AMD or Intel** (VAAPI; Intel 5th-gen Core / Broadwell or newer, and Arc):
+  1. On the host, find the render group's id: `getent group render | cut -d: -f3`.
+  2. Set `COMPOSE_FILE=compose.yaml:compose.vaapi.yaml` and `RENDER_GID=<that id>`.
+  3. With more than one GPU (e.g. an Intel iGPU plus a card), pick the card's render node:
+     `ls -l /dev/dri/by-path` shows which `renderD12x` belongs to which PCI device; set
+     `HW_DEVICE=/dev/dri/renderD129` (default `renderD128`).
+- **NVIDIA** (NVENC): install the NVIDIA driver and the
+  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+  on the host (`docker run --rm --gpus all ubuntu nvidia-smi` should list the card), then set
+  `COMPOSE_FILE=compose.yaml:compose.nvidia.yaml`.
+
+At startup the API runs a short test encode. Its log then says either
+`hardware encoding on: vaapi` / `nvenc`, or `hardware encoding (...) unavailable,
+transcoding on the CPU: <ffmpeg's reason>`, so a missing or misconfigured GPU never breaks
+playback. A video the GPU encoder can't handle (e.g. larger than it supports at
+"Original" quality) is retried on the CPU. With a GPU you can usually raise
+`MAX_TRANSCODES` (default 2).
+
 ## Browse API
 
 `GET /api/{scenes,galleries,images,performers,studios,tags}` and `/{id}` for details;

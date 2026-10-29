@@ -26,6 +26,8 @@ x-backend: &backend
     # How many files a scan reads/probes at once, and how many scenes get previews at once.
     SCAN_PROBE_CONCURRENCY: ${SCAN_PROBE_CONCURRENCY:-4}
     GENERATE_CONCURRENCY: ${GENERATE_CONCURRENCY:-2}
+    # Live transcodes at once (more get a 503 and retry); raise it with a GPU.
+    MAX_TRANSCODES: ${MAX_TRANSCODES:-2}
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
     # "Set image from URL" makes the server download a picture when a user asks for it
     # (public internet addresses only). Set to false to forbid any outbound request.

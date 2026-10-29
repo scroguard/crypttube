@@ -9,7 +9,7 @@ from app.auth import require_admin, require_user
 from app import crypto
 from app.config import get_settings
 from app.db import create_pool, migrate
-from app.streaming import TranscodeLimiter
+from app.streaming import TranscodeLimiter, detect_hw_accel
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,6 +24,7 @@ async def lifespan(app: FastAPI):
         await migrate(pool)
     app.state.pool = pool
     app.state.transcodes = TranscodeLimiter(settings.max_transcodes)
+    await detect_hw_accel(settings.hw_accel, settings.hw_device)
     yield
     await pool.close()
 
