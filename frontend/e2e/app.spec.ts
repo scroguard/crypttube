@@ -1381,3 +1381,12 @@ test("studios: a search typed just before ticking Top-level only keeps both", as
   await expect(page).toHaveURL(/[?&]roots=1(&|$)/);
   await expect(page.getByLabel("Top-level only")).toBeChecked();
 });
+
+test("the server's own stylesheet loads last and overrides theme roles", async () => {
+  await page.goto("/");
+  const css = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    return [root.getPropertyValue("--e2e-custom-css").trim(), root.getPropertyValue("--color-link").trim().toLowerCase()];
+  });
+  expect(css).toEqual(["loaded", "#9e77d1"]);
+});

@@ -1,0 +1,3 @@
+/* The e2e stack's server stylesheet (CUSTOM_CSS_FILE): a marker the test checks, and
+   one role override that must beat the app's own value. */
+:root { --e2e-custom-css: loaded; --color-link: #9e77d1; }

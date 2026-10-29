@@ -80,6 +80,7 @@ fi
 KEY=frontend/e2e/.uploads-key
 [ -f "$KEY" ] || { python3 -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())" > "$KEY"; chmod 400 "$KEY"; }
 export UPLOADS_KEY_FILE="$PWD/$KEY"
+export CUSTOM_CSS_FILE="$PWD/frontend/e2e/custom.css"   # proves a server stylesheet is loaded
 export BACKEND_TAG=e2e   # its own image tag, so a test build never replaces the real one
 compose=(docker compose -p crypttube-e2e -f compose.yaml -f compose.e2e.yaml)
 cleanup() { [ "${1:-}" = "--keep" ] || "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1; }

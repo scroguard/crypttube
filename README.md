@@ -105,6 +105,23 @@ paths, durations and sizes) are bundled with the app, never loaded from a font s
 their licences are served at `/fonts/`. The logo is drawn inline (`components/Logo.tsx`), so
 it follows the theme.
 
+**Your own CSS.** Set `CUSTOM_CSS_FILE` to a `.css` file on the host (readable by
+everyone) and redeploy; it is served as `/custom.css` and loaded after the app's styles, so
+it wins. It is served to anyone who can reach the site, signed in or not, so point it
+only at a stylesheet. Changing a role restyles everything that uses it:
+
+```css
+:root {
+  --color-accent: #a3e635;      /* icons, progress, active markers */
+  --color-surface: #141414;     /* cards, inputs, menus */
+}
+```
+
+Any other CSS works too, but class names and markup may change between versions; the
+`--color-*` roles are the stable part. The file is re-read on every page load. If an edit
+doesn't show, your editor probably replaced the file rather than rewriting it; redeploy
+with "force recreate" so the container picks up the new file.
+
 Highlights:
 
 - **Player**: picks direct play / remux / transcode by asking the browser what it can
