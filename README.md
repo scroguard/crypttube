@@ -29,10 +29,12 @@ the API and database are internal. `compose.yaml` is self-contained, so stack ma
   `COMPOSE_FILE=compose.yaml:compose.proxy.yaml`, then point the proxy at
   `http://goonstreamer-web:80`. The stack joins that network; redeploying never
   detaches the proxy.
-- Set `TRUSTED_PROXY` to the reverse proxy's address or network (CIDR, e.g. the proxy's
-  Docker network `172.18.0.0/16`), so failed logins are counted per visitor. Without it
-  every visitor looks like the proxy, and one person's wrong passwords slow down
-  everyone's logins for that username. Addresses sent by anything else are ignored.
+- Set `TRUSTED_PROXY` to the reverse proxy's own address (e.g. `172.18.0.5`), so failed
+  logins are counted per visitor. Without it every visitor looks like the proxy, and one
+  person's wrong passwords slow down everyone's logins for that username. Whatever it
+  trusts may claim to be any visitor, so don't give a whole network (CIDR) unless only
+  the proxy is on it: other containers on a shared proxy network could then dodge the
+  login throttle. In Docker, give the proxy a fixed address so it can't change.
 - With HTTPS at the proxy set `COOKIE_SECURE=true`. Allow large request bodies and long
   timeouts on the proxy for uploads and streaming (e.g. nginx `client_max_body_size 0;`
   — Cloudflare's free plan caps uploads at 100 MB per request).

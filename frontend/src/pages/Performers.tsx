@@ -17,7 +17,8 @@ export default function Performers() {
   const desc = p.get("desc") === "1";
   const gender = p.get("gender") ?? "";
   const favorite = p.get("favorite") === "1";
-  const set = (k: string, v: string | null) => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); setP(n, { replace: k === "q" }); };
+  // From the live URL, not this render's params: the search box calls this 300 ms late.
+  const set = (k: string, v: string | null) => { const n = new URLSearchParams(window.location.search); if (v) n.set(k, v); else n.delete(k); setP(n, { replace: k === "q" }); };
   const list = useInfiniteList<PerformerItem>("/performers", {
     q: q || undefined, sort, desc, gender: gender || undefined, favorite: favorite || undefined,
   }, { withTotal: true });

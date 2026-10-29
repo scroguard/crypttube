@@ -384,10 +384,14 @@ async def test_forced_follow_up_keeps_the_copy_it_was_shown(app, client, indexed
     first = next(i for i in group["items"] if i["keep"])
     assert first["path"] == str(original)
 
-    r = (await client.post("/api/duplicates/delete-set", json={"kind": "scene", "id": first["id"]})).json()
-    assert r["deleted"] == 1 and r["kept"] == 1
+    # asking to keep the later of the two agreeing copies: the other is deleted, and the
+    # differing copy is still explained by where it differs
+    c = next(i for i in group["items"] if i["path"] == str(root / "other" / "c.mp4"))
+    r = (await client.post("/api/duplicates/delete-set",
+                           json={"kind": "scene", "id": first["id"], "keeper_id": c["id"]})).json()
+    assert r["deleted"] == 1 and r["kept"] == 1 and r["reason"].startswith("contents differ from byte")
     keeper = r["keeper"]
-    assert keeper["path"].startswith(str(root / "other"))
+    assert keeper["id"] == c["id"] and not (root / "other" / "b.mp4").exists()
     r = await client.post("/api/duplicates/delete-set",
                           json={"kind": "scene", "id": keeper["id"], "keeper_id": 999999, "force": True})
     assert r.status_code == 404 and original.exists()

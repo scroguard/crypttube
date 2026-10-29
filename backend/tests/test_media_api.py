@@ -157,6 +157,34 @@ async def test_transcode_slot_freed_when_the_source_cannot_be_opened(app, client
     assert app.state.transcodes.active == 0
 
 
+async def test_transcode_slot_released_only_after_the_body_is_closed():
+    """A viewer who disconnects mid-chunk: ffmpeg (the body) is stopped first, then the
+    slot is given back."""
+    from app import streaming
+    limiter = streaming.TranscodeLimiter(1)
+    release = limiter.acquire()
+    events = []
+
+    async def body():
+        try:
+            while True:
+                yield b"x"
+        finally:
+            events.append(("body closed", limiter.active))
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            raise OSError("viewer went away")
+
+    async def receive():
+        await asyncio.Event().wait()           # no disconnect message; the send fails
+
+    response = streaming.TranscodeResponse(body(), release, media_type="video/mp4")
+    with pytest.raises(OSError):
+        await response({"type": "http", "asgi": {"spec_version": "2.0"}}, receive, send)
+    assert events == [("body closed", 1)] and limiter.active == 0
+
+
 def test_transcode_slot_is_taken_at_once_and_released_once():
     from app import streaming
     limiter = streaming.TranscodeLimiter(2)
