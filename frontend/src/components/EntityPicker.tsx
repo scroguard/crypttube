@@ -106,30 +106,30 @@ export default function EntityPicker({ kind, value, onChange, single = false, pl
         {value.map((id) => (
           <span key={id} className="chip">
             {linked
-              ? <Link to={`/${kind}/${id}`} className="hover:text-accent-hover" onClick={(e) => e.stopPropagation()}>{names.get(id)}</Link>
+              ? <Link to={`/${kind}/${id}`} className="hover:text-link" onClick={(e) => e.stopPropagation()}>{names.get(id)}</Link>
               : names.get(id)}
-            <button type="button" aria-label={`Remove ${names.get(id)}`} className="text-zinc-400 hover:text-white"
+            <button type="button" aria-label={`Remove ${names.get(id)}`} className="text-text-muted hover:text-text"
                     onClick={(e) => { e.stopPropagation(); onChange(value.filter((v) => v !== id)); }}>×</button>
           </span>
         ))}
-        <input className="min-w-[6rem] flex-1 bg-transparent py-0.5 text-sm outline-none" value={text}
+        <input className="min-w-[6rem] flex-1 bg-transparent py-0.5 text-sm" value={text}
                placeholder={value.length && single ? "" : placeholder ?? `Add ${kind}…`}
                onChange={(e) => { setText(e.target.value); setOpen(true); setActive(0); }}
                onFocus={() => setOpen(true)} onKeyDown={onKey} aria-label={placeholder ?? `Add ${kind}…`} />
       </div>
       {open && (options.length > 0 || canCreate) && (
         <ul role="listbox" data-drop={dropUp ? "up" : "down"}
-            className={`card absolute z-30 max-h-64 w-full overflow-y-auto bg-zinc-900 py-1 shadow-xl ${dropUp ? "bottom-full mb-1" : "mt-1"}`}>
+            className={`card absolute z-30 max-h-64 w-full overflow-y-auto bg-surface py-1 shadow-xl ${dropUp ? "bottom-full mb-1" : "mt-1"}`}>
           {options.map((o, i) => (
             <li key={o.id} role="option" aria-selected={i === active}
-                className={`cursor-pointer px-3 py-1.5 text-sm ${i === active ? "bg-zinc-800" : ""}`}
+                className={`cursor-pointer px-3 py-1.5 text-sm ${i === active ? "bg-surface-raised" : ""}`}
                 onMouseDown={(e) => { e.preventDefault(); pick(o.id); }} onMouseEnter={() => setActive(i)}>
               {o.name}
             </li>
           ))}
           {canCreate && (
             <li role="option" aria-selected={active === options.length}
-                className={`cursor-pointer px-3 py-1.5 text-sm text-accent-hover ${active === options.length ? "bg-zinc-800" : ""}`}
+                className={`cursor-pointer px-3 py-1.5 text-sm text-link ${active === options.length ? "bg-surface-raised" : ""}`}
                 onMouseDown={(e) => { e.preventDefault(); create(); }}>
               Create “{debounced}”
             </li>

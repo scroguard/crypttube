@@ -27,10 +27,10 @@ export default function GalleryDetail() {
       <div className="mb-4 flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold">{g.title || "Untitled"}</h1>
-          <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-zinc-400">
+          <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-text-muted">
             <span>{g.image_count} images</span>
             {g.release_date && <span>{formatDate(g.release_date)}</span>}
-            {g.studio && <Link to={`/studios/${g.studio.id}`} className="hover:text-white">{g.studio.name}</Link>}
+            {g.studio && <Link to={`/studios/${g.studio.id}`} className="hover:text-text">{g.studio.name}</Link>}
             {g.performers.length > 0 && <RefLinks items={g.performers} to="performers" max={6} />}
           </div>
         </div>
@@ -39,7 +39,7 @@ export default function GalleryDetail() {
         <DeleteMediaButton kind="galleries" ids={[id]} onDeleted={() => navigate("/galleries", { replace: true })} />
       </div>
       <div className="mb-4"><Chips items={g.tags} to="tags" /></div>
-      {g.details && <p className="mb-4 whitespace-pre-line text-sm text-zinc-300">{g.details}</p>}
+      {g.details && <p className="mb-4 whitespace-pre-line text-sm text-text">{g.details}</p>}
       <ImageBrowser path={`/galleries/${id}/images`} />
       {editing && <ContentEditModal kind="galleries" item={g} onClose={() => setEditing(false)} />}
     </div>

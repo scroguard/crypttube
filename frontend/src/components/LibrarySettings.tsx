@@ -13,9 +13,9 @@ export const VISIBILITY_LABEL: Record<Visibility, string> = {
 };
 
 export function VisibilityBadge({ library }: { library: Pick<MyLibrary, "visibility" | "shared_with"> }) {
-  if (library.visibility === "everyone") return <span className="chip bg-sky-950 text-sky-300">Everyone</span>;
+  if (library.visibility === "everyone") return <span className="chip bg-info-bg text-info">Everyone</span>;
   if (library.visibility === "users")
-    return <span className="chip bg-sky-950 text-sky-300">Shared with {library.shared_with.length}</span>;
+    return <span className="chip bg-info-bg text-info">Shared with {library.shared_with.length}</span>;
   return <span className="chip">Private</span>;
 }
 
@@ -53,18 +53,18 @@ export default function LibrarySettings({ library, onClose, onSaved }: {
         {visibility === "users" && (
           <fieldset>
             <legend className="label">Share with</legend>
-            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-zinc-800 p-2">
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2">
               {users.data?.map((u) => (
-                <label key={u.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-zinc-800">
+                <label key={u.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-surface-raised">
                   <input type="checkbox" className="accent-accent" checked={shared.includes(u.id)} onChange={() => toggle(u.id)} />
                   {u.username}
                 </label>
               ))}
-              {users.data?.length === 0 && <p className="px-2 py-1 text-sm text-zinc-500">No other users yet.</p>}
+              {users.data?.length === 0 && <p className="px-2 py-1 text-sm text-text-subtle">No other users yet.</p>}
             </div>
           </fieldset>
         )}
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-text-subtle">
           {visibility === "private"
             ? "Nobody else can see this library or anything in it, including administrators."
             : "People you share with can browse and play, but not change, what's in this library. You can stop sharing at any time."}

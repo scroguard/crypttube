@@ -52,9 +52,9 @@ export default function UserEdit() {
             <input className="input" type="password" autoComplete="new-password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
             <button className="btn-ghost" disabled={password.length < 8} onClick={() => patch.mutate({ password }, { onSuccess: () => setPassword("") })}>Set</button>
           </div>
-          <span className="mt-1 block text-xs text-zinc-500">Signs the user out everywhere.</span>
+          <span className="mt-1 block text-xs text-text-subtle">Signs the user out everywhere.</span>
         </Field>
-        <div className="sm:col-span-2 flex flex-wrap items-end gap-4 border-t border-zinc-800 pt-4">
+        <div className="sm:col-span-2 flex flex-wrap items-end gap-4 border-t border-border pt-4">
           <Toggle checked={u.can_upload} onChange={(v) => patch.mutate({ can_upload: v })} label="May create own libraries and upload" />
           {u.can_upload && <QuotaField bytes={u.upload_quota_bytes} onSave={(bytes) => patch.mutate({ upload_quota_bytes: bytes })} />}
         </div>
@@ -70,7 +70,7 @@ export default function UserEdit() {
       <section className="card space-y-4 p-5">
         <div>
           <h2 className="font-semibold">Content restrictions</h2>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-text-muted">
             {u.role === "admin" ? "Admins are never restricted; these rules apply if the role changes. " : ""}
             Hidden content behaves as if it doesn't exist for this user. Hiding a tag also hides its sub-tags;
             hiding a studio also hides its sub-studios; performers carrying a hidden tag are hidden too.
@@ -80,7 +80,7 @@ export default function UserEdit() {
         <Field label="Hidden studios"><EntityPicker kind="studios" value={studios} onChange={setStudios} /></Field>
         <Field label="Hidden performers"><EntityPicker kind="performers" value={performers} onChange={setPerformers} /></Field>
         <div className="flex items-center justify-end gap-3">
-          {saved && <span className="text-sm text-emerald-400">Saved</span>}
+          {saved && <span className="text-sm text-success">Saved</span>}
           <button className="btn-primary" disabled={saveRules.isPending}
                   onClick={() => saveRules.mutate({ tag_ids: tags, studio_ids: studios, performer_ids: performers }, { onSuccess: () => setSaved(true) })}>
             Save restrictions

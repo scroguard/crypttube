@@ -8,8 +8,10 @@
   text. Kept on purpose: volume names (`goon-streamer_*`, pinned, `VOLUME_PREFIX`), the
   database user/name `goon` (fixed when Postgres first created it) and the upload key-id
   label in `crypto.key_id` (part of every encrypted file's header).
-- GPU transcoding (branch `gpu-transcoding`): opt-in via `compose.vaapi.yaml` (AMD/Intel)
-  or `compose.nvidia.yaml`. Untested on real hardware: no GPU here or on the server yet.
+- GPU transcoding (PR #4, merged): opt-in via `compose.vaapi.yaml` (AMD/Intel) or
+  `compose.nvidia.yaml`. Untested on real hardware: no GPU here or on the server yet.
+- Theming step 1 (branch `theming-roles`): 30 color roles, bundled brand fonts, inline logo,
+  new favicon. Steps 2 (runtime custom.css) and 3 (admin theme editor) are queued.
 
 ## Next steps
 1. Point Dockhand at `https://github.com/scroguard/crypttube`.
@@ -45,6 +47,12 @@
   stays on the CPU if it fails; `ffmpeg_stream` retries a GPU stream on the CPU if it
   fails before any output. Live Photo clips stay on the CPU. The image carries the VAAPI
   drivers (mesa, Intel iHD from non-free); NVIDIA's come from the host's container toolkit.
+- Theme: design decisions come from Ink, the user's branding agent (via the "jarvis"
+  session, which relays both ways). Roles, preset values and UI rules: Ink's handoff v0.1
+  and update v0.2 (presets Crypt, Crypt Lime, Ossuary; dark only). Brand source files are in
+  `items from ink/` (untracked, excluded locally in `.git/info/exclude`).
+- CodeRabbit's GitHub app is on the Free plan (summary only). For line reviews, run the
+  CLI: `coderabbit review --agent --committed --base main`.
 - Full-repo CodeRabbit review: an empty orphan base branch plus a snapshot branch on top of
   it, then comment `@coderabbitai full review` on the PR (a branch identical to `main` gives
   no diff).

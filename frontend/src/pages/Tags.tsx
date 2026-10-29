@@ -23,7 +23,7 @@ export default function Tags() {
           <input type="checkbox" className="accent-accent" checked={roots} onChange={(e) => set("roots", e.target.checked ? "1" : null)} /> Top-level only
         </label>
         <PageSizeSelect />
-        <span className="ml-auto text-sm text-zinc-500">{list.total != null && plural(list.total, "tag")}</span>
+        <span className="ml-auto text-sm text-text-subtle">{list.total != null && plural(list.total, "tag")}</span>
         {canCreate && <CreateEntityButton kind="tags" label="tag" />}
       </Toolbar>
       <InfiniteGrid list={list} layout="portrait" render={(t) => <TagCard tag={t} />} empty="No tags yet." />

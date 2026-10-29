@@ -1,18 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { api } from "../api/client";
+import { LogoStacked } from "../components/Logo";
 import { ErrorBox, Field } from "../components/ui";
 
 export function AuthCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="card w-full max-w-sm p-6">
-        <div className="mb-6 flex items-center gap-2">
-          <img src="/favicon.svg" alt="" className="h-8 w-8" />
-          <div>
-            <h1 className="text-xl font-bold">{title}</h1>
-            {subtitle && <p className="text-sm text-zinc-400">{subtitle}</p>}
-          </div>
+        <LogoStacked className="mx-auto mb-6 h-24 w-auto" />
+        <div className="mb-6 text-center">
+          <h1 className="text-xl">{title}</h1>
+          {subtitle && <p className="text-sm text-text-muted">{subtitle}</p>}
         </div>
         {children}
       </div>

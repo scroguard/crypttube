@@ -28,7 +28,7 @@ export function ViewToggle() {
   const view = useBrowseView();
   const btn = (v: BrowseView, label: string) => (
     <button type="button" onClick={() => setBrowseView(v)} aria-pressed={view === v}
-            className={`px-3 py-2 text-sm font-medium ${view === v ? "bg-zinc-700 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"}`}>
+            className={`px-3 py-2 text-sm font-medium ${view === v ? "bg-surface-hover text-text" : "bg-surface-raised text-text-muted hover:text-text"}`}>
       {label}
     </button>
   );
@@ -81,25 +81,25 @@ export default function GroupedBrowser<T extends { id: number }>({ kind, query, 
       components={{ Footer: () => (q.isFetchingNextPage ? <Spinner className="py-6" /> : <div className="h-6" />) }}
       itemContent={(_, s) => (
         <section className="pb-8" data-testid="group" aria-label={s.performer?.name ?? "Unassigned"}>
-          <header className="mb-3 flex items-center gap-3 border-b border-zinc-800 pb-2">
+          <header className="mb-3 flex items-center gap-3 border-b border-border pb-2">
             {s.performer ? (
-              <Link to={`/performers/${s.performer.id}`} className="flex min-w-0 items-center gap-3 hover:text-accent-hover">
+              <Link to={`/performers/${s.performer.id}`} className="flex min-w-0 items-center gap-3 hover:text-link">
                 {s.performer.image_url
                   ? <img src={s.performer.image_url} alt="" className="h-9 w-9 rounded-full object-cover" />
                   : <Initials name={s.performer.name} className="h-9 w-9 rounded-full text-xs" />}
                 <h2 className="truncate text-lg font-semibold">{s.performer.name}</h2>
               </Link>
             ) : (
-              <h2 className="text-lg font-semibold text-zinc-300">Unassigned</h2>
+              <h2 className="text-lg font-semibold text-text">Unassigned</h2>
             )}
-            <span className="text-sm text-zinc-500" data-testid="group-count">{plural(s.total, noun)}</span>
+            <span className="text-sm text-text-subtle" data-testid="group-count">{plural(s.total, noun)}</span>
             {s.total > s.items.length && (
-              <Link to={seeAll(s)} className="ml-auto whitespace-nowrap text-sm text-accent-hover hover:underline">
+              <Link to={seeAll(s)} className="ml-auto whitespace-nowrap text-sm text-link hover:underline">
                 See all {s.total.toLocaleString()} →
               </Link>
             )}
             {s.total <= s.items.length && (
-              <Link to={seeAll(s)} className="ml-auto whitespace-nowrap text-sm text-zinc-500 hover:text-white">Open as grid →</Link>
+              <Link to={seeAll(s)} className="ml-auto whitespace-nowrap text-sm text-text-subtle hover:text-text">Open as grid →</Link>
             )}
           </header>
           <div className={layout}>

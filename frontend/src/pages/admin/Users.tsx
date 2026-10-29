@@ -26,15 +26,15 @@ export default function Users() {
         <button className="btn-primary" onClick={() => setCreating(true)}>New user</button>
       </div>
       {users.isPending ? <Spinner /> : users.isError ? <ErrorBox error={users.error} /> : (
-        <div className="card divide-y divide-zinc-800">
+        <div className="card divide-y divide-border">
           {users.data.map((u) => (
-            <Link key={u.id} to={`/admin/users/${u.id}`} className="flex items-center gap-4 p-4 hover:bg-zinc-800/50" data-testid="user-row">
+            <Link key={u.id} to={`/admin/users/${u.id}`} className="flex items-center gap-4 p-4 hover:bg-surface-raised/50" data-testid="user-row">
               <div className="min-w-0 flex-1">
-                <div className="font-medium">{u.username} {!u.is_active && <span className="text-xs text-red-400">(disabled)</span>}</div>
-                <div className="text-xs text-zinc-500">Last login {formatDateTime(u.last_login_at)}</div>
+                <div className="font-medium">{u.username} {!u.is_active && <span className="text-xs text-danger">(disabled)</span>}</div>
+                <div className="text-xs text-text-subtle">Last login {formatDateTime(u.last_login_at)}</div>
               </div>
               {!!u.restriction_count && <span className="chip">{u.restriction_count} restrictions</span>}
-              <span className="w-16 text-right text-sm capitalize text-zinc-400">{u.role}</span>
+              <span className="w-16 text-right text-sm capitalize text-text-muted">{u.role}</span>
             </Link>
           ))}
         </div>

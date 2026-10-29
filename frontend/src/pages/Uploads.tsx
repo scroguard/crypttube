@@ -14,13 +14,13 @@ export function useMyLibraries() {
 export function QuotaBar({ used, quota }: { used: number; quota: number | null }) {
   const pct = quota ? Math.min(100, (used / quota) * 100) : 0;
   return (
-    <div className="w-64 text-xs text-zinc-400" data-testid="quota">
+    <div className="w-64 text-xs text-text-muted" data-testid="quota">
       <div className="mb-1 flex justify-between">
         <span>{formatBytes(used)} used</span>
         <span>{quota ? `of ${formatBytes(quota)}` : "no limit"}</span>
       </div>
       {quota !== null && (
-        <div className="h-1.5 rounded bg-zinc-800"><div className={`h-full rounded ${pct > 90 ? "bg-red-500" : "bg-accent"}`} style={{ width: `${pct}%` }} /></div>
+        <div className="h-1.5 rounded bg-surface-raised"><div className={`h-full rounded ${pct > 90 ? "bg-danger" : "bg-accent"}`} style={{ width: `${pct}%` }} /></div>
       )}
     </div>
   );
@@ -38,7 +38,7 @@ export default function Uploads() {
       <div className="mb-6 flex flex-wrap items-end gap-4">
         <div className="mr-auto">
           <h1 className="text-2xl font-semibold">My uploads</h1>
-          <p className="text-sm text-zinc-400">Your own libraries. You decide who else can see each one.</p>
+          <p className="text-sm text-text-muted">Your own libraries. You decide who else can see each one.</p>
         </div>
         <QuotaBar used={q.data.used_bytes} quota={q.data.quota_bytes} />
         <button className="btn-primary" onClick={() => setCreating(true)}>New library</button>
@@ -46,12 +46,12 @@ export default function Uploads() {
       {q.data.libraries.length === 0 ? <Empty>No libraries yet. Create one to start uploading.</Empty> : (
         <div className="grid gap-3 sm:grid-cols-2">
           {q.data.libraries.map((lib) => (
-            <Link key={lib.id} to={`/uploads/${lib.id}`} className="card block p-4 hover:border-zinc-600" data-testid="my-library">
+            <Link key={lib.id} to={`/uploads/${lib.id}`} className="card block p-4 hover:border-border-strong" data-testid="my-library">
               <div className="flex items-center gap-2">
                 <h2 className="mr-auto truncate font-semibold">{lib.name}</h2>
                 <VisibilityBadge library={lib} />
               </div>
-              <p className="mt-1 text-sm text-zinc-400">
+              <p className="mt-1 text-sm text-text-muted">
                 {plural(lib.scene_count, "video")} · {plural(lib.image_count, "image")} · {formatBytes(lib.bytes)}
               </p>
             </Link>

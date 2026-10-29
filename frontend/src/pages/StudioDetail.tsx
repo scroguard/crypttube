@@ -22,16 +22,16 @@ export default function StudioDetail() {
   return (
     <div>
       <div className="flex flex-wrap items-start gap-6">
-        {s.image_url && <img src={s.image_url} alt="" className="h-24 max-w-xs rounded bg-zinc-900 object-contain p-2" />}
+        {s.image_url && <img src={s.image_url} alt="" className="h-24 max-w-xs rounded bg-surface object-contain p-2" />}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-semibold">{s.name}</h1>
             <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} />
           </div>
-          {s.parent && <p className="text-sm text-zinc-400">Part of <Link to={`/studios/${s.parent.id}`} className="hover:text-white">{s.parent.name}</Link></p>}
-          {s.url && <a href={s.url} target="_blank" rel="noreferrer noopener" className="text-sm text-accent-hover hover:underline">{s.url}</a>}
+          {s.parent && <p className="text-sm text-text-muted">Part of <Link to={`/studios/${s.parent.id}`} className="hover:text-text">{s.parent.name}</Link></p>}
+          {s.url && <a href={s.url} target="_blank" rel="noreferrer noopener" className="text-sm text-link hover:underline">{s.url}</a>}
           {s.children.length > 0 && <div className="mt-3"><span className="label">Sub-studios</span><Chips items={s.children} to="studios" /></div>}
-          {s.details && <p className="mt-3 whitespace-pre-line text-sm text-zinc-300">{s.details}</p>}
+          {s.details && <p className="mt-3 whitespace-pre-line text-sm text-text">{s.details}</p>}
         </div>
         {canEdit && (
           <div className="flex flex-col items-end gap-2">

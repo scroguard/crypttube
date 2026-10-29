@@ -41,7 +41,7 @@ export default function ImageSourceModal({ kind, id, onClose }: { kind: Kind; id
                      if (file) apply.mutate(() => api(base, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } }), done);
                    }} />
           </label>
-          <p className="mt-3 text-xs text-zinc-500">Any common image format, up to 20 MB. It is stored as an optimized copy.</p>
+          <p className="mt-3 text-xs text-text-subtle">Any common image format, up to 20 MB. It is stored as an optimized copy.</p>
         </div>
       )}
       {tab === "url" && <UrlSource onFetch={(url) => apply.mutate(() => api(`${base}/from-url`, { json: { url } }), done)} busy={apply.isPending} />}
@@ -52,7 +52,7 @@ export default function ImageSourceModal({ kind, id, onClose }: { kind: Kind; id
       {tab === "server" && isAdmin && (
         <ServerSource onPick={(path) => apply.mutate(() => api(`${base}/from-path`, { json: { path } }), done)} />
       )}
-      {apply.isPending && tab !== "url" && <p className="mt-3 text-sm text-zinc-400">Saving…</p>}
+      {apply.isPending && tab !== "url" && <p className="mt-3 text-sm text-text-muted">Saving…</p>}
       {apply.isError && <ErrorBox error={apply.error} className="mt-3" />}
     </Modal>
   );
@@ -67,7 +67,7 @@ function RandomSource({ kind, base, onClose, onAdjust }: { kind: Kind; base: str
     api<{ image_id: number; thumbnail_url: string }>(`${base}/random`, { json: { exclude_image_id: exclude } }));
   const self = kind === "performers" ? "this performer's" : kind === "studios" ? "this studio's" : "this tag's";
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950/40 p-3" data-testid="random-source">
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-border bg-bg/40 p-3" data-testid="random-source">
       {pick.data && (
         <img src={pick.data.thumbnail_url} alt="Current pick" data-testid="random-pick" data-image-id={pick.data.image_id}
              className={`h-16 w-16 rounded-md object-cover ${pick.isPending ? "opacity-50" : ""}`} />
@@ -76,8 +76,8 @@ function RandomSource({ kind, base, onClose, onAdjust }: { kind: Kind; base: str
               onClick={() => pick.mutate(pick.data?.image_id ?? null)}>
         🎲 {pick.data ? "Pick another" : "Random"}
       </button>
-      <span className="min-w-0 flex-1 text-sm text-zinc-400">
-        {pick.isError ? <span className="text-red-300" role="alert">{pick.error.message}</span>
+      <span className="min-w-0 flex-1 text-sm text-text-muted">
+        {pick.isError ? <span className="text-danger" role="alert">{pick.error.message}</span>
           : pick.data ? "Saved. Not the one? Pick another."
           : `Use a random one of ${self} images.`}
       </span>
@@ -98,7 +98,7 @@ function UrlSource({ onFetch, busy }: { onFetch: (url: string) => void; busy: bo
       <Field label="Image address">
         <input className="input" type="url" placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} required />
       </Field>
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-text-subtle">
         The server downloads the picture once and keeps its own copy; nothing is loaded from that site afterwards.
         Only addresses on the public internet are allowed.
       </p>
@@ -152,12 +152,12 @@ function LibrarySource({ kind, id, onPick }: { kind: Kind; id: number; onPick: (
             return (
               <button key={it.id} type="button" title={it.title ?? ""} data-testid="source-item"
                       onClick={() => onPick(scene ? { scene_id: it.id } : { image_id: it.id })}
-                      className="aspect-square overflow-hidden rounded-md bg-zinc-950 ring-accent hover:ring-2 focus:outline-none focus:ring-2">
+                      className="aspect-square overflow-hidden rounded-md bg-bg ring-accent hover:ring-2 focus:ring-2">
                 <img src={src} alt={it.title ?? ""} loading="lazy" className="h-full w-full object-cover" />
               </button>
             );
           })}
-          {!items.length && <p className="col-span-full py-8 text-center text-sm text-zinc-500">Nothing found.</p>}
+          {!items.length && <p className="col-span-full py-8 text-center text-sm text-text-subtle">Nothing found.</p>}
         </div>
       )}
       {list.hasNextPage && (
@@ -187,15 +187,15 @@ function ServerSource({ onPick }: { onPick: (path: string) => void }) {
     <div>
       <div className="mb-2 flex items-center gap-2 text-sm">
         <button type="button" className="btn-ghost py-1" disabled={!dir.parent} onClick={() => dir.parent && setCwd(dir.parent)}>↰ Up</button>
-        <code className="truncate text-xs text-zinc-400" data-testid="server-path">{dir.path}</code>
+        <code className="truncate text-xs text-text-muted" data-testid="server-path">{dir.path}</code>
       </div>
-      <div className="max-h-[50vh] overflow-y-auto rounded-md border border-zinc-800 bg-zinc-950 p-2">
+      <div className="max-h-[50vh] overflow-y-auto rounded-md border border-border bg-bg p-2">
         <ul>
           {dir.entries.map((e) => (
             <li key={e.path}>
               <button type="button" onClick={() => setCwd(e.path)} aria-label={`Open ${e.name}`}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-zinc-900">
-                <span aria-hidden className="text-amber-400/80">📁</span>{e.name}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface">
+                <span aria-hidden className="text-warning/80">📁</span>{e.name}
               </button>
             </li>
           ))}
@@ -204,14 +204,14 @@ function ServerSource({ onPick }: { onPick: (path: string) => void }) {
           <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2">
             {dir.files.map((f) => (
               <button key={f.path} type="button" title={f.name} onClick={() => onPick(f.path)} data-testid="server-file"
-                      className="overflow-hidden rounded-md bg-zinc-900 text-left ring-accent hover:ring-2 focus:outline-none focus:ring-2">
+                      className="overflow-hidden rounded-md bg-surface text-left ring-accent hover:ring-2 focus:ring-2">
                 <img src={buildUrl("/libraries/browse/preview", { path: f.path })} alt="" loading="lazy" className="aspect-square w-full object-cover" />
-                <span className="block truncate px-1.5 py-1 text-[11px] text-zinc-400">{f.name}</span>
+                <span className="block truncate px-1.5 py-1 text-[11px] text-text-muted">{f.name}</span>
               </button>
             ))}
           </div>
         )}
-        {!dir.entries.length && !dir.files.length && <p className="py-6 text-center text-sm text-zinc-500">No folders or images here.</p>}
+        {!dir.entries.length && !dir.files.length && <p className="py-6 text-center text-sm text-text-subtle">No folders or images here.</p>}
       </div>
     </div>
   );

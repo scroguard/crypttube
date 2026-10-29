@@ -19,7 +19,7 @@ export default function Galleries() {
         <SortControl sorts={SORTS} sort={f.sort as string} desc={f.desc as boolean} onChange={(sort, desc) => update({ sort, desc })} />
         <div className="w-64"><EntityPicker kind="tags" value={(f.tags as number[]) ?? []} onChange={(tags) => update({ tags })} placeholder="Filter by tag…" /></div>
         <PageSizeSelect />
-        <span className="ml-auto text-sm text-zinc-500">{list.total != null && plural(list.total, "gallery", "galleries")}</span>
+        <span className="ml-auto text-sm text-text-subtle">{list.total != null && plural(list.total, "gallery", "galleries")}</span>
       </Toolbar>
       <InfiniteGrid list={list} render={(g) => <GalleryCard gallery={g} />} empty="No galleries." />
     </div>

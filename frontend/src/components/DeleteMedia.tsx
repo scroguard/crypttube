@@ -43,9 +43,9 @@ export default function DeleteMediaButton({ kind, ids, onDeleted, className = "b
                 && del.mutate(undefined)}>
         {del.isPending ? "Deleting…" : ids.length > 1 ? "Delete files" : "Delete"}
       </button>
-      {del.isError && <span className="text-sm text-red-300" role="alert">{(del.error as Error).message}</span>}
+      {del.isError && <span className="text-sm text-danger" role="alert">{(del.error as Error).message}</span>}
       {del.data && del.data.skipped.length > 0 && (
-        <span className="text-sm text-amber-300" role="status">
+        <span className="text-sm text-warning" role="status">
           {del.data.deleted} deleted, {del.data.skipped.length} skipped ({del.data.skipped[0].reason})
         </span>
       )}

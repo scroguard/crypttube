@@ -46,12 +46,12 @@ export default function Libraries() {
                 onClick={() => confirm("Rebuild all thumbnails and previews for every library? Existing ones are discarded first; this can take a while on a large library.")
                   && generate.mutate({ force: true }, { onSuccess: queued })}>Rebuild all previews…</button>
       </div>
-      {notice && <p className="mb-3 text-sm text-emerald-400">{notice} <Link to="/admin/jobs" className="underline">View jobs</Link></p>}
+      {notice && <p className="mb-3 text-sm text-success">{notice} <Link to="/admin/jobs" className="underline">View jobs</Link></p>}
       <form onSubmit={submit} className="card mb-6 flex flex-wrap gap-2 p-4">
         <input className="input flex-1 font-mono" value={path} onChange={(e) => setPath(e.target.value)} aria-label="Library path" />
         <button type="button" className="btn-ghost" onClick={() => setPicking(true)}>Browse…</button>
         <button className="btn-primary" disabled={add.isPending}>Add library</button>
-        <p className="w-full text-xs text-zinc-500">Paths are as seen inside the container: your media folder is mounted read-only at /media.</p>
+        <p className="w-full text-xs text-text-subtle">Paths are as seen inside the container: your media folder is mounted read-only at /media.</p>
         {add.isError && <ErrorBox error={add.error} className="w-full" />}
       </form>
       {libs.isPending ? <Spinner /> : libs.isError ? <ErrorBox error={libs.error} /> : (
@@ -75,7 +75,7 @@ export default function Libraries() {
                 <Toggle checked={lib.create_folder_galleries} onChange={(v) => patch.mutate({ id: lib.id, create_folder_galleries: v })} label="Folder galleries" />
               </div>
               {lib.watch && lib.watch_state === "error" && lib.watch_error && (
-                <p className="mt-2 text-xs text-red-300">Change watching is off for this library: {lib.watch_error}. Scans still work.</p>
+                <p className="mt-2 text-xs text-danger">Change watching is off for this library: {lib.watch_error}. Scans still work.</p>
               )}
               <ExcludeEditor lib={lib} onSave={(patterns) => patch.mutate({ id: lib.id, exclude_patterns: patterns })} />
             </li>
@@ -118,16 +118,16 @@ function UserLibraries({ onDelete }: { onDelete: (id: number) => void }) {
   return (
     <section className="mt-10">
       <h2 className="mb-1 text-lg font-semibold">User libraries</h2>
-      <p className="mb-3 text-sm text-zinc-400">
+      <p className="mb-3 text-sm text-text-muted">
         Uploaded by users into their own libraries. Their content is only visible to the people the owner shares it with.
       </p>
-      <div className="card divide-y divide-zinc-800">
+      <div className="card divide-y divide-border">
         {q.data.map((l) => (
           <div key={l.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm" data-testid="user-library">
             <span className="font-medium">{l.owner.username}</span>
-            <span className="mr-auto text-zinc-400">{l.name}</span>
+            <span className="mr-auto text-text-muted">{l.name}</span>
             <span className="chip">{l.visibility === "private" ? "Private" : l.visibility === "everyone" ? "Everyone" : "Selected users"}</span>
-            <span className="w-40 text-right text-zinc-400">{l.file_count} files · {formatBytes(l.bytes)}</span>
+            <span className="w-40 text-right font-mono text-text-muted">{l.file_count} files · {formatBytes(l.bytes)}</span>
             <button className="btn-danger py-1" onClick={() => confirm(`Delete ${l.owner.username}'s library “${l.name}” and its ${l.file_count} uploaded files?`) && onDelete(l.id)}>Delete</button>
           </div>
         ))}
@@ -138,11 +138,11 @@ function UserLibraries({ onDelete }: { onDelete: (id: number) => void }) {
 
 function WatchBadge({ lib }: { lib: Library }) {
   if (!lib.enabled || !lib.watch) return null;
-  if (lib.watch_state === "active") return <span className="chip bg-emerald-950 text-emerald-300" data-testid="watch-state">Watching</span>;
+  if (lib.watch_state === "active") return <span className="chip bg-success-bg text-success" data-testid="watch-state">Watching</span>;
   if (lib.watch_state === "error")
-    return <span className="chip bg-red-950 text-red-300" data-testid="watch-state" title={lib.watch_error ?? ""}>Watch failed</span>;
+    return <span className="chip bg-danger-bg text-danger" data-testid="watch-state" title={lib.watch_error ?? ""}>Watch failed</span>;
   return (
-    <span className="chip bg-amber-950 text-amber-300" data-testid="watch-state"
+    <span className="chip bg-warning-bg text-warning" data-testid="watch-state"
           title="Registering every folder for change notifications; scans and other jobs keep running meanwhile">
       Starting watcher…
     </span>

@@ -73,7 +73,7 @@ function Pager({ paging }: { paging: Paging }) {
     <nav className="my-3 flex flex-wrap items-center justify-center gap-2 text-sm" aria-label="Pages" data-testid="pager">
       <button className="btn-ghost" disabled={!paging.hasPrev} onClick={paging.first} aria-label="First page">« First</button>
       <button className="btn-ghost" disabled={!paging.hasPrev} onClick={paging.prev}>‹ Previous</button>
-      <form className="flex items-center gap-2 tabular-nums text-zinc-400" data-testid="page-indicator"
+      <form className="flex items-center gap-2 tabular-nums text-text-muted" data-testid="page-indicator"
             onSubmit={(e) => { e.preventDefault(); jump(); }}>
         Page
         <input className="input w-20 py-1 text-center" inputMode="numeric" aria-label="Page number"
@@ -84,7 +84,7 @@ function Pager({ paging }: { paging: Paging }) {
       <button className="btn-ghost" disabled={!paging.hasNext} onClick={paging.next}>Next ›</button>
       <button className="btn-ghost" disabled={!paging.hasNext || paging.pageCount === null} onClick={paging.last} aria-label="Last page">Last »</button>
       {paging.from > 0 && (
-        <span className="tabular-nums text-zinc-400" data-testid="page-range">
+        <span className="tabular-nums text-text-muted" data-testid="page-range">
           {paging.from.toLocaleString()}–{paging.to.toLocaleString()}
           {paging.total !== null && ` of ${paging.total.toLocaleString()}`}
         </span>

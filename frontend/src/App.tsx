@@ -55,7 +55,7 @@ export default function App() {
           <Route path="/uploads" element={<Uploads />} />
           <Route path="/uploads/:id" element={<UploadLibrary />} />
           <Route path="/admin/*" element={<AdminRoutes />} />
-          <Route path="*" element={<p className="p-8 text-zinc-400">Page not found.</p>} />
+          <Route path="*" element={<p className="p-8 text-text-muted">Page not found.</p>} />
         </Routes>
       </Suspense>
     </Layout>
@@ -64,7 +64,7 @@ export default function App() {
 
 function AdminRoutes() {
   const { isAdmin } = useMe();
-  if (!isAdmin) return <p className="p-8 text-zinc-400">Admins only.</p>;
+  if (!isAdmin) return <p className="p-8 text-text-muted">Admins only.</p>;
   return (
     <Routes>
       <Route index element={<Navigate to="libraries" replace />} />

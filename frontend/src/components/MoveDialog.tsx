@@ -76,7 +76,7 @@ export default function MoveDialog({ kind, ids, onClose, onMoved }: {
         <div className="space-y-3 text-sm" data-testid="move-summary">
           <p>Moved {summary.moved} {summary.moved === 1 ? "item" : "items"} to <code className="break-all text-xs">{summary.dest}</code>.</p>
           {summary.skipped.length > 0 && (
-            <div className="text-amber-300">
+            <div className="text-warning">
               {summary.skipped.length} not moved:
               <ul className="mt-1 list-disc pl-5 text-xs">
                 {[...new Set(summary.skipped.map((s) => s.reason))].map((r) => (
@@ -89,7 +89,7 @@ export default function MoveDialog({ kind, ids, onClose, onMoved }: {
         </div>
       ) : conflicts ? (
         <div className="space-y-3" data-testid="move-conflicts">
-          <p className="text-sm text-zinc-300">
+          <p className="text-sm text-text">
             {summary && summary.moved > 0 && `Moved ${summary.moved}. `}
             {conflicts.items.length === 1 ? "A file with this name is" : "Files with these names are"} already in that folder.
             Choose new names (the extension stays):
@@ -97,8 +97,8 @@ export default function MoveDialog({ kind, ids, onClose, onMoved }: {
           <ul className="max-h-[40vh] space-y-2 overflow-y-auto">
             {conflicts.items.map((c, i) => (
               <li key={c.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="w-48 truncate text-zinc-400" title={c.name}>{c.name}</span>
-                <span className="text-zinc-600">→</span>
+                <span className="w-48 truncate text-text-muted" title={c.name}>{c.name}</span>
+                <span className="text-text-subtle">→</span>
                 <input className="input min-w-48 flex-1" aria-label={`New name for ${c.name}`} value={c.value}
                        onChange={(e) => setConflicts({ ...conflicts, items: conflicts.items.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} />
               </li>
@@ -115,25 +115,25 @@ export default function MoveDialog({ kind, ids, onClose, onMoved }: {
           <div className="flex items-center gap-2 text-sm">
             <button className="btn-ghost py-1" disabled={cwd === null}
                     onClick={() => setCwd(dir?.parent ?? null)}>↰ Up</button>
-            <code className="truncate text-xs text-zinc-400" data-testid="move-path">
+            <code className="truncate text-xs text-text-muted" data-testid="move-path">
               {dir?.library ? `${dir.library.name}${dir.relative ? ` / ${dir.relative}` : ""}` : "Choose a library"}
             </code>
           </div>
-          <div className="max-h-[40vh] overflow-y-auto rounded-md border border-zinc-800 bg-zinc-950 p-2">
+          <div className="max-h-[40vh] overflow-y-auto rounded-md border border-border bg-bg p-2">
             {listing.isPending ? <Spinner className="my-6" /> : listing.isError ? <ErrorBox error={listing.error} /> : (
               <ul>
                 {dir!.entries.map((e) => (
                   <li key={e.path}>
                     <button type="button" onClick={() => setCwd(e.path)} aria-label={`Open ${e.name}`}
-                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-zinc-900">
-                      <span aria-hidden className="text-amber-400/80">📁</span>
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface">
+                      <span aria-hidden className="text-warning/80">📁</span>
                       <span className="truncate">{e.name}</span>
                       {e.mine && <span className="chip ml-auto">yours</span>}
                     </button>
                   </li>
                 ))}
                 {!dir!.entries.length && (
-                  <li className="py-6 text-center text-sm text-zinc-500">
+                  <li className="py-6 text-center text-sm text-text-subtle">
                     {cwd === null ? "There's no library you can move files to." : "No folders here."}
                   </li>
                 )}
@@ -146,7 +146,7 @@ export default function MoveDialog({ kind, ids, onClose, onMoved }: {
                 <span className="label">New folder here (optional; "a/b" makes both)</span>
                 <input className="input" value={newFolder} onChange={(e) => setNewFolder(e.target.value)} placeholder="e.g. Performer name" />
               </label>
-              <label className="flex flex-wrap items-center gap-2 text-sm text-zinc-300">
+              <label className="flex flex-wrap items-center gap-2 text-sm text-text">
                 If a file with the same name is already there:
                 <select className="input w-auto" aria-label="If the name is taken" value={onConflict}
                         onChange={(e) => setOnConflict(e.target.value as OnConflict)}>

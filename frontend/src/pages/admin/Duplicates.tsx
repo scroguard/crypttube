@@ -71,7 +71,7 @@ export default function Duplicates() {
     <div className="mx-auto max-w-5xl">
       <AdminNav />
       <h1 className="mb-1 text-xl font-semibold">Duplicates</h1>
-      <p className="mb-4 text-sm text-zinc-400">
+      <p className="mb-4 text-sm text-text-muted">
         Files with identical content under different names, found by the fingerprint taken when they were indexed.
         Deleting a copy first gives its tags, performers and other details to the copies that stay, and compares
         the files byte for byte; a file that isn't truly identical is never deleted. Deletion is permanent.
@@ -80,7 +80,7 @@ export default function Duplicates() {
       {list.isPending ? <Spinner /> : list.isError ? <ErrorBox error={list.error} /> : (
         <>
           <div className="mb-4 flex flex-wrap items-center gap-3" data-testid="duplicates-summary">
-            <span className="mr-auto text-sm text-zinc-300">
+            <span className="mr-auto text-sm text-text">
               {s && s.groups > 0
                 ? <>{s.groups} sets of duplicates · {s.extra_copies} extra copies · {formatBytes(s.extra_bytes)} could be freed</>
                 : <>No duplicate {noun} found.</>}
@@ -101,7 +101,7 @@ export default function Duplicates() {
                           && removeAll.mutate(undefined)}>
                   Delete all extra copies…
                 </button>
-                <label className="flex items-center gap-2 text-xs text-zinc-400" title="Admin override: the byte-for-byte check still picks which copy to keep, but copies that differ are deleted too">
+                <label className="flex items-center gap-2 text-xs text-text-muted" title="Admin override: the byte-for-byte check still picks which copy to keep, but copies that differ are deleted too">
                   <input type="checkbox" className="accent-accent" checked={override} onChange={(e) => setOverride(e.target.checked)} />
                   Also delete copies that differ
                 </label>
@@ -111,14 +111,14 @@ export default function Duplicates() {
           {(combine.error || remove.error || removeSet.error || removeAll.error) && <ErrorBox error={combine.error || remove.error || removeSet.error || removeAll.error} className="mb-3" />}
           {deleteJob.data && <DeleteJobStatus job={deleteJob.data} onDone={() => list.refetch()} />}
           {removeSet.data && !removeSet.isPending && (
-            <div className="mb-3 rounded-md border border-zinc-800 bg-zinc-950/40 px-4 py-3 text-sm" role="status" data-testid="set-result">
+            <div className="mb-3 rounded-md border border-border bg-bg/40 px-4 py-3 text-sm" role="status" data-testid="set-result">
               <p>
                 Deleted {removeSet.data.deleted} {removeSet.data.deleted === 1 ? "copy" : "copies"}; kept
                 {" "}<code className="break-all text-xs">{removeSet.data.keeper.path}</code>
                 {!removeSet.data.suggested_kept && " (the copy most others matched, instead of the suggested one)"}.
               </p>
               {removeSet.data.kept_copies.map((k) => (
-                <p key={k.id} className="mt-1 text-amber-300">
+                <p key={k.id} className="mt-1 text-warning">
                   Also kept, because it differs: <code className="break-all text-xs">{k.path}</code> ({k.reason}).
                 </p>
               ))}
@@ -136,15 +136,15 @@ export default function Duplicates() {
               <li key={`${g.oshash}-${g.size}`} className="card p-4" data-testid="duplicate-group">
                 <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
                   <span className="font-medium">{g.items.length} copies</span>
-                  <span className="text-zinc-400">{formatBytes(g.size)} each</span>
+                  <span className="font-mono text-text-muted">{formatBytes(g.size)} each</span>
                   <span className="mr-auto" />
                   <button className="btn-danger py-1" disabled={removeSet.isPending}
                           onClick={() => confirm(`Delete ${g.items.length - 1} of these ${g.items.length} copies from disk? One copy stays (normally the one marked "Suggested to keep"), with the details of all of them. A copy that differs from the others is left alone. This cannot be undone.`) && removeSet.mutate({ id: g.items[0].id })}>
                     {removeSet.isPending && removeSet.variables?.id === g.items[0].id ? "Deleting…" : `Delete ${g.items.length - 1} extra ${g.items.length === 2 ? "copy" : "copies"}`}
                   </button>
-                  {g.in_sync ? <span className="text-xs text-emerald-400">Details match</span> : (
+                  {g.in_sync ? <span className="text-xs text-success">Details match</span> : (
                     <>
-                      <span className="text-xs text-amber-300">Details differ</span>
+                      <span className="text-xs text-warning">Details differ</span>
                       <button className="btn-ghost py-1" disabled={combine.isPending} onClick={() => combine.mutate(g.items[0].id)}>
                         Combine details
                       </button>
@@ -154,17 +154,17 @@ export default function Duplicates() {
                 <ul className="space-y-2">
                   {g.items.map((i) => (
                     <li key={i.id} className="flex items-center gap-3" data-testid="duplicate-item">
-                      <img src={i.thumbnail_url} alt="" loading="lazy" className="h-14 w-24 shrink-0 rounded bg-zinc-950 object-cover" />
+                      <img src={i.thumbnail_url} alt="" loading="lazy" className="h-14 w-24 shrink-0 rounded bg-bg object-cover" />
                       <div className="min-w-0 flex-1 text-sm">
                         <div className="flex flex-wrap items-center gap-2">
                           {kind === "scene"
-                            ? <Link to={`/scenes/${i.id}`} className="truncate font-medium hover:text-accent-hover">{i.title || `Scene ${i.id}`}</Link>
+                            ? <Link to={`/scenes/${i.id}`} className="truncate font-medium hover:text-link">{i.title || `Scene ${i.id}`}</Link>
                             : <span className="truncate font-medium">{i.title || `Image ${i.id}`}</span>}
-                          {i.keep ? <span className="chip bg-emerald-900/50 text-emerald-200">Suggested to keep</span>
+                          {i.keep ? <span className="chip bg-success-bg text-success">Suggested to keep</span>
                             : <span className="chip">Extra copy</span>}
                         </div>
-                        <code className="block break-all text-xs text-zinc-400">{i.path}</code>
-                        <div className="text-xs text-zinc-500">
+                        <code className="block break-all text-xs text-text-muted">{i.path}</code>
+                        <div className="text-xs text-text-subtle">
                           {[i.width && i.height ? `${i.width}×${i.height}` : null,
                             i.duration ? formatDuration(i.duration) : null,
                             i.rating != null ? `${Math.round(i.rating / 20)}★` : null,
@@ -204,8 +204,8 @@ function DeleteJobStatus({ job, onDone }: { job: DeleteJob; onDone: () => void }
     if (wasActive.current && !active) onDone();   // finished: show what's left
     wasActive.current = active;
   }, [active, onDone]);
-  const color = job.status === "failed" ? "border-red-900 bg-red-950/40 text-red-200"
-    : active ? "border-sky-900 bg-sky-950/40 text-sky-200" : "border-zinc-800 bg-zinc-950/40 text-zinc-300";
+  const color = job.status === "failed" ? "border-danger/40 bg-danger-bg text-danger"
+    : active ? "border-info/40 bg-info-bg text-info" : "border-border bg-bg/40 text-text";
   return (
     <div className={`mb-3 rounded-md border px-4 py-3 text-sm ${color}`} role="status" data-testid="delete-job">
       <div className="flex flex-wrap items-center gap-3">
@@ -221,7 +221,7 @@ function DeleteJobStatus({ job, onDone }: { job: DeleteJob; onDone: () => void }
         )}
       </div>
       {job.status === "running" && job.progress != null && (
-        <div className="mt-2 h-1.5 rounded bg-zinc-800"><div className="h-full rounded bg-sky-500" style={{ width: `${job.progress * 100}%` }} /></div>
+        <div className="mt-2 h-1.5 rounded bg-surface-raised"><div className="h-full rounded bg-accent" style={{ width: `${job.progress * 100}%` }} /></div>
       )}
       {(job.error || job.message) && <p className="mt-1 whitespace-pre-line text-xs opacity-90">{job.error || job.message}</p>}
     </div>

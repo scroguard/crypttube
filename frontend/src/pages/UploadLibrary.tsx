@@ -107,10 +107,10 @@ export default function UploadLibrary() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Link to="/uploads" className="text-sm text-zinc-400 hover:text-white">← My uploads</Link>
+        <Link to="/uploads" className="text-sm text-text-muted hover:text-text">← My uploads</Link>
         <h1 className="text-2xl font-semibold">{lib.name}</h1>
         <VisibilityBadge library={lib} />
-        <span className="mr-auto text-sm text-zinc-500">
+        <span className="mr-auto text-sm text-text-subtle">
           {plural(lib.scene_count, "video")} · {plural(lib.image_count, "image")} · {formatBytes(lib.bytes)}
         </span>
         <QuotaBar used={libs.data.used_bytes} quota={libs.data.quota_bytes} />
@@ -128,15 +128,15 @@ export default function UploadLibrary() {
            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
            onDragLeave={() => setDragging(false)}
            onDrop={async (e) => { e.preventDefault(); setDragging(false); uploader.add(await filesFromDrop(e.dataTransfer), folder); }}
-           className={`mb-4 rounded-lg border-2 border-dashed p-6 text-center transition-colors ${dragging ? "border-accent bg-accent/10" : "border-zinc-700"}`}>
-        <p className="text-sm text-zinc-300">Drop videos, images, zip archives or whole folders here</p>
+           className={`mb-4 rounded-lg border-2 border-dashed p-6 text-center transition-colors ${dragging ? "border-accent bg-accent/10" : "border-border-strong"}`}>
+        <p className="text-sm text-text">Drop videos, images, zip archives or whole folders here</p>
         <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
           <button className="btn-primary" onClick={() => fileInput.current?.click()}>Choose files</button>
           <button className="btn-ghost" onClick={() => folderInput.current?.click()}>Choose a folder</button>
           <input className="input w-56" placeholder="Into subfolder (optional)" value={folder}
                  onChange={(e) => setFolder(e.target.value)} aria-label="Destination subfolder" />
         </div>
-        <p className="mt-2 text-xs text-zinc-500">A folder of images becomes a gallery. Uploads are indexed automatically.</p>
+        <p className="mt-2 text-xs text-text-subtle">A folder of images becomes a gallery. Uploads are indexed automatically.</p>
         <input ref={fileInput} type="file" multiple hidden data-testid="file-input"
                onChange={(e) => { if (e.target.files) uploader.add(filesFromInput(e.target.files), folder); e.target.value = ""; }} />
         <input ref={folderInput} type="file" multiple hidden
@@ -150,20 +150,20 @@ export default function UploadLibrary() {
             <span className="mr-auto font-medium">
               {uploader.busy ? "Uploading…" : "Uploads finished"} ({uploader.queue.filter((q) => q.status === "done").length}/{uploader.queue.length})
             </span>
-            {!uploader.busy && <button className="text-xs text-zinc-400 underline" onClick={uploader.clear}>clear</button>}
+            {!uploader.busy && <button className="text-xs text-text-muted underline" onClick={uploader.clear}>clear</button>}
           </div>
           <ul className="space-y-1.5">
             {uploader.queue.map((it) => (
               <li key={it.key} className="text-xs" data-testid="upload-item" data-status={it.status}>
                 <div className="flex gap-2">
                   <span className="mr-auto truncate font-mono">{it.path}</span>
-                  <span className="text-zinc-500">{formatBytes(it.file.size)}</span>
-                  <span className={it.status === "error" || it.status === "skipped" ? "text-red-400" : it.status === "done" ? "text-emerald-400" : "text-zinc-400"}>
+                  <span className="font-mono text-text-subtle">{formatBytes(it.file.size)}</span>
+                  <span className={it.status === "error" || it.status === "skipped" ? "text-danger" : it.status === "done" ? "text-success" : "text-text-muted"}>
                     {it.status === "uploading" ? `${Math.round(it.progress * 100)}%` : it.error ?? it.status}
                   </span>
                 </div>
                 {it.status === "uploading" && (
-                  <div className="mt-0.5 h-1 rounded bg-zinc-800"><div className="h-full rounded bg-accent" style={{ width: `${it.progress * 100}%` }} /></div>
+                  <div className="mt-0.5 h-1 rounded bg-surface-raised"><div className="h-full rounded bg-accent" style={{ width: `${it.progress * 100}%` }} /></div>
                 )}
               </li>
             ))}
@@ -189,14 +189,14 @@ function FileList({ libraryId }: { libraryId: number }) {
   if (files.isError) return <ErrorBox error={files.error} />;
   if (!files.data.length) return <Empty>No files yet.</Empty>;
   return (
-    <div className="card divide-y divide-zinc-800">
+    <div className="card divide-y divide-border">
       {files.data.map((f) => (
         <div key={f.path} className="flex items-center gap-3 px-4 py-2 text-sm" data-testid="library-file">
           {f.scene_id
-            ? <Link to={`/scenes/${f.scene_id}`} className="mr-auto truncate font-mono hover:text-accent-hover">{f.path}</Link>
+            ? <Link to={`/scenes/${f.scene_id}`} className="mr-auto truncate font-mono hover:text-link">{f.path}</Link>
             : <span className="mr-auto truncate font-mono">{f.path}</span>}
-          {!f.indexed && <span className="chip bg-amber-950 text-amber-300" title="Still being processed, or the file couldn't be read as media">not indexed</span>}
-          <span className="text-xs text-zinc-500">{formatBytes(f.size)}</span>
+          {!f.indexed && <span className="chip bg-warning-bg text-warning" title="Still being processed, or the file couldn't be read as media">not indexed</span>}
+          <span className="font-mono text-xs text-text-subtle">{formatBytes(f.size)}</span>
           <button className="btn-ghost py-1 text-xs" disabled={del.isPending}
                   onClick={() => confirm(`Delete ${f.path}?`) && del.mutate(f.path)}>Delete</button>
         </div>

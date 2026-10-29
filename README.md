@@ -94,7 +94,18 @@ other stacks on the same Docker host.
 
 React 19 SPA (`frontend/`), TanStack Query for caching, react-virtuoso for virtualized
 window-scrolled grids (only on-screen cards exist in the DOM; Back restores the exact
-scroll position), filters kept in the URL. Highlights:
+scroll position), filters kept in the URL.
+
+**Theme.** Colors are named by role, not hue (`bg`, `surface`, `text-muted`, `link`,
+`danger-solid`, …): 30 `--color-*` variables in `frontend/src/index.css`, used as Tailwind
+classes such as `bg-surface` or `text-link`. Tailwind's own palette is switched off, so a
+component can't use a raw color. The default values are the brand's "Crypt" theme. The
+fonts (Chakra Petch for headings and small labels, Inter for text, JetBrains Mono for
+paths, durations and sizes) are bundled with the app, never loaded from a font service;
+their licences are served at `/fonts/`. The logo is drawn inline (`components/Logo.tsx`), so
+it follows the theme.
+
+Highlights:
 
 - **Player**: picks direct play / remux / transcode by asking the browser what it can
   decode, falls back automatically on error, manual quality menu (Original, 1080p…360p),

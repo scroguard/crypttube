@@ -63,7 +63,7 @@ export function ContentEditModal({ kind, item, onClose }: {
         {location && (
           <div className="sm:col-span-2">
             <span className="label">{kind === "galleries" ? "Location" : "File"}</span>
-            <code className="block select-all break-all rounded-md bg-zinc-950 px-3 py-2 text-xs text-zinc-300" data-testid="file-location">{location}</code>
+            <code className="block select-all break-all rounded-md bg-bg px-3 py-2 text-xs text-text" data-testid="file-location">{location}</code>
           </div>
         )}
         <div className="sm:col-span-2"><Field label="Title"><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></Field></div>

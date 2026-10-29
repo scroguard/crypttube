@@ -62,18 +62,18 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
     if (!list.length) return null;
     return (
       <div className="flex flex-wrap items-center gap-1.5" data-testid={`assigned-${key}`}>
-        <span className="text-xs uppercase tracking-wide text-zinc-500">{label}</span>
+        <span className="text-xs uppercase tracking-wide text-text-subtle">{label}</span>
         {list.slice(0, MAX_CHIPS).map((a) => (
-          <span key={a.id} className={`chip ${key === "performers" ? "bg-accent/20 text-rose-200" : key === "studios" ? "bg-sky-900/50 text-sky-200" : ""}`}
+          <span key={a.id} className={`chip ${key === "performers" ? "bg-accent/20 text-text" : key === "studios" ? "bg-info-bg text-info" : ""}`}
                 title={a.count === ids.length ? "On every selected item" : `On ${a.count} of the ${ids.length} selected items`}>
             {a.name}
-            <span className="text-zinc-400">{a.count >= ids.length ? "all" : `${a.count}/${ids.length}`}</span>
-            <button type="button" className="text-zinc-400 hover:text-white" disabled={write.isPending}
+            <span className="text-text-muted">{a.count >= ids.length ? "all" : `${a.count}/${ids.length}`}</span>
+            <button type="button" className="text-text-muted hover:text-text" disabled={write.isPending}
                     aria-label={`Remove ${a.name} from the selection`}
                     onClick={() => run(key === "studios" ? { clear_studio_ids: [a.id] } : { [key]: { mode: "remove", ids: [a.id] } })}>×</button>
           </span>
         ))}
-        {list.length > MAX_CHIPS && <span className="text-xs text-zinc-500">and {list.length - MAX_CHIPS} more</span>}
+        {list.length > MAX_CHIPS && <span className="text-xs text-text-subtle">and {list.length - MAX_CHIPS} more</span>}
       </div>
     );
   };
@@ -95,10 +95,10 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
   return (
     <>
     <div style={{ height: height + 16 }} aria-hidden data-testid="bulk-bar-spacer" />
-    <div ref={bar} className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-700 bg-zinc-900/95 p-3 backdrop-blur" data-testid="bulk-bar" data-no-marquee>
+    <div ref={bar} className="fixed inset-x-0 bottom-0 z-40 border-t border-border-strong bg-surface/95 p-3 backdrop-blur" data-testid="bulk-bar" data-no-marquee>
       {(assigned.data?.tags.length || assigned.data?.performers.length || assigned.data?.studios.length) ? (
         <div className="mx-auto mb-2 flex max-h-24 max-w-[1920px] flex-wrap items-center gap-x-5 gap-y-1.5 overflow-y-auto" data-testid="assigned">
-          <span className="text-xs text-zinc-400">Already assigned (× removes it from the selection):</span>
+          <span className="text-xs text-text-muted">Already assigned (× removes it from the selection):</span>
           {chips("performers", "Performers")}
           {chips("studios", "Studio")}
           {chips("tags", "Tags")}
@@ -107,8 +107,8 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
       <div className="mx-auto flex max-w-[1920px] flex-wrap items-end gap-3">
         <div className="text-sm">
           <strong>{ids.length.toLocaleString()}</strong> selected
-          <button className="ml-2 text-xs text-zinc-400 underline" onClick={onSelectAll}>select all shown</button>
-          <button className="ml-2 text-xs text-zinc-400 underline" onClick={onDone}>clear</button>
+          <button className="ml-2 text-xs text-text-muted underline" onClick={onSelectAll}>select all shown</button>
+          <button className="ml-2 text-xs text-text-muted underline" onClick={onDone}>clear</button>
         </div>
         <div className="flex items-end gap-2 max-sm:flex-wrap" role="group" aria-label="Tags">
           <div className="w-64"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} placeholder="Tags…" /></div>
@@ -137,11 +137,11 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
         )}
         <DeleteMediaButton kind={kind} ids={ids} onDeleted={onDone} />
         {write.isPending && (
-          <span className="text-sm text-zinc-400" role="status" data-testid="bulk-progress">
+          <span className="text-sm text-text-muted" role="status" data-testid="bulk-progress">
             Applying…{ids.length > CHUNK && ` ${done.toLocaleString()} of ${ids.length.toLocaleString()}`}
           </span>
         )}
-        {write.isSuccess && !write.isPending && <span className="text-sm text-emerald-400">Done</span>}
+        {write.isSuccess && !write.isPending && <span className="text-sm text-success">Done</span>}
         {write.isError && <ErrorBox error={write.error} />}
       </div>
     </div>

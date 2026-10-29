@@ -67,14 +67,14 @@ export default function Home() {
       </div>
       {editing && <HomeEditor config={home.data} onClose={() => setEditing(false)} />}
       {!editing && sections.length === 0 && (
-        <p className="py-16 text-center text-sm text-zinc-500" data-testid="home-empty">
+        <p className="py-16 text-center text-sm text-text-subtle" data-testid="home-empty">
           Your home page has no sections. Use Customize to add some.
         </p>
       )}
       {!editing && nothing && (
-        <p className="py-16 text-center text-sm text-zinc-500" data-testid="home-empty">
+        <p className="py-16 text-center text-sm text-text-subtle" data-testid="home-empty">
           Nothing to show yet.{" "}
-          {isAdmin ? <>Add a library under <Link to="/admin/libraries" className="text-accent-hover hover:underline">Admin → Libraries</Link>.</>
+          {isAdmin ? <>Add a library under <Link to="/admin/libraries" className="text-link hover:underline">Admin → Libraries</Link>.</>
                    : "Content will appear here once it has been added."}
         </p>
       )}
@@ -106,9 +106,9 @@ function SectionView({ section, label, onFilled, openImage }: {
   if (!src || !items.length) return null;   // empty sections stay out of the way
   return (
     <section className="mb-8" aria-label={label} data-testid="home-section">
-      <header className="mb-3 flex items-baseline gap-3 border-b border-zinc-800 pb-2">
+      <header className="mb-3 flex items-baseline gap-3 border-b border-border pb-2">
         <h2 className="text-lg font-semibold">{label}</h2>
-        {src.seeAll && <Link to={src.seeAll} className="ml-auto text-sm text-accent-hover hover:underline">See all →</Link>}
+        {src.seeAll && <Link to={src.seeAll} className="ml-auto text-sm text-link hover:underline">See all →</Link>}
       </header>
       <div className={LAYOUTS[src.layout]}>
         {items.map((it, i) => <div key={it.id}>{src.render(it, items, i, openImage)}</div>)}
@@ -138,19 +138,19 @@ function HomeEditor({ config, onClose }: { config: HomeConfig; onClose: () => vo
   return (
     <div className="card mb-8 p-4" data-testid="home-editor">
       <h2 className="mb-1 font-semibold">Customize your home page</h2>
-      <p className="mb-4 text-sm text-zinc-400">Pick what you want to see and in which order. This only affects your account.</p>
+      <p className="mb-4 text-sm text-text-muted">Pick what you want to see and in which order. This only affects your account.</p>
       <ol className="space-y-2">
         {sections.map((s, i) => (
-          <li key={i} className="flex flex-wrap items-center gap-2 rounded-md bg-zinc-950 p-2" data-testid="home-row">
+          <li key={i} className="flex flex-wrap items-center gap-2 rounded-md bg-bg p-2" data-testid="home-row">
             <div className="flex flex-col">
-              <button className="px-2 text-xs text-zinc-400 hover:text-white disabled:opacity-30" disabled={i === 0}
+              <button className="px-2 text-xs text-text-muted hover:text-text disabled:opacity-30" disabled={i === 0}
                       onClick={() => move(i, -1)} aria-label={`Move ${labels[s.type]?.label ?? s.type} up`}>▲</button>
-              <button className="px-2 text-xs text-zinc-400 hover:text-white disabled:opacity-30" disabled={i === sections.length - 1}
+              <button className="px-2 text-xs text-text-muted hover:text-text disabled:opacity-30" disabled={i === sections.length - 1}
                       onClick={() => move(i, 1)} aria-label={`Move ${labels[s.type]?.label ?? s.type} down`}>▼</button>
             </div>
             <div className="min-w-0 flex-1">
               <div className="font-medium">{labels[s.type]?.label ?? s.type}</div>
-              <div className="truncate text-xs text-zinc-500">{labels[s.type]?.description}</div>
+              <div className="truncate text-xs text-text-subtle">{labels[s.type]?.description}</div>
             </div>
             <input className="input w-48" placeholder="Custom heading (optional)" maxLength={60} value={s.title ?? ""}
                    onChange={(e) => patch(i, { title: e.target.value || null })} aria-label="Custom heading" />
@@ -161,7 +161,7 @@ function HomeEditor({ config, onClose }: { config: HomeConfig; onClose: () => vo
                     aria-label={`Remove ${labels[s.type]?.label ?? s.type}`}>Remove</button>
           </li>
         ))}
-        {!sections.length && <li className="py-4 text-center text-sm text-zinc-500">No sections. Add one below.</li>}
+        {!sections.length && <li className="py-4 text-center text-sm text-text-subtle">No sections. Add one below.</li>}
       </ol>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <select className="input w-auto" value={adding} onChange={(e) => setAdding(e.target.value)} aria-label="Section to add">

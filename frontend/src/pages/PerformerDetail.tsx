@@ -37,7 +37,7 @@ export default function PerformerDetail() {
     <div>
       <div className="flex flex-col gap-6 md:flex-row">
         <div className="w-full shrink-0 md:w-64">
-          <div className="aspect-[2/3] overflow-hidden rounded-lg bg-zinc-900">
+          <div className="aspect-[2/3] overflow-hidden rounded-lg bg-surface">
             {p.image_url ? <img src={p.image_url} alt="" className="h-full w-full object-cover" /> : <Initials name={p.name} className="h-full w-full text-5xl" />}
           </div>
           {canEdit && <div className="mt-2"><EntityImageControls kind="performers" id={id} hasImage={!!p.image_url} /></div>}
@@ -45,20 +45,20 @@ export default function PerformerDetail() {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-semibold">{p.name}</h1>
-            {p.disambiguation && <span className="text-zinc-500">({p.disambiguation})</span>}
-            <button className={`text-2xl hover:text-accent-hover ${p.favorite ? "text-accent" : "text-zinc-600"}`}
+            {p.disambiguation && <span className="text-text-subtle">({p.disambiguation})</span>}
+            <button className={`text-2xl hover:text-link ${p.favorite ? "text-link" : "text-text-subtle"}`}
                     onClick={() => favorite.mutate(!p.favorite)} aria-pressed={p.favorite}
                     aria-label={p.favorite ? "Remove from my favourites" : "Add to my favourites"}
                     title={p.favorite ? "One of your favourites" : "Add to your favourites"}>♥</button>
             <Rating value={p.rating} onChange={canEdit ? (rating) => patch.mutate({ rating }) : undefined} />
             {canEdit && <div className="ml-auto flex gap-2"><button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button><DeleteEntityButton kind="performers" id={id} name={p.name} /></div>}
           </div>
-          {p.aliases.length > 0 && <p className="mt-1 text-sm text-zinc-400">Also known as {p.aliases.join(", ")}</p>}
+          {p.aliases.length > 0 && <p className="mt-1 text-sm text-text-muted">Also known as {p.aliases.join(", ")}</p>}
           <dl className="mt-4 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
             {facts.filter(([, v]) => v).map(([k, v]) => <Row key={k} label={k}>{v}</Row>)}
           </dl>
           <div className="mt-4"><Chips items={p.tags} to="tags" /></div>
-          {p.details && <p className="mt-4 whitespace-pre-line text-sm text-zinc-300">{p.details}</p>}
+          {p.details && <p className="mt-4 whitespace-pre-line text-sm text-text">{p.details}</p>}
         </div>
       </div>
       <EntityContent filter={{ performer_ids: [id] }} scope="this performer" />

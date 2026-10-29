@@ -38,7 +38,7 @@ export function SortControl({ sorts, sort, desc, onChange }: {
       <select className="input w-auto rounded-r-none" value={sort} onChange={(e) => onChange(e.target.value, desc)} aria-label="Sort by">
         {Object.entries(sorts).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
       </select>
-      <button className="btn-ghost rounded-l-none border border-l-0 border-zinc-700" onClick={() => onChange(sort, !desc)}
+      <button className="btn-ghost rounded-l-none border border-l-0 border-border-strong" onClick={() => onChange(sort, !desc)}
               aria-label={desc ? "Descending" : "Ascending"} title={desc ? "Descending" : "Ascending"}>
         {desc ? "↓" : "↑"}
       </button>
@@ -65,7 +65,7 @@ export function Toolbar({ children }: { children: ReactNode }) {
   }, []);
   return (
     <div ref={bar} data-testid="toolbar"
-         className="sticky top-14 z-30 -mx-4 mb-4 flex flex-wrap items-center gap-2 bg-zinc-950/90 px-4 py-2 backdrop-blur">
+         className="sticky top-14 z-30 -mx-4 mb-4 flex flex-wrap items-center gap-2 bg-bg/90 px-4 py-2 backdrop-blur">
       {children}
     </div>
   );
