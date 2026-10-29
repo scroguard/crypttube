@@ -109,6 +109,11 @@ services:
       # Behind a reverse proxy: its own address (see README), so the visitor's own
       # address is used for the login throttle instead of the proxy's.
       TRUSTED_PROXY: ${TRUSTED_PROXY:-127.0.0.1}
+    # Your own stylesheet (README: "Theme"), loaded after the app's; without
+    # CUSTOM_CSS_FILE it is the repo's empty one.
+    configs:
+      - source: custom_css
+        target: /usr/share/nginx/html/custom.css
     # WEB_BIND chooses the host interface: 127.0.0.1 (default, this machine only),
     # 0.0.0.0 (all interfaces) or a specific LAN address. A reverse proxy running in
     # Docker can instead reach this container directly: see compose.proxy.yaml.
@@ -139,6 +144,10 @@ networks:
 secrets:
   uploads_key:
     file: ${UPLOADS_KEY_FILE:-/dev/null}
+
+configs:
+  custom_css:
+    file: ${CUSTOM_CSS_FILE:-./frontend/public/custom.css}
 
 # Named explicitly so the data survives a project rename (the project used to be called
 # goon-streamer, and Compose prefixes volume names with the project name). VOLUME_PREFIX
