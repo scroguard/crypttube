@@ -68,6 +68,9 @@
   session, which relays both ways). Roles, preset values and UI rules: Ink's handoff v0.1
   and update v0.2 (presets Crypt, Crypt Lime, Ossuary; dark only). Brand source files are in
   `items from ink/` (untracked, excluded locally in `.git/info/exclude`).
+- Watched folders: `app/folder_links.py` `apply` is the only writer (scanner, Move, backfill
+  job). It runs in the indexing transaction, so a failure leaves the file "new" for the next
+  scan. Links are checked against their creator's rights at tag time.
 - CodeRabbit's GitHub app is on the Free plan (summary only). For line reviews, run the
   CLI: `coderabbit review --agent --committed --base main`.
 - Full-repo CodeRabbit review: an empty orphan base branch plus a snapshot branch on top of

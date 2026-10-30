@@ -6,6 +6,8 @@ Guarantees:
 - Files that vanish are soft-marked missing, never deleted, so user metadata survives
   an unmounted drive or a file that is being moved.
 - Moved/renamed files are matched by (oshash, size) and keep their scene/image rows.
+- Files that arrive in a folder linked to a performer or studio get tagged, in the same
+  transaction that indexes them (app/folder_links.py).
 - Files modified within `settle_seconds` are skipped (likely still being copied) and
   reported back so the caller can schedule a delayed re-scan.
 """
@@ -20,7 +22,7 @@ from pathlib import Path
 
 import asyncpg
 
-from app import crypto, media
+from app import crypto, folder_links, media
 from app.jobs import JobContext
 
 log = logging.getLogger(__name__)
@@ -51,6 +53,7 @@ class ScanStats:
     failed: int = 0
     unsettled: int = 0
     unreadable: int = 0   # known unreadable files, unchanged since: skipped
+    tagged: int = 0       # arrivals tagged through a linked folder
     errors: list[str] = field(default_factory=list)
     # scenes whose content is new or changed, i.e. that need generated assets
     scene_ids: list[int] = field(default_factory=list)
@@ -128,6 +131,8 @@ class Scanner:
         self._affected_galleries: set[int] = set()
         self._failures: list[tuple[Entry, str]] = []
         self._indexed: list[str] = []
+        self._has_links = False
+        self._moved_from: dict[int, str] = {}
 
     async def scan(self, library_id: int, subpath: str | None = None) -> ScanStats:
         lib = await self.pool.fetchrow("SELECT * FROM library_paths WHERE id = $1", library_id)
@@ -143,6 +148,8 @@ class Scanner:
         if not _is_within(root, lib_root):
             raise ScanError(f"{root} is outside library {lib_root}")
 
+        self._has_links = await self.pool.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM folder_links WHERE library_id = $1)", library_id)
         entries = await asyncio.to_thread(
             walk, root, lib_root, list(lib["exclude_patterns"]), self.generated_dir
         )
@@ -271,7 +278,7 @@ class Scanner:
         # missing file is a different file, not a move. Otherwise a scene and its
         # metadata could be pulled across the privacy boundary between owners.
         candidates = await self.pool.fetch(
-            """SELECT f.id, f.size, f.oshash FROM files f
+            """SELECT f.id, f.path, f.size, f.oshash FROM files f
                JOIN library_paths l ON l.id = f.library_id
                WHERE f.zip_file_id IS NULL AND f.oshash = ANY($1)
                  AND (f.missing_since IS NOT NULL OR f.id = ANY($2))
@@ -279,20 +286,21 @@ class Scanner:
                      (SELECT owner_id FROM library_paths WHERE id = $3)""",
             hashes, [r["id"] for r in vanished], library_id,
         )
-        pool: dict[tuple[str, int], list[int]] = {}
+        pool: dict[tuple[str, int], list[tuple[int, str]]] = {}
         for c in candidates:
-            pool.setdefault((c["oshash"], c["size"]), []).append(c["id"])
+            pool.setdefault((c["oshash"], c["size"]), []).append((c["id"], c["path"]))
         moved = {}
         for e, h in new_hashed:
             ids = pool.get((h, e.size))
             if ids:
-                fid = ids.pop()
+                fid, old_path = ids.pop()
                 await self.pool.execute(
                     """UPDATE files SET path = $2, library_id = $3, mod_time = $4, missing_since = NULL
                        WHERE id = $1""",
                     fid, e.path, library_id, e.mod_time,
                 )
                 moved[e.path] = fid
+                self._moved_from[fid] = old_path
         return moved
 
     async def _process(self, e: Entry, file_id, library_id, folder_galleries, oshash, how):
@@ -333,6 +341,8 @@ class Scanner:
                     await self._upsert_image(conn, file_id, e.path, probe, gallery_id)
                 else:
                     await self._upsert_archive(conn, file_id, library_id, e, probe)
+                if self._has_links and how != "updated":
+                    self.stats.tagged += await folder_links.apply(conn, file_id, self._moved_from.get(file_id))
             setattr(self.stats, how, getattr(self.stats, how) + 1)
             self._indexed.append(e.path)
         except (media.ProbeError, OSError, ValueError, asyncpg.PostgresError) as exc:

@@ -1420,3 +1420,24 @@ test("admin theme: a preset saved for everyone, contrast warnings, back to built
   await page.goto("/scenes");
   expect(await bodyBg()).toBe("rgb(11, 11, 16)");
 });
+
+test("watched folder: link a folder to a performer and tag what's already there", async () => {
+  const made = await page.request.post("/api/performers", { data: { name: "Folder Performer" }, headers: { "X-Requested-With": "e2e" } });
+  expect(made.ok()).toBeTruthy();
+  const { id } = await made.json();
+  await page.goto(`/performers/${id}`);
+  const section = page.getByTestId("folder-links");
+  await section.getByRole("button", { name: "Add folder" }).click();
+  const dialog = page.getByRole("dialog", { name: "Watch a folder" });
+  await dialog.getByRole("button", { name: /^Open / }).first().click();
+  await dialog.getByRole("button", { name: "Open videos" }).click();
+  await expect(dialog.getByRole("radio", { name: "New files only" })).toBeChecked();
+  await dialog.getByRole("radio", { name: /All files/ }).check();
+  await dialog.getByRole("button", { name: "Watch this folder" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(section.locator("code")).toContainText("videos");
+  await expect.poll(async () => (await (await page.request.get(`/api/performers/${id}`)).json()).scene_count,
+                    { timeout: 30_000 }).toBeGreaterThan(0);
+  await section.getByRole("button", { name: /Stop watching/ }).click();
+  await expect(section.locator("code")).toHaveCount(0);
+});

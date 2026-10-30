@@ -8,6 +8,7 @@ import { EntityImageControls, FormButtons } from "../components/EditForms";
 import EntityContent from "../components/EntityContent";
 import { DeleteEntityButton } from "../components/EntityDialogs";
 import EntityPicker from "../components/EntityPicker";
+import FolderLinks from "../components/FolderLinks";
 import { ErrorBox, Field, Modal, Rating, Spinner } from "../components/ui";
 
 export default function StudioDetail() {
@@ -32,6 +33,7 @@ export default function StudioDetail() {
           {s.url && <a href={s.url} target="_blank" rel="noreferrer noopener" className="text-sm text-link hover:underline">{s.url}</a>}
           {s.children.length > 0 && <div className="mt-3"><span className="label">Sub-studios</span><Chips items={s.children} to="studios" /></div>}
           {s.details && <p className="mt-3 whitespace-pre-line text-sm text-text">{s.details}</p>}
+          <FolderLinks kind="studios" id={id} />
         </div>
         {canEdit && (
           <div className="flex flex-col items-end gap-2">

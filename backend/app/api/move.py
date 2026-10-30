@@ -18,7 +18,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import counts
+from app import counts, folder_links
 from app.acl import visible
 from app.auth import User, require_user
 from app.config import get_settings
@@ -211,6 +211,9 @@ async def move(body: MoveRequest, request: Request, user: User = Depends(require
                 continue
             moved += 1
             touched_libs.add(r["library_id"])
+            async with pool.acquire() as conn, conn.transaction():
+                for file_id, old_path in files:
+                    await folder_links.apply(conn, file_id, old_path)
             if r["owner_id"] is not None:
                 user_dirs.append((r["path"], next(x["path"] for x in roots if x["library_id"] == r["library_id"])))
             if kind == "image":

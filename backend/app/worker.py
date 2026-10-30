@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import asyncpg
 
-from app import counts, crypto, generated, jobs, maintenance
+from app import counts, crypto, folder_links, generated, jobs, maintenance
 from app.config import Settings, get_settings
 from app.db import create_pool, migrate
 from app.deletion import DeleteError
@@ -431,7 +431,11 @@ def _encrypt_existing(paths) -> int:
     return n
 
 
-HANDLERS = {"encrypt_uploads": handle_encrypt_uploads, "delete_duplicates": handle_delete_duplicates, "scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
+async def handle_folder_link_backfill(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+    return await folder_links.backfill(pool, ctx, payload["link_id"])
+
+
+HANDLERS = {folder_links.JOB_KIND: handle_folder_link_backfill, "encrypt_uploads": handle_encrypt_uploads, "delete_duplicates": handle_delete_duplicates, "scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
             maintenance.CLEANUP_KIND: handle_cleanup, maintenance.JOB_KIND: handle_maintenance}
 
 SCHEDULE_CHECK_SECONDS = 60

@@ -8,6 +8,7 @@ import { EntityImageControls, FormButtons } from "../components/EditForms";
 import EntityContent from "../components/EntityContent";
 import { DeleteEntityButton } from "../components/EntityDialogs";
 import EntityPicker, { creator } from "../components/EntityPicker";
+import FolderLinks from "../components/FolderLinks";
 import { ErrorBox, Field, Initials, Modal, Rating, Spinner } from "../components/ui";
 import { age, formatDate, GENDERS } from "../lib/format";
 import { Row } from "./SceneDetail";
@@ -59,6 +60,7 @@ export default function PerformerDetail() {
           </dl>
           <div className="mt-4"><Chips items={p.tags} to="tags" /></div>
           {p.details && <p className="mt-4 whitespace-pre-line text-sm text-text">{p.details}</p>}
+          <FolderLinks kind="performers" id={id} />
         </div>
       </div>
       <EntityContent filter={{ performer_ids: [id] }} scope="this performer" />
