@@ -40,7 +40,10 @@ services:
 volumes:
   pgdata:
     name: crypttube-e2e_pgdata
+    external: false   # never the real install's EXISTING_VOLUMES
   generated:
     name: crypttube-e2e_generated
+    external: false   # never the real install's EXISTING_VOLUMES
   uploads:
     name: crypttube-e2e_uploads
+    external: false   # never the real install's EXISTING_VOLUMES
