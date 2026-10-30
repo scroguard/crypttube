@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import folder_links, jobs
@@ -83,14 +84,15 @@ async def list_links(kind: Kind, entity_id: int, request: Request, acl: Acl = De
     pool = request.app.state.pool
     roots = {r["library_id"]: r for r in await _roots(pool, acl)}
     rows = await pool.fetch(
-        f"""SELECT w.id, w.path, w.library_id FROM folder_links w
+        f"""SELECT w.id, w.path, w.library_id, w.removing_at IS NOT NULL AS removing FROM folder_links w
             WHERE w.{COLUMN[kind]} = $1 AND w.library_id = ANY($2::bigint[])
             ORDER BY w.path""", entity_id, list(roots))
     missing = await asyncio.to_thread(lambda: {r["id"]: not os.path.isdir(r["path"]) for r in rows})
     return {"can_link": bool(roots), "links": [
         {"id": r["id"], "path": r["path"], "library": roots[r["library_id"]]["name"],
          "relative": os.path.relpath(r["path"], roots[r["library_id"]]["path"]),
-         "watching": roots[r["library_id"]]["watching"], "missing": missing[r["id"]]} for r in rows]}
+         "watching": roots[r["library_id"]]["watching"], "missing": missing[r["id"]],
+         "removing": r["removing"]} for r in rows]}
 
 
 class LinkBody(BaseModel):
@@ -117,6 +119,9 @@ async def add_link(kind: Kind, entity_id: int, body: LinkBody, request: Request,
                                     AND (path = $2 OR starts_with(path, $2 || '/') OR starts_with($2, path || '/')))""",
                 entity_id, str(path)):
             raise HTTPException(409, "another studio is already linked to this folder, or to one above or below it")
+        if await conn.fetchval(f"SELECT removing_at IS NOT NULL FROM folder_links WHERE {column} = $1 AND path = $2",
+                               entity_id, str(path)):
+            raise HTTPException(409, "this folder's tags are still being removed; try again when that's done")
         link_id = await conn.fetchval(
             f"""INSERT INTO folder_links ({column}, library_id, path, created_by) VALUES ($1, $2, $3, $4)
                 ON CONFLICT ({column}, path) WHERE {column} IS NOT NULL DO UPDATE SET created_by = EXCLUDED.created_by
@@ -128,17 +133,38 @@ async def add_link(kind: Kind, entity_id: int, body: LinkBody, request: Request,
     return {"id": link_id, "path": str(path), "job_id": job_id}
 
 
-@router.delete("/{kind}/{entity_id}/{link_id}", status_code=204)
-async def remove_link(kind: Kind, entity_id: int, link_id: int, request: Request,
-                      acl: Acl = Depends(get_acl)) -> Response:
-    """Stops future tagging. Tags already given stay."""
+async def _own_link(request: Request, acl: Acl, kind: Kind, entity_id: int, link_id: int):
     await _require_entity(request, acl, kind, entity_id)
     pool = request.app.state.pool
-    roots = await _roots(pool, acl)
-    removed = await pool.fetchval(
-        f"""DELETE FROM folder_links WHERE id = $1 AND {COLUMN[kind]} = $2
-            AND library_id = ANY($3::bigint[]) RETURNING id""",
-        link_id, entity_id, [r["library_id"] for r in roots])
-    if removed is None:
+    link = await pool.fetchrow(
+        f"""SELECT * FROM folder_links WHERE id = $1 AND {COLUMN[kind]} = $2 AND library_id = ANY($3::bigint[])""",
+        link_id, entity_id, [r["library_id"] for r in await _roots(pool, acl)])
+    if link is None:
         raise HTTPException(404, "link not found")
+    return link
+
+
+@router.get("/{kind}/{entity_id}/{link_id}/impact")
+async def link_impact(kind: Kind, entity_id: int, link_id: int, request: Request, acl: Acl = Depends(get_acl)) -> dict:
+    """What choosing to remove this link's tags would do, in files."""
+    link = await _own_link(request, acl, kind, entity_id, link_id)
+    return await folder_links.impact(request.app.state.pool, link)
+
+
+@router.delete("/{kind}/{entity_id}/{link_id}")
+async def remove_link(kind: Kind, entity_id: int, link_id: int, request: Request,
+                      tags: Literal["keep", "remove"] = "keep", acl: Acl = Depends(get_acl)) -> Response:
+    """Stop watching a folder, leaving its tags ("keep"), or taking back the tags it added
+    ("remove"), in the background. New tagging stops at once either way; asking to remove
+    again restarts a removal that stopped."""
+    link = await _own_link(request, acl, kind, entity_id, link_id)
+    pool = request.app.state.pool
+    if tags == "remove":
+        await pool.execute("UPDATE folder_links SET removing_at = coalesce(removing_at, now()) WHERE id = $1", link_id)
+        job_id = await jobs.enqueue(pool, folder_links.REMOVE_JOB_KIND, {"link_id": link_id},
+                                    dedupe_key=f"{folder_links.REMOVE_JOB_KIND}:{link_id}")
+        return JSONResponse({"job_id": job_id}, status_code=202)
+    if link["removing_at"] is not None:
+        raise HTTPException(409, "this folder's tags are already being removed")
+    await pool.execute("DELETE FROM folder_links WHERE id = $1", link_id)
     return Response(status_code=204)

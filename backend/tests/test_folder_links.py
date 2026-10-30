@@ -259,6 +259,214 @@ async def test_a_deleted_folder_is_reported_and_the_link_kept(app, client, lib):
     assert len(links) == 1 and links[0]["missing"] is True
 
 
+async def unlink(client, kind, entity_id, made, tags="remove"):
+    r = await client.delete(f"/api/folder-links/{kind}/{entity_id}/{made['id']}", params={"tags": tags})
+    assert r.status_code == (202 if tags == "remove" else 204), r.text
+
+
+async def impact(client, kind, entity_id, made):
+    r = await client.get(f"/api/folder-links/{kind}/{entity_id}/{made['id']}/impact")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def test_remove_takes_back_what_the_link_added_only(app, client, lib, sample_media):
+    lid, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    # set by hand before the link
+    by_hand = await scene_of(pool, root / "videos" / "h264.mp4")
+    await pool.execute("INSERT INTO scene_performers (scene_id, performer_id) VALUES ($1, $2)", by_hand["id"], a)
+    made = await link(client, "performers", a, root / "videos", "all")
+    await drain(app)
+    shutil.copy(sample_media / "h264.mp4", root / "videos" / "new.mp4")
+    os.utime(root / "videos" / "new.mp4", (1, 1))
+    await pool.execute("UPDATE files SET oshash = 'other' WHERE path = $1", str(root / "videos" / "h264.mp4"))
+    await scan(app, lid)
+
+    assert await impact(client, "performers", a, made) == {"remove": 3, "covered": 0, "untracked": 1}
+    await unlink(client, "performers", a, made)
+    await drain(app)
+    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["performer_ids"] == [a]
+    for name in ("h265.mkv", "vp9.webm", "new.mp4"):
+        assert (await scene_of(pool, root / "videos" / name))["performer_ids"] == []
+    assert await pool.fetchval("SELECT count(*) FROM folder_links") == 0
+    assert await pool.fetchval("SELECT count(*) FROM folder_link_tags") == 0
+
+
+async def test_leaving_tags_in_place(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    made = await link(client, "performers", a, root / "videos", "all")
+    await drain(app)
+    await unlink(client, "performers", a, made, "keep")
+    await drain(app)
+    assert await pool.fetchval("SELECT count(*) FROM scene_performers") == 3
+    assert await pool.fetchval("SELECT count(*) FROM folder_links") == 0
+
+
+async def test_a_tag_from_before_tracking_stays(app, client, lib):
+    """What a link tagged before folder_link_tags existed has no record, like a hand-set tag."""
+    _, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    made = await link(client, "performers", a, root / "videos", "all")
+    await drain(app)
+    await pool.execute("DELETE FROM folder_link_tags")
+    assert await impact(client, "performers", a, made) == {"remove": 0, "covered": 0, "untracked": 3}
+    await unlink(client, "performers", a, made)
+    await drain(app)
+    assert await pool.fetchval("SELECT count(*) FROM scene_performers") == 3
+
+
+async def test_a_folder_still_linked_keeps_the_tag(app, client, lib, sample_media):
+    lid, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    outer = await link(client, "performers", a, root / "inbox")
+    inner = await link(client, "performers", a, root / "inbox" / "deep")
+    shutil.copy(sample_media / "h264.mp4", root / "inbox" / "deep" / "both.mp4")
+    shutil.copy(sample_media / "h265.mkv", root / "inbox" / "outer.mkv")
+    await scan(app, lid)
+    assert await impact(client, "performers", a, outer) == {"remove": 1, "covered": 1, "untracked": 0}
+    await unlink(client, "performers", a, outer)
+    await drain(app)
+    assert (await scene_of(pool, root / "inbox" / "deep" / "both.mp4"))["performer_ids"] == [a]
+    assert (await scene_of(pool, root / "inbox" / "outer.mkv"))["performer_ids"] == []
+
+    # the folder that kept it can take it back later
+    await unlink(client, "performers", a, inner)
+    await drain(app)
+    assert (await scene_of(pool, root / "inbox" / "deep" / "both.mp4"))["performer_ids"] == []
+
+
+async def test_a_new_only_folder_keeps_a_tag_it_never_added(app, client, lib, sample_media):
+    lid, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    outer = await link(client, "performers", a, root / "inbox")
+    shutil.copy(sample_media / "h264.mp4", root / "inbox" / "deep" / "v.mp4")
+    await scan(app, lid)
+    await link(client, "performers", a, root / "inbox" / "deep")     # new files only
+    await unlink(client, "performers", a, outer)
+    await drain(app)
+    assert (await scene_of(pool, root / "inbox" / "deep" / "v.mp4"))["performer_ids"] == [a]
+
+
+async def test_a_hand_edit_changes_who_owns_the_tag(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    made = await link(client, "performers", a, root / "videos", "all")
+    await drain(app)
+    kept = await scene_of(pool, root / "videos" / "h264.mp4")
+    readded = await scene_of(pool, root / "videos" / "h265.mkv")
+
+    # saving a scene without touching its performers leaves the record alone
+    r = await client.patch(f"/api/scenes/{kept['id']}", json={"title": "Renamed", "performer_ids": [a]})
+    assert r.status_code == 200, r.text
+    # taken off and put back by hand: it's the person's tag now
+    for ids in ([], [a]):
+        r = await client.patch(f"/api/scenes/{readded['id']}", json={"performer_ids": ids})
+        assert r.status_code == 200, r.text
+
+    await unlink(client, "performers", a, made)
+    await drain(app)
+    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["performer_ids"] == []
+    assert (await scene_of(pool, root / "videos" / "h265.mkv"))["performer_ids"] == [a]
+
+
+async def test_a_file_moved_out_loses_the_tag_its_link_added(app, client, lib, sample_media):
+    lid, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    made = await link(client, "performers", a, root / "inbox")
+    shutil.copy(sample_media / "h264.mp4", root / "inbox" / "v.mp4")
+    await pool.execute("DELETE FROM files WHERE oshash IS NOT NULL")
+    await scan(app, lid)
+    os.rename(root / "inbox" / "v.mp4", root / "moved.mp4")
+    await scan(app, lid)
+    assert (await scene_of(pool, root / "moved.mp4"))["performer_ids"] == [a]
+    await unlink(client, "performers", a, made)
+    await drain(app)
+    assert (await scene_of(pool, root / "moved.mp4"))["performer_ids"] == []
+
+
+async def test_studios_work_the_same(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    st, other = await studio(pool, "Acme"), await studio(pool, "Other")
+    by_hand = await scene_of(pool, root / "videos" / "h264.mp4")
+    changed = await scene_of(pool, root / "videos" / "h265.mkv")
+    await pool.execute("UPDATE scenes SET studio_id = $2 WHERE id = $1", by_hand["id"], other)
+    made = await link(client, "studios", st, root / "videos", "all")
+    await drain(app)
+    # changed by hand afterwards: not the link's any more
+    r = await client.patch(f"/api/scenes/{changed['id']}", json={"studio_id": other})
+    assert r.status_code == 200, r.text
+    assert await impact(client, "studios", st, made) == {"remove": 1, "covered": 0, "untracked": 0}
+    await unlink(client, "studios", st, made)
+    await drain(app)
+    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["studio_id"] == other
+    assert (await scene_of(pool, root / "videos" / "h265.mkv"))["studio_id"] == other
+    assert (await scene_of(pool, root / "videos" / "vp9.webm"))["studio_id"] is None
+
+
+async def test_archives_lose_the_tag_with_their_images(app, client, lib, sample_media):
+    lid, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    made = await link(client, "performers", a, root / "inbox")
+    shutil.copy(root / "archive.zip", root / "inbox" / "set.zip")
+    await pool.execute("UPDATE files SET oshash = 'other' WHERE path = $1", str(root / "archive.zip"))
+    await scan(app, lid)
+    assert await pool.fetchval("SELECT count(*) FROM image_performers") == 2
+    assert await pool.fetchval("SELECT count(*) FROM gallery_performers") == 1
+    assert (await impact(client, "performers", a, made))["remove"] == 1
+    await unlink(client, "performers", a, made)
+    await drain(app)
+    assert await pool.fetchval("SELECT count(*) FROM image_performers") == 0
+    assert await pool.fetchval("SELECT count(*) FROM gallery_performers") == 0
+
+
+async def test_a_stopped_removal_can_be_run_again(app, client, lib, sample_media, monkeypatch):
+    lid, root = lib
+    pool = app.state.pool
+    monkeypatch.setattr(folder_links, "BATCH", 1)
+    a = await performer(pool, "Ann")
+    made = await link(client, "performers", a, root / "videos", "all")
+    await drain(app)
+    await pool.execute("UPDATE folder_links SET removing_at = now() WHERE id = $1", made["id"])
+
+    class Stops:
+        calls = 0
+        async def cancelled(self):
+            Stops.calls += 1
+            return Stops.calls > 2
+        async def progress(self, *a):
+            pass
+
+    assert (await folder_links.remove_tags(pool, Stops(), made["id"])).startswith("stopped")
+    assert await pool.fetchval("SELECT count(*) FROM scene_performers") == 1
+
+    # a link being removed tags nothing new, can't be added again or left in place
+    shutil.copy(sample_media / "h264.mp4", root / "videos" / "late.mp4")
+    await pool.execute("UPDATE files SET oshash = 'other' WHERE path = $1", str(root / "videos" / "h264.mp4"))
+    await scan(app, lid)
+    assert (await scene_of(pool, root / "videos" / "late.mp4"))["performer_ids"] == []
+    r = await client.post(f"/api/folder-links/performers/{a}", json={"path": str(root / "videos")})
+    assert r.status_code == 409
+    r = await client.delete(f"/api/folder-links/performers/{a}/{made['id']}", params={"tags": "keep"})
+    assert r.status_code == 409
+    assert (await client.get(f"/api/folder-links/performers/{a}")).json()["links"][0]["removing"] is True
+
+    await unlink(client, "performers", a, made)
+    await drain(app)
+    assert await pool.fetchval("SELECT count(*) FROM scene_performers") == 0
+    assert await pool.fetchval("SELECT count(*) FROM folder_links") == 0
+
+
 @pytest.fixture
 async def people(app, clean, client, login_as, sample_media):
     """alice owns a library shared with bob; eddie is an editor; vic is a viewer."""
@@ -332,8 +540,10 @@ async def test_links_and_folders_are_only_shown_to_those_who_can_tag(app, people
     assert (await people["vic"].get(f"/api/folder-links/performers/{p}")).json() == {"can_link": False, "links": []}
     names = [e["path"] for e in (await people["bob"].get("/api/folder-links/folders")).json()["entries"]]
     assert str(people["main"]) not in names and str(people["shared"]) not in names
-    r = await people["bob"].delete(f"/api/folder-links/performers/{p}/{made['id']}")
-    assert r.status_code == 404
+    for tags in ("keep", "remove"):
+        r = await people["bob"].delete(f"/api/folder-links/performers/{p}/{made['id']}", params={"tags": tags})
+        assert r.status_code == 404
+    assert (await people["bob"].get(f"/api/folder-links/performers/{p}/{made['id']}/impact")).status_code == 404
     assert await pool.fetchval("SELECT count(*) FROM folder_links") == 1
 
 

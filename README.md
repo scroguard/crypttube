@@ -173,9 +173,11 @@ Highlights:
   in one (or below it) get tagged with everyone linked there. Choose *new files only* or
   *all files*, which tags what's already there in a background job. You can link folders
   in libraries whose content you can edit. A folder takes any number of performers but one
-  studio, counting the folders above and below it. Tags are only ever added: removing a
-  link keeps them, and a studio already set is never replaced. Galleries aren't tagged,
-  only the files in them (a zip's gallery counts as its file).
+  studio, counting the folders above and below it. A studio already set is never replaced.
+  Galleries aren't tagged, only the files in them (a zip's gallery counts as its file).
+  When you stop watching a folder, choose to leave its tags or remove them, in a background
+  job. Removing only takes back what the link added: tags set by hand, tags another watched
+  folder covers, and tags from before version 0021 of the schema stay.
 - **Admin**: libraries (watch, exclusions, scan), live job monitor, users and per-user
   content restrictions.
 

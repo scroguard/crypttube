@@ -435,7 +435,11 @@ async def handle_folder_link_backfill(pool: asyncpg.Pool, settings: Settings, ct
     return await folder_links.backfill(pool, ctx, payload["link_id"])
 
 
-HANDLERS = {folder_links.JOB_KIND: handle_folder_link_backfill, "encrypt_uploads": handle_encrypt_uploads, "delete_duplicates": handle_delete_duplicates, "scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
+async def handle_folder_link_remove(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
+    return await folder_links.remove_tags(pool, ctx, payload["link_id"])
+
+
+HANDLERS = {folder_links.JOB_KIND: handle_folder_link_backfill, folder_links.REMOVE_JOB_KIND: handle_folder_link_remove, "encrypt_uploads": handle_encrypt_uploads, "delete_duplicates": handle_delete_duplicates, "scan": handle_scan, "generate": handle_generate, counts.JOB_KIND: handle_refresh_counts,
             maintenance.CLEANUP_KIND: handle_cleanup, maintenance.JOB_KIND: handle_maintenance}
 
 SCHEDULE_CHECK_SECONDS = 60

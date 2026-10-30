@@ -68,6 +68,10 @@
   session, which relays both ways). Roles, preset values and UI rules: Ink's handoff v0.1
   and update v0.2 (presets Crypt, Crypt Lime, Ossuary; dark only). Brand source files are in
   `items from ink/` (untracked, excluded locally in `.git/info/exclude`).
+- Unlinking with "remove tags": `folder_link_tags` records what each link added; triggers
+  drop a record when its tag goes, so a tag re-added by hand counts as hand-set. A tag with
+  no record is never claimed or removed. `folder_links.removing_at` stops tagging at once;
+  the job deletes the link when it's done, and asking again resumes it.
 - Watched folders: `app/folder_links.py` `apply` is the only writer (scanner, Move, backfill
   job). It runs in the indexing transaction, so a failure leaves the file "new" for the next
   scan. Links are checked against their creator's rights at tag time.
