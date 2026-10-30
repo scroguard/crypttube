@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { api } from "../api/client";
-import { useDetail, useWrite } from "../api/hooks";
+import { useDetail, useRate } from "../api/hooks";
 import type { ImageDetail, ImageItem } from "../api/types";
 import { formatBytes } from "../lib/format";
 import { releaseFocus } from "../lib/useEscape";
@@ -32,8 +31,7 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
   const frame = useRef<HTMLDivElement>(null);
   const image = images[index];
   const detail = useDetail<ImageDetail>(image ? `/images/${image.id}` : null).data;
-  const rate = useWrite(({ id, rating }: { id: number; rating: number | null }) =>
-    api(`/images/${id}`, { method: "PATCH", json: { rating } }));
+  const rate = useRate(`/images/${image?.id}`);
 
   const go = (delta: number) => {
     const next = index + delta;
@@ -57,6 +55,7 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
       // say, the search box when a thumbnail is clicked.
       if (editing) return;
       if (e.key === "Escape") onClose();
+      else if (e.key === " " && (e.target as HTMLElement).closest("button")) return;   // presses that button
       else if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); go(1); }
       else if (e.key === "ArrowLeft") go(-1);
     };
@@ -94,8 +93,7 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
         <div className="flex-1" />
         {detail && detail.id === image.id && (
           <Rating key={image.id} value={detail.rating}
-                  onChange={detail.can_edit ? (rating) => rate.mutate({ id: image.id, rating }) : undefined}
-                  error={rate.variables?.id === image.id ? rate.error : null} />
+                  onChange={detail.can_edit ? rate.save : undefined} error={rate.error} />
         )}
         {detail?.can_edit && detail.id === image.id && (
           <button onClick={() => setEditing(true)} className="hover:text-text">Edit</button>

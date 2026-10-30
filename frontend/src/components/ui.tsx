@@ -78,7 +78,8 @@ export function Rating({ value, onChange, error }: {
   value: number | null; onChange?: (v: number | null) => void; error?: Error | null;
 }) {
   const [chosen, setChosen] = useState<number | null | undefined>(undefined);
-  useEffect(() => setChosen(undefined), [value, error]);
+  useEffect(() => setChosen(undefined), [value]);
+  useEffect(() => { if (error) setChosen(undefined); }, [error]);
   const shown = chosen === undefined ? value : chosen;
   const stars = shown == null ? 0 : Math.round(shown / 20);
   const choose = (n: number) => {

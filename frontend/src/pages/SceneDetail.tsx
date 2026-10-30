@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api } from "../api/client";
-import { useDetail, useWrite } from "../api/hooks";
+import { useDetail, useRate, useWrite } from "../api/hooks";
 import type { Playback, SceneDetail as Scene } from "../api/types";
 import Chips from "../components/Chips";
 import DeleteMediaButton from "../components/DeleteMedia";
@@ -18,7 +18,7 @@ export default function SceneDetail() {
   const playback = useDetail<Playback>(`/scenes/${id}/playback`);
   const [editing, setEditing] = useState(false);
   const navigate = useNavigate();
-  const rate = useWrite((rating: number | null) => api(`/scenes/${id}`, { method: "PATCH", json: { rating } }));
+  const rate = useRate(`/scenes/${id}`);
   const assign = useWrite((body: object) => api(`/scenes/${id}`, { method: "PATCH", json: body }));
   const qc = useQueryClient();
   const [rebuilding, setRebuilding] = useState(false);
@@ -67,7 +67,7 @@ export default function SceneDetail() {
           <h1 className="text-2xl font-semibold" data-testid="scene-title">{s.title || "Untitled"}</h1>
           <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-text-muted">{meta.map((m, i) => <span key={i}>{m}</span>)}</div>
         </div>
-        <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} error={rate.error} />
+        <Rating key={id} value={s.rating} onChange={canEdit ? rate.save : undefined} error={rate.error} />
         {canEdit && <button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button>}
         {canEdit && (
           <button className="btn-ghost" disabled={rebuilding} onClick={rebuild}

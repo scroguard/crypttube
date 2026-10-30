@@ -52,6 +52,28 @@ test("@mobile a rating that can't be saved says so and goes back", async ({ page
   await expect(stars(page)).toHaveAttribute("aria-label", "Rating 0 of 5");
 });
 
+test("@mobile a star answers before the save does, and again after a failed one", async ({ page }) => {
+  await signIn(page);
+  const id = await first(page, "scenes");
+  await page.goto(`/scenes/${id}`);
+  await expect(page.getByTestId("scene-title")).toBeVisible();
+  let release = (_status: number) => {};
+  await page.route("**/api/scenes/*", async (r) => {
+    if (r.request().method() !== "PATCH") return r.continue();
+    const status = await new Promise<number>((resolve) => { release = resolve; });
+    return status === 200 ? r.continue() : r.fulfill({ status, contentType: "application/json", body: '{"detail":"no"}' });
+  });
+  await page.getByRole("button", { name: "Rate 2 of 5" }).tap();
+  await expect(stars(page)).toHaveAttribute("aria-label", "Rating 2 of 5");   // still saving
+  release(500);
+  await expect(page.getByRole("alert")).toBeVisible();
+  await page.getByRole("button", { name: "Rate 3 of 5" }).tap();
+  await expect(stars(page)).toHaveAttribute("aria-label", "Rating 3 of 5");   // a retry shows at once too
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  release(200);
+  await expect.poll(async () => (await (await page.request.get(`/api/scenes/${id}`)).json()).rating).toBe(60);
+});
+
 test("@mobile rate an image by touch in the viewer", async ({ page }) => {
   await signIn(page);
   await page.goto("/images");

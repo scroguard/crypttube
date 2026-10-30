@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api } from "../api/client";
-import { useDetail, useWrite } from "../api/hooks";
+import { useDetail, useRate } from "../api/hooks";
 import type { GalleryDetail as Gallery } from "../api/types";
 import { RefLinks } from "../components/Cards";
 import Chips from "../components/Chips";
@@ -16,7 +15,7 @@ export default function GalleryDetail() {
   const gallery = useDetail<Gallery>(`/galleries/${id}`);
   const [editing, setEditing] = useState(false);
   const navigate = useNavigate();
-  const rate = useWrite((rating: number | null) => api(`/galleries/${id}`, { method: "PATCH", json: { rating } }));
+  const rate = useRate(`/galleries/${id}`);
 
   if (gallery.isPending) return <Spinner className="mt-24" />;
   if (gallery.isError) return <ErrorBox error={gallery.error} />;
@@ -34,7 +33,7 @@ export default function GalleryDetail() {
             {g.performers.length > 0 && <RefLinks items={g.performers} to="performers" max={6} />}
           </div>
         </div>
-        <Rating value={g.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} error={rate.error} />
+        <Rating key={id} value={g.rating} onChange={canEdit ? rate.save : undefined} error={rate.error} />
         {canEdit && <button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button>}
         <DeleteMediaButton kind="galleries" ids={[id]} onDeleted={() => navigate("/galleries", { replace: true })} />
       </div>
