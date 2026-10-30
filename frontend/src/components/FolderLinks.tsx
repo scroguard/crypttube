@@ -6,7 +6,7 @@ import { ErrorBox, Modal, Spinner } from "./ui";
 
 interface Link {
   id: number; path: string; library: string; relative: string;
-  watching: boolean; missing: boolean; other_studios: number;
+  watching: boolean; missing: boolean;
 }
 interface Listing {
   path: string | null;
@@ -48,11 +48,6 @@ export default function FolderLinks({ kind, id }: { kind: "performers" | "studio
               {l.missing && <span className="chip text-warning">folder not found</span>}
               {!l.missing && !l.watching && (
                 <span className="chip" title="This library isn't watched, so new files are tagged at its next scan">tagged at next scan</span>
-              )}
-              {l.other_studios > 0 && (
-                <span className="chip text-warning" title="A file has one studio: the one linked to the deepest folder is used, then the one linked first">
-                  other studios linked here
-                </span>
               )}
               <button className="ml-auto text-text-subtle hover:text-text" aria-label={`Stop watching ${l.relative}`}
                       disabled={remove.isPending} onClick={() => remove.mutate(l.id)}>✕</button>

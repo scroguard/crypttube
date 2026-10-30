@@ -136,30 +136,48 @@ async def test_move_dialog_tags_too(app, client, lib):
     assert (await scene_of(pool, root / "inbox" / "h264.mp4"))["performer_ids"] == [a]
 
 
-async def test_studio_is_never_replaced_and_deepest_wins(app, client, lib, sample_media):
+async def test_a_folder_takes_one_studio_counting_above_and_below(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    one, two = await studio(pool, "One"), await studio(pool, "Two")
+    await link(client, "studios", one, root / "inbox")
+    for folder in (root / "inbox", root / "inbox" / "deep", root):
+        r = await client.post(f"/api/folder-links/studios/{two}", json={"path": str(folder)})
+        assert r.status_code == 409, r.text
+        assert "another studio" in r.json()["detail"]
+    await link(client, "studios", two, root / "videos")                # elsewhere is fine
+    await link(client, "studios", one, root / "inbox" / "deep")        # so is the same studio
+    await link(client, "studios", one, root / "inbox")                 # and linking it again
+
+    # performers aren't limited
+    for name in ("Ann", "Bea"):
+        await link(client, "performers", await performer(pool, name), root / "inbox")
+
+
+async def test_a_studio_already_set_is_never_replaced(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    linked, by_hand = await studio(pool, "Linked"), await studio(pool, "By hand")
+    await pool.execute("UPDATE scenes SET studio_id = $2 WHERE id = $1",
+                       (await scene_of(pool, root / "videos" / "h264.mp4"))["id"], by_hand)
+    await link(client, "studios", linked, root / "videos", "all")
+    await drain(app)
+    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["studio_id"] == by_hand
+    assert (await scene_of(pool, root / "videos" / "vp9.webm"))["studio_id"] == linked
+
+
+async def test_a_new_images_folder_gallery_is_left_alone(app, client, lib, sample_media):
     lid, root = lib
     pool = app.state.pool
-    outer, inner, later = [await studio(pool, n) for n in ("Outer", "Inner", "Later")]
-    await link(client, "studios", outer, root / "inbox")
-    await link(client, "studios", inner, root / "inbox" / "deep")
-    await link(client, "studios", later, root / "inbox" / "deep")
-    shutil.copy(sample_media / "h264.mp4", root / "inbox" / "deep" / "v.mp4")
-    shutil.copy(sample_media / "h265.mkv", root / "inbox" / "w.mkv")
+    a = await performer(pool, "Ann")
+    await link(client, "performers", a, root / "pics")
+    shutil.copy(sample_media / "img0.jpg", root / "pics" / "new.jpg")
     await scan(app, lid)
-    assert (await scene_of(pool, root / "inbox" / "deep" / "v.mp4"))["studio_id"] == inner
-    assert (await scene_of(pool, root / "inbox" / "w.mkv"))["studio_id"] == outer
-
-    # the link list warns about the clash
-    links = (await client.get(f"/api/folder-links/studios/{outer}")).json()["links"]
-    assert links[0]["other_studios"] == 2
-
-    # a studio chosen by hand stays, including through back-tagging
-    await pool.execute("UPDATE scenes SET studio_id = $2 WHERE id = $1",
-                       (await scene_of(pool, root / "videos" / "h264.mp4"))["id"], later)
-    await link(client, "studios", outer, root / "videos", "all")
-    await drain(app)
-    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["studio_id"] == later
-    assert (await scene_of(pool, root / "videos" / "vp9.webm"))["studio_id"] == outer
+    row = await pool.fetchrow("SELECT performer_ids FROM galleries WHERE folder_path = $1", str(root / "pics"))
+    assert row["performer_ids"] == []
+    assert await pool.fetchval(
+        "SELECT performer_ids FROM images i JOIN files f ON f.id = i.file_id WHERE f.path = $1",
+        str(root / "pics" / "new.jpg")) == [a]
 
 
 async def test_new_only_leaves_existing_files(app, client, lib):

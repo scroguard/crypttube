@@ -5,6 +5,9 @@ Tagging a library's content needs the same rights as editing it by hand, whateve
 picker offered: an editor or admin for the main libraries, the owner for a user's own.
 Being able to see a library someone shared isn't enough. Reading a link needs those rights
 too, because a link names a folder.
+
+A folder takes any number of performers but one studio, counting the folders above and
+below it, because a file has one studio.
 """
 
 import asyncio
@@ -12,6 +15,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -80,21 +84,14 @@ async def list_links(kind: Kind, entity_id: int, request: Request, acl: Acl = De
     pool = request.app.state.pool
     roots = {r["library_id"]: r for r in await _roots(pool, acl)}
     rows = await pool.fetch(
-        f"""SELECT w.id, w.path, w.library_id,
-                   (SELECT count(*) FROM folder_links o
-                    WHERE o.studio_id IS NOT NULL AND w.studio_id IS NOT NULL AND o.id <> w.id
-                      AND o.library_id = w.library_id
-                      AND (o.path = w.path OR starts_with(o.path, w.path || '/')
-                           OR starts_with(w.path, o.path || '/'))) AS other_studios
-            FROM folder_links w
+        f"""SELECT w.id, w.path, w.library_id FROM folder_links w
             WHERE w.{COLUMN[kind]} = $1 AND w.library_id = ANY($2::bigint[])
             ORDER BY w.path""", entity_id, list(roots))
     missing = await asyncio.to_thread(lambda: {r["id"]: not os.path.isdir(r["path"]) for r in rows})
     return {"can_link": bool(roots), "links": [
         {"id": r["id"], "path": r["path"], "library": roots[r["library_id"]]["name"],
          "relative": os.path.relpath(r["path"], roots[r["library_id"]]["path"]),
-         "watching": roots[r["library_id"]]["watching"], "missing": missing[r["id"]],
-         "other_studios": r["other_studios"]} for r in rows]}
+         "watching": roots[r["library_id"]]["watching"], "missing": missing[r["id"]]} for r in rows]}
 
 
 class LinkBody(BaseModel):
@@ -113,10 +110,20 @@ async def add_link(kind: Kind, entity_id: int, body: LinkBody, request: Request,
     pool = request.app.state.pool
     path, root = _folder(body.path, await _roots(pool, acl))
     column = COLUMN[kind]
-    link_id = await pool.fetchval(
-        f"""INSERT INTO folder_links ({column}, library_id, path, created_by) VALUES ($1, $2, $3, $4)
-            ON CONFLICT ({column}, path) WHERE {column} IS NOT NULL DO UPDATE SET created_by = EXCLUDED.created_by
-            RETURNING id""", entity_id, root["library_id"], str(path), acl.user_id)
+    clash = "another studio is already linked to this folder, or to one above or below it"
+    if kind == "studios" and await pool.fetchval(
+            """SELECT EXISTS (SELECT 1 FROM folder_links
+                              WHERE studio_id IS NOT NULL AND studio_id <> $1
+                                AND (path = $2 OR starts_with(path, $2 || '/') OR starts_with($2, path || '/')))""",
+            entity_id, str(path)):
+        raise HTTPException(409, clash)
+    try:
+        link_id = await pool.fetchval(
+            f"""INSERT INTO folder_links ({column}, library_id, path, created_by) VALUES ($1, $2, $3, $4)
+                ON CONFLICT ({column}, path) WHERE {column} IS NOT NULL DO UPDATE SET created_by = EXCLUDED.created_by
+                RETURNING id""", entity_id, root["library_id"], str(path), acl.user_id)
+    except asyncpg.UniqueViolationError:    # another studio got there first
+        raise HTTPException(409, clash) from None
     job_id = None
     if body.scope == "all":
         job_id = await jobs.enqueue(pool, folder_links.JOB_KIND, {"link_id": link_id},

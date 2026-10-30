@@ -13,4 +13,6 @@ CREATE TABLE folder_links (
 );
 CREATE UNIQUE INDEX folder_links_performer_key ON folder_links (performer_id, path) WHERE performer_id IS NOT NULL;
 CREATE UNIQUE INDEX folder_links_studio_key    ON folder_links (studio_id, path) WHERE studio_id IS NOT NULL;
+-- Any number of performers on a folder, but one studio.
+CREATE UNIQUE INDEX folder_links_one_studio ON folder_links (path) WHERE studio_id IS NOT NULL;
 CREATE INDEX folder_links_library_idx ON folder_links (library_id);

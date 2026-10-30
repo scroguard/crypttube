@@ -172,9 +172,10 @@ Highlights:
 - **Watched folders**: on a performer's or studio's page, link folders; files that arrive
   in one (or below it) get tagged with everyone linked there. Choose *new files only* or
   *all files*, which tags what's already there in a background job. You can link folders
-  in libraries whose content you can edit. A file has one studio: with several linked, the
-  deepest folder's wins, then the first linked. Tags are only ever added: removing a link
-  keeps them, and a studio already set is never replaced.
+  in libraries whose content you can edit. A folder takes any number of performers but one
+  studio, counting the folders above and below it. Tags are only ever added: removing a
+  link keeps them, and a studio already set is never replaced. Galleries aren't tagged,
+  only the files in them (a zip's gallery counts as its file).
 - **Admin**: libraries (watch, exclusions, scan), live job monitor, users and per-user
   content restrictions.
 

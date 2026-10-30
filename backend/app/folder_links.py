@@ -5,8 +5,8 @@ it) is tagged with everyone linked to that folder.
 back-tagging job. It only ever adds: a performer already there is left alone and a studio
 already set is never replaced, so running it twice changes nothing.
 
-Content has one studio, so when several linked studios match the file the one linked to
-the deepest folder wins, then the one linked first.
+A folder can have many performers but one studio, and folders holding different studios
+can't nest (api/folder_links.py refuses it), so at most one studio ever covers a file.
 
 A link applies only while the person who made it may still tag that library's content:
 the library's owner, or for a main library an active editor or admin (same rule as
@@ -31,8 +31,7 @@ MATCHING_LINKS = """
     JOIN users u ON u.id = w.created_by
     WHERE f.id = $1 AND f.zip_file_id IS NULL
       AND ($2::text IS NULL OR NOT starts_with($2, w.path || '/'))
-      AND u.is_active AND (l.owner_id = u.id OR (l.owner_id IS NULL AND u.role IN ('editor', 'admin')))
-    ORDER BY length(w.path) DESC, w.id"""
+      AND u.is_active AND (l.owner_id = u.id OR (l.owner_id IS NULL AND u.role IN ('editor', 'admin')))"""
 
 
 async def apply(conn: asyncpg.Connection, file_id: int, old_path: str | None = None,
