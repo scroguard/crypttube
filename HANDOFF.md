@@ -45,7 +45,8 @@
 - Dockhand runs Compose inside its own container (`/app/data/stacks/...`): builds work, but
   a bind mount or config/secret `file:` relative to the repo does not exist on the host.
   Every host file in `compose.yaml` must be an absolute path from env (or `/dev/null`);
-  repo files go into images, or into opt-in override files.
+  repo files go into images, or into opt-in override files. The one exception is
+  `MEDIA_ROOT` (default `./media`, for local use), which a Dockhand stack must set.
 - Pre-rename installs whose Compose refuses the old-labelled volumes set `EXISTING_VOLUMES=true`
   (volumes become external). The user's Dockhand stack needs it.
 - Volumes are named explicitly (`${VOLUME_PREFIX:-goon-streamer}_*`), so the Compose
