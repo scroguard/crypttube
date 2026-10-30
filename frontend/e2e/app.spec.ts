@@ -234,6 +234,18 @@ test("filters: tag filter via the filter panel", async () => {
   await expect(page.getByTestId("scene-card")).toHaveCount(3);
 });
 
+test("rate an image in the viewer", async () => {
+  await nav("Images").click();
+  await page.getByTestId("image-tile").first().click();
+  const viewer = page.getByTestId("lightbox");
+  await viewer.getByRole("button", { name: "Rate 3 of 5" }).click();
+  await expect(viewer.locator('[aria-label^="Rating "]')).toHaveAttribute("aria-label", "Rating 3 of 5");
+  await page.reload();
+  await page.getByTestId("image-tile").first().click();
+  await expect(viewer.locator('[aria-label^="Rating "]')).toHaveAttribute("aria-label", "Rating 3 of 5");
+  await page.keyboard.press("Escape");
+});
+
 test("gallery lightbox navigation", async () => {
   await nav("Galleries").click();
   await expect(page.getByTestId("gallery-card")).toHaveCount(2); // folder + zip

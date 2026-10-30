@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { useDetail } from "../api/hooks";
+import { api } from "../api/client";
+import { useDetail, useWrite } from "../api/hooks";
 import type { ImageDetail, ImageItem } from "../api/types";
 import { formatBytes } from "../lib/format";
 import { releaseFocus } from "../lib/useEscape";
 import { ContentEditModal } from "./EditForms";
+import { Rating } from "./ui";
 
 /**
  * Full-screen image viewer. ←/→ or swipe to navigate, click the picture to toggle zoom;
@@ -30,6 +32,8 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
   const frame = useRef<HTMLDivElement>(null);
   const image = images[index];
   const detail = useDetail<ImageDetail>(image ? `/images/${image.id}` : null).data;
+  const rate = useWrite(({ id, rating }: { id: number; rating: number | null }) =>
+    api(`/images/${id}`, { method: "PATCH", json: { rating } }));
 
   const go = (delta: number) => {
     const next = index + delta;
@@ -75,7 +79,7 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
   return (
     <div ref={frame} tabIndex={-1} className="fixed inset-0 z-50 flex flex-col bg-bg/95 outline-none"
          role="dialog" aria-modal="true" aria-label="Image viewer" data-testid="lightbox">
-      <div className="flex items-center gap-4 px-4 py-2 text-sm text-text">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-sm text-text">
         <span className="tabular-nums" data-testid="lightbox-counter">{index + 1} / {total ?? images.length}</span>
         <span className="truncate">{image.title}</span>
         <span className="text-text-subtle">{image.width}×{image.height}</span>
@@ -88,6 +92,11 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
           </span>
         )}
         <div className="flex-1" />
+        {detail && detail.id === image.id && (
+          <Rating key={image.id} value={detail.rating}
+                  onChange={detail.can_edit ? (rating) => rate.mutate({ id: image.id, rating }) : undefined}
+                  error={rate.variables?.id === image.id ? rate.error : null} />
+        )}
         {detail?.can_edit && detail.id === image.id && (
           <button onClick={() => setEditing(true)} className="hover:text-text">Edit</button>
         )}

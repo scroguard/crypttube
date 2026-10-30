@@ -50,7 +50,7 @@ export default function PerformerDetail() {
                     onClick={() => favorite.mutate(!p.favorite)} aria-pressed={p.favorite}
                     aria-label={p.favorite ? "Remove from my favourites" : "Add to my favourites"}
                     title={p.favorite ? "One of your favourites" : "Add to your favourites"}>♥</button>
-            <Rating value={p.rating} onChange={canEdit ? (rating) => patch.mutate({ rating }) : undefined} />
+            <Rating value={p.rating} onChange={canEdit ? (rating) => patch.mutate({ rating }) : undefined} error={patch.error} />
             {canEdit && <div className="ml-auto flex gap-2"><button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button><DeleteEntityButton kind="performers" id={id} name={p.name} /></div>}
           </div>
           {p.aliases.length > 0 && <p className="mt-1 text-sm text-text-muted">Also known as {p.aliases.join(", ")}</p>}

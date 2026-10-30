@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client";
 
 export function Spinner({ className = "" }: { className?: string }) {
@@ -69,18 +69,35 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
-/** 0-100 rating shown as five stars; clickable when onChange is given. */
-export function Rating({ value, onChange }: { value: number | null; onChange?: (v: number | null) => void }) {
-  const stars = value == null ? 0 : Math.round(value / 20);
+/**
+ * 0-100 rating shown as five stars; clickable when onChange is given. A tap shows at once,
+ * ahead of the save, and comes back with `error` if the save failed. Stars get finger-sized
+ * targets on touch screens.
+ */
+export function Rating({ value, onChange, error }: {
+  value: number | null; onChange?: (v: number | null) => void; error?: Error | null;
+}) {
+  const [chosen, setChosen] = useState<number | null | undefined>(undefined);
+  useEffect(() => setChosen(undefined), [value, error]);
+  const shown = chosen === undefined ? value : chosen;
+  const stars = shown == null ? 0 : Math.round(shown / 20);
+  const choose = (n: number) => {
+    const next = stars === n ? null : n * 20;
+    setChosen(next);
+    onChange?.(next);
+  };
   return (
-    <span className="inline-flex" aria-label={`Rating ${stars} of 5`}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button key={n} type="button" disabled={!onChange}
-                onClick={() => onChange?.(stars === n ? null : n * 20)}
-                className={`px-0.5 text-lg leading-none ${n <= stars ? "text-warning" : "text-text-subtle"} ${onChange ? "hover:text-warning" : "cursor-default"}`}>
-          ★
-        </button>
-      ))}
+    <span className="inline-flex flex-col items-start">
+      <span className="inline-flex" aria-label={`Rating ${stars} of 5`}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} type="button" disabled={!onChange} onClick={() => choose(n)}
+                  aria-label={onChange ? `Rate ${n} of 5` : undefined}
+                  className={`touch-manipulation px-0.5 text-lg leading-none pointer-coarse:h-11 pointer-coarse:w-9 pointer-coarse:px-0 pointer-coarse:text-2xl ${n <= stars ? "text-warning" : "text-text-subtle"} ${onChange ? "hover:text-warning" : "cursor-default"}`}>
+            ★
+          </button>
+        ))}
+      </span>
+      {error && <span role="alert" className="text-xs text-danger">Rating not saved: {error.message}</span>}
     </span>
   );
 }

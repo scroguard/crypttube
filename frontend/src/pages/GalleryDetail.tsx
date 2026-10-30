@@ -34,7 +34,7 @@ export default function GalleryDetail() {
             {g.performers.length > 0 && <RefLinks items={g.performers} to="performers" max={6} />}
           </div>
         </div>
-        <Rating value={g.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} />
+        <Rating value={g.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} error={rate.error} />
         {canEdit && <button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button>}
         <DeleteMediaButton kind="galleries" ids={[id]} onDeleted={() => navigate("/galleries", { replace: true })} />
       </div>

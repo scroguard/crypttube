@@ -26,7 +26,7 @@ export default function StudioDetail() {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-semibold">{s.name}</h1>
-            <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} />
+            <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} error={rate.error} />
           </div>
           {s.parent && <p className="text-sm text-text-muted">Part of <Link to={`/studios/${s.parent.id}`} className="hover:text-text">{s.parent.name}</Link></p>}
           {s.url && <a href={s.url} target="_blank" rel="noreferrer noopener" className="text-sm text-link hover:underline">{s.url}</a>}

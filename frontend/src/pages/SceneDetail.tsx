@@ -67,7 +67,7 @@ export default function SceneDetail() {
           <h1 className="text-2xl font-semibold" data-testid="scene-title">{s.title || "Untitled"}</h1>
           <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-text-muted">{meta.map((m, i) => <span key={i}>{m}</span>)}</div>
         </div>
-        <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} />
+        <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} error={rate.error} />
         {canEdit && <button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button>}
         {canEdit && (
           <button className="btn-ghost" disabled={rebuilding} onClick={rebuild}
