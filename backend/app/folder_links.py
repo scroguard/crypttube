@@ -37,7 +37,7 @@ MATCHING_LINKS = """
 
 async def apply(conn: asyncpg.Connection, file_id: int, old_path: str | None = None,
                 only_link: int | None = None) -> bool:
-    """Tag what this file holds with the links covering it. Returns whether any link did.
+    """Tag what this file holds with the links covering it. Returns whether anything changed.
 
     `old_path` is where a moved file came from: links that already covered it are skipped,
     so a rename can't bring back a performer someone took off by hand. `only_link` limits
@@ -55,20 +55,23 @@ async def apply(conn: asyncpg.Connection, file_id: int, old_path: str | None = N
     images = [r["id"] for r in await conn.fetch(
         """SELECT id FROM images WHERE file_id = $1
            UNION SELECT image_id FROM gallery_images WHERE gallery_id = ANY($2::bigint[])""", file_id, galleries)]
+    changed = 0
     for table, column, ids in (("scene", "scenes", scenes), ("gallery", "galleries", galleries),
                                ("image", "images", images)):
         if not ids:
             continue
         if performers:
-            await conn.execute(
+            status = await conn.execute(
                 f"""INSERT INTO {table}_performers ({table}_id, performer_id)
                     SELECT i, p FROM unnest($1::bigint[]) i, unnest($2::bigint[]) p
                     ON CONFLICT DO NOTHING""", ids, performers)
+            changed += int(status.split()[-1])
         if studio_id is not None:
-            await conn.execute(
+            status = await conn.execute(
                 f"UPDATE {column} SET studio_id = $2 WHERE id = ANY($1::bigint[]) AND studio_id IS NULL",
                 ids, studio_id)
-    return True
+            changed += int(status.split()[-1])
+    return changed > 0
 
 
 async def backfill(pool: asyncpg.Pool, ctx: JobContext, link_id: int) -> str:
@@ -91,7 +94,7 @@ async def backfill(pool: asyncpg.Pool, ctx: JobContext, link_id: int) -> str:
             for file_id in ids:
                 tagged += await apply(conn, file_id, only_link=link_id)
         last, done = ids[-1], done + len(ids)
-        await ctx.progress(done / total, f"checked {done}/{total} files")
+        await ctx.progress(min(1.0, done / max(total, 1)), f"checked {done}/{total} files")
         await asyncio.sleep(0)
     if tagged:
         await counts.request_refresh(pool)

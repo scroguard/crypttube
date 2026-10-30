@@ -107,17 +107,16 @@ class LinkBody(BaseModel):
 @router.post("/{kind}/{entity_id}", status_code=201)
 async def add_link(kind: Kind, entity_id: int, body: LinkBody, request: Request,
                    acl: Acl = Depends(get_acl)) -> dict:
-    """Linking a folder twice changes nothing, except that "all" tags what's there again."""
+    """Linking a folder again is harmless: "all" tags what's there again, and the link now
+    rests on your rights, which revives one whose creator lost theirs."""
     await _require_entity(request, acl, kind, entity_id)
     pool = request.app.state.pool
     path, root = _folder(body.path, await _roots(pool, acl))
     column = COLUMN[kind]
     link_id = await pool.fetchval(
-        f"""WITH ins AS (
-                INSERT INTO folder_links ({column}, library_id, path, created_by) VALUES ($1, $2, $3, $4)
-                ON CONFLICT ({column}, path) WHERE {column} IS NOT NULL DO NOTHING RETURNING id)
-            SELECT id FROM ins UNION ALL SELECT id FROM folder_links WHERE {column} = $1 AND path = $3
-            LIMIT 1""", entity_id, root["library_id"], str(path), acl.user_id)
+        f"""INSERT INTO folder_links ({column}, library_id, path, created_by) VALUES ($1, $2, $3, $4)
+            ON CONFLICT ({column}, path) WHERE {column} IS NOT NULL DO UPDATE SET created_by = EXCLUDED.created_by
+            RETURNING id""", entity_id, root["library_id"], str(path), acl.user_id)
     job_id = None
     if body.scope == "all":
         job_id = await jobs.enqueue(pool, folder_links.JOB_KIND, {"link_id": link_id},

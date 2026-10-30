@@ -190,6 +190,7 @@ async def test_all_files_backfills_in_batches_and_can_run_twice(app, client, lib
     await drain(app)
     assert await pool.fetchval("SELECT count(*) FROM scene_performers") == 3
     assert await pool.fetchval("SELECT count(*) FROM folder_links WHERE performer_id = $1", a) == 1
+    assert await pool.fetchval("SELECT message FROM jobs WHERE id = $1", again["job_id"]) == "tagged 0 of 3 files"
 
 
 async def test_backfill_of_a_removed_link_does_nothing(app, client, lib):
@@ -283,29 +284,30 @@ async def test_access_is_enforced_on_the_server(app, client, people):
     assert await status(people["alice"], "performers", alices, people["private"]) == 201
 
 
-async def test_a_link_inside_a_symlink_leaving_the_library_is_refused(client, people):
-    pool_link = people["main"] / "escape"
-    pool_link.symlink_to(people["private"])
-    r = await client.post(f"/api/folder-links/studios/1", json={"path": str(pool_link)})
-    assert r.status_code in (403, 404)
-    r = await client.get("/api/folder-links/folders", params={"path": str(pool_link)})
+async def test_a_link_inside_a_symlink_leaving_the_library_is_refused(app, client, people):
+    escape = people["main"] / "escape"
+    escape.symlink_to(people["private"])
+    st = await studio(app.state.pool, "Acme")
+    r = await client.post(f"/api/folder-links/studios/{st}", json={"path": str(escape)})
+    assert r.status_code == 403
+    r = await client.get("/api/folder-links/folders", params={"path": str(escape)})
     assert r.status_code == 403
 
 
 async def test_links_and_folders_are_only_shown_to_those_who_can_tag(app, people):
     pool = app.state.pool
     p = await performer(pool, "Global")
-    await link(people["alice"], "performers", p, people["shared"])
+    made = await link(people["alice"], "performers", p, people["shared"])
     assert (await people["bob"].get(f"/api/folder-links/performers/{p}")).json()["links"] == []
     assert (await people["vic"].get(f"/api/folder-links/performers/{p}")).json() == {"can_link": False, "links": []}
     names = [e["path"] for e in (await people["bob"].get("/api/folder-links/folders")).json()["entries"]]
     assert str(people["main"]) not in names and str(people["shared"]) not in names
-    r = await people["bob"].delete(f"/api/folder-links/performers/{p}/1")
+    r = await people["bob"].delete(f"/api/folder-links/performers/{p}/{made['id']}")
     assert r.status_code == 404
     assert await pool.fetchval("SELECT count(*) FROM folder_links") == 1
 
 
-async def test_a_link_stops_when_its_creator_loses_the_right(app, people, sample_media):
+async def test_a_link_stops_when_its_creator_loses_the_right(app, people, login_as, sample_media):
     pool = app.state.pool
     p = await performer(pool, "Global")
     await link(people["eddie"], "performers", p, people["main"])
@@ -313,3 +315,10 @@ async def test_a_link_stops_when_its_creator_loses_the_right(app, people, sample
     shutil.copy(sample_media / "h264.mp4", people["main"] / "sub" / "v.mp4")
     await scan(app, people["main_id"])
     assert (await scene_of(pool, people["main"] / "sub" / "v.mp4"))["performer_ids"] == []
+
+    # someone who still has the right links it again: it works, for what's there too
+    editor2 = await login_as("edna", "editor")
+    await link(editor2, "performers", p, people["main"], "all")
+    await drain(app)
+    assert (await scene_of(pool, people["main"] / "sub" / "v.mp4"))["performer_ids"] == [p]
+    assert await pool.fetchval("SELECT count(*) FROM folder_links") == 1

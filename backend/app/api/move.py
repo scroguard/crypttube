@@ -211,9 +211,6 @@ async def move(body: MoveRequest, request: Request, user: User = Depends(require
                 continue
             moved += 1
             touched_libs.add(r["library_id"])
-            async with pool.acquire() as conn, conn.transaction():
-                for file_id, old_path in files:
-                    await folder_links.apply(conn, file_id, old_path)
             if r["owner_id"] is not None:
                 user_dirs.append((r["path"], next(x["path"] for x in roots if x["library_id"] == r["library_id"])))
             if kind == "image":
@@ -255,8 +252,9 @@ async def _move_one(pool, files: list[tuple[int, str]], dest: Path, dest_lib: in
                 await asyncio.to_thread(_move_file, src, dst)
                 done.append((fid, src, dst))
         async with pool.acquire() as conn, conn.transaction():
-            for fid, _src, dst in done:
+            for fid, src, dst in done:
                 await conn.execute("UPDATE files SET path = $2, library_id = $3 WHERE id = $1", fid, dst, dest_lib)
+                await folder_links.apply(conn, fid, src)
     except Exception as e:                         # put back what was moved, then report
         for _fid, src, dst in reversed(done):
             try:
