@@ -23,7 +23,8 @@
    projects/goon-streamer"` (a link to `crypttube`) and
    `rm -r ~/.claude/projects/-var-home-claude-personal-projects-goon-streamer` (copied).
 5. Redeploy with a rebuild for the theming changes (web and API images both changed); then
-   try Admin → Theme. Optional: `CUSTOM_CSS_FILE` for a server stylesheet (README, "Theme").
+   try Admin → Theme. Optional: `compose.custom-css.yaml` + `CUSTOM_CSS_FILE` for a server
+   stylesheet (README, "Theme").
 6. When a GPU is installed: follow README "Hardware transcoding", check the API log for
    `hardware encoding on: ...`, then try a transcode (player quality menu: 720p).
 7. Known limits: no key rotation for upload encryption; performer pictures taken from private
@@ -41,6 +42,10 @@
   `X-Forwarded-For` (the resolved visitor address); uvicorn trusts it (`FORWARDED_ALLOW_IPS=*`).
 - Transcode slots: `TranscodeLimiter.acquire()` in the route; `TranscodeResponse` closes the
   body (stopping ffmpeg) and then releases, whatever ends the response (release is idempotent).
+- Dockhand runs Compose inside its own container (`/app/data/stacks/...`): builds work, but
+  a bind mount or config/secret `file:` relative to the repo does not exist on the host.
+  Every host file in `compose.yaml` must be an absolute path from env (or `/dev/null`);
+  repo files go into images, or into opt-in override files.
 - Pre-rename installs whose Compose refuses the old-labelled volumes set `EXISTING_VOLUMES=true`
   (volumes become external). The user's Dockhand stack needs it.
 - Volumes are named explicitly (`${VOLUME_PREFIX:-goon-streamer}_*`), so the Compose

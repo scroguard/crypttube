@@ -82,7 +82,7 @@ KEY=frontend/e2e/.uploads-key
 export UPLOADS_KEY_FILE="$PWD/$KEY"
 export CUSTOM_CSS_FILE="$PWD/frontend/e2e/custom.css"   # proves a server stylesheet is loaded
 export BACKEND_TAG=e2e   # its own image tag, so a test build never replaces the real one
-compose=(docker compose -p crypttube-e2e -f compose.yaml -f compose.e2e.yaml)
+compose=(docker compose -p crypttube-e2e -f compose.yaml -f compose.e2e.yaml -f compose.custom-css.yaml)
 cleanup() { [ "${1:-}" = "--keep" ] || "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1; }
 trap 'cleanup "${1:-}"' EXIT
 "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
