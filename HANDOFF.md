@@ -41,6 +41,8 @@
   `X-Forwarded-For` (the resolved visitor address); uvicorn trusts it (`FORWARDED_ALLOW_IPS=*`).
 - Transcode slots: `TranscodeLimiter.acquire()` in the route; `TranscodeResponse` closes the
   body (stopping ffmpeg) and then releases, whatever ends the response (release is idempotent).
+- Pre-rename installs whose Compose refuses the old-labelled volumes set `EXISTING_VOLUMES=true`
+  (volumes become external). The user's Dockhand stack needs it.
 - Volumes are named explicitly (`${VOLUME_PREFIX:-goon-streamer}_*`), so the Compose
   project name no longer decides them; `compose.e2e.yaml` names its own (`crypttube-e2e_*`), so a
   hand-run `down -v` there can't touch real data.
