@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../api/client";
-import { useDetail, useWrite } from "../api/hooks";
+import { useDetail, useRate, useWrite } from "../api/hooks";
 import type { StudioDetail as Studio } from "../api/types";
 import Chips from "../components/Chips";
 import { EntityImageControls, FormButtons } from "../components/EditForms";
@@ -15,7 +15,7 @@ export default function StudioDetail() {
   const id = Number(useParams().id);
   const q = useDetail<Studio>(`/studios/${id}`);
   const [editing, setEditing] = useState(false);
-  const rate = useWrite((rating: number | null) => api(`/studios/${id}`, { method: "PATCH", json: { rating } }));
+  const rate = useRate(`/studios/${id}`);
   if (q.isPending) return <Spinner className="mt-24" />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const s = q.data;
@@ -27,7 +27,7 @@ export default function StudioDetail() {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-3xl font-semibold">{s.name}</h1>
-            <Rating value={s.rating} onChange={canEdit ? (r) => rate.mutate(r) : undefined} />
+            <Rating key={id} value={s.rating} onChange={canEdit ? rate.save : undefined} error={rate.error} />
           </div>
           {s.parent && <p className="text-sm text-text-muted">Part of <Link to={`/studios/${s.parent.id}`} className="hover:text-text">{s.parent.name}</Link></p>}
           {s.url && <a href={s.url} target="_blank" rel="noreferrer noopener" className="text-sm text-link hover:underline">{s.url}</a>}

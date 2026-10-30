@@ -234,6 +234,26 @@ test("filters: tag filter via the filter panel", async () => {
   await expect(page.getByTestId("scene-card")).toHaveCount(3);
 });
 
+test("rate an image in the viewer", async () => {
+  await nav("Images").click();
+  await page.getByTestId("image-tile").first().click();
+  const viewer = page.getByTestId("lightbox");
+  const saved = page.waitForResponse((r) => r.request().method() === "PATCH");
+  await viewer.getByRole("button", { name: "Rate 3 of 5" }).click();
+  expect((await saved).status()).toBe(200);
+  await page.reload();
+  await page.getByTestId("image-tile").first().click();
+  await expect(viewer.locator('[aria-label^="Rating "]')).toHaveAttribute("aria-label", "Rating 3 of 5");
+
+  // Space on a focused star rates; it doesn't turn the page
+  const counter = await viewer.getByTestId("lightbox-counter").textContent();
+  await viewer.getByRole("button", { name: "Rate 2 of 5" }).focus();
+  await page.keyboard.press("Space");
+  await expect(viewer.locator('[aria-label^="Rating "]')).toHaveAttribute("aria-label", "Rating 2 of 5");
+  await expect(viewer.getByTestId("lightbox-counter")).toHaveText(counter!);
+  await page.keyboard.press("Escape");
+});
+
 test("gallery lightbox navigation", async () => {
   await nav("Galleries").click();
   await expect(page.getByTestId("gallery-card")).toHaveCount(2); // folder + zip

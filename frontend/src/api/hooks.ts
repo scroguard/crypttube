@@ -134,6 +134,16 @@ export function useWrite<TArgs, TResult = unknown>(fn: (args: TArgs) => Promise<
   });
 }
 
+/** Save a rating. `error` belongs to `path`: it doesn't follow the user to another item. */
+export function useRate(path: string) {
+  const write = useWrite(({ to, rating }: { to: string; rating: number | null }) =>
+    api(to, { method: "PATCH", json: { rating } }));
+  return {
+    save: (rating: number | null) => write.mutate({ to: path, rating }),
+    error: write.variables?.to === path ? write.error : null,
+  };
+}
+
 /** Sign out (this device or everywhere), then drop all cached data and show the login screen. */
 export function useLogout() {
   const qc = useQueryClient();

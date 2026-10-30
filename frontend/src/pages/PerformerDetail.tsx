@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useParams } from "react-router";
 import { api } from "../api/client";
-import { useDetail, useWrite } from "../api/hooks";
+import { useDetail, useRate, useWrite } from "../api/hooks";
 import type { PerformerDetail as Performer } from "../api/types";
 import Chips from "../components/Chips";
 import { EntityImageControls, FormButtons } from "../components/EditForms";
@@ -17,7 +17,7 @@ export default function PerformerDetail() {
   const id = Number(useParams().id);
   const q = useDetail<Performer>(`/performers/${id}`);
   const [editing, setEditing] = useState(false);
-  const patch = useWrite((body: object) => api(`/performers/${id}`, { method: "PATCH", json: body }));
+  const rate = useRate(`/performers/${id}`);
   const favorite = useWrite((on: boolean) => api(`/performers/${id}/favorite`, { method: "PUT", json: { favorite: on } }));
 
   if (q.isPending) return <Spinner className="mt-24" />;
@@ -51,7 +51,7 @@ export default function PerformerDetail() {
                     onClick={() => favorite.mutate(!p.favorite)} aria-pressed={p.favorite}
                     aria-label={p.favorite ? "Remove from my favourites" : "Add to my favourites"}
                     title={p.favorite ? "One of your favourites" : "Add to your favourites"}>♥</button>
-            <Rating value={p.rating} onChange={canEdit ? (rating) => patch.mutate({ rating }) : undefined} />
+            <Rating key={id} value={p.rating} onChange={canEdit ? rate.save : undefined} error={rate.error} />
             {canEdit && <div className="ml-auto flex gap-2"><button className="btn-ghost" onClick={() => setEditing(true)}>Edit</button><DeleteEntityButton kind="performers" id={id} name={p.name} /></div>}
           </div>
           {p.aliases.length > 0 && <p className="mt-1 text-sm text-text-muted">Also known as {p.aliases.join(", ")}</p>}
