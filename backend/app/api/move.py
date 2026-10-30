@@ -18,7 +18,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import counts
+from app import counts, folder_links
 from app.acl import visible
 from app.auth import User, require_user
 from app.config import get_settings
@@ -252,8 +252,9 @@ async def _move_one(pool, files: list[tuple[int, str]], dest: Path, dest_lib: in
                 await asyncio.to_thread(_move_file, src, dst)
                 done.append((fid, src, dst))
         async with pool.acquire() as conn, conn.transaction():
-            for fid, _src, dst in done:
+            for fid, src, dst in done:
                 await conn.execute("UPDATE files SET path = $2, library_id = $3 WHERE id = $1", fid, dst, dest_lib)
+                await folder_links.apply(conn, fid, src)
     except Exception as e:                         # put back what was moved, then report
         for _fid, src, dst in reversed(done):
             try:

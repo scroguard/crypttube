@@ -169,6 +169,13 @@ Highlights:
   100,000), so "search a performer's folder → select all → add performer" is three steps.
 - **Editing** (editors/admins): scenes, galleries, images, performers (incl. images),
   studios, tags (hierarchy, merge); create tags/performers/studios inline from pickers.
+- **Watched folders**: on a performer's or studio's page, link folders; files that arrive
+  in one (or below it) get tagged with everyone linked there. Choose *new files only* or
+  *all files*, which tags what's already there in a background job. You can link folders
+  in libraries whose content you can edit. A folder takes any number of performers but one
+  studio, counting the folders above and below it. Tags are only ever added: removing a
+  link keeps them, and a studio already set is never replaced. Galleries aren't tagged,
+  only the files in them (a zip's gallery counts as its file).
 - **Admin**: libraries (watch, exclusions, scan), live job monitor, users and per-user
   content restrictions.
 
