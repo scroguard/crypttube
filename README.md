@@ -118,9 +118,11 @@ backgrounds they sit on. They are warnings, not blocks. Saving stores the 30 col
 as `/api/theme.css` (sign-in included); *Use the built-in theme* removes them. Fonts and
 corner radii are part of the brand and not editable.
 
-**Your own CSS.** Set `CUSTOM_CSS_FILE` to a `.css` file on the host (readable by
-everyone) and redeploy; it is served as `/custom.css` and loaded after the app's styles, so
-it wins. It is served to anyone who can reach the site, signed in or not, so point it
+**Your own CSS.** Add `compose.custom-css.yaml` to `COMPOSE_FILE` (e.g.
+`COMPOSE_FILE=compose.yaml:compose.custom-css.yaml`, together with any other overrides),
+set `CUSTOM_CSS_FILE` to a `.css` file on the host (readable by everyone) and redeploy;
+it is served as `/custom.css` and loaded after the app's styles, so it wins. Without it,
+an empty `/custom.css` from the image is served. It is served to anyone who can reach the site, signed in or not, so point it
 only at a stylesheet. Changing a role restyles everything that uses it:
 
 ```css

@@ -1,0 +1,16 @@
+# Optional: your own stylesheet, loaded after the app's so it wins (README: "Theme").
+#
+#   COMPOSE_FILE=compose.yaml:compose.custom-css.yaml        (in .env / stack env)
+#   CUSTOM_CSS_FILE=<path ON THE HOST of a .css file readable by everyone>
+#
+# Without this file the image's own, empty /custom.css is served. (Opt-in because a stack
+# manager running Compose in a container can't mount files from the repo checkout.)
+services:
+  crypttube-web:
+    configs:
+      - source: custom_css
+        target: /usr/share/nginx/html/custom.css
+
+configs:
+  custom_css:
+    file: ${CUSTOM_CSS_FILE:?set CUSTOM_CSS_FILE to your stylesheet's path on the host}
