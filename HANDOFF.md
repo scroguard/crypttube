@@ -10,24 +10,26 @@
   label in `crypto.key_id` (part of every encrypted file's header).
 - GPU transcoding (PR #4, merged): opt-in via `compose.vaapi.yaml` (AMD/Intel) or
   `compose.nvidia.yaml`. Untested on real hardware: no GPU here or on the server yet.
-- Theming merged (#5 roles, fonts, logo; #6 server stylesheet `CUSTOM_CSS_FILE`; #7
-  Admin → Theme editor with Crypt, Crypt Lime and Ossuary presets).
+- Theming merged (#5 roles, fonts, logo; #6 server stylesheet; #7 Admin → Theme editor with
+  Crypt, Crypt Lime and Ossuary presets).
+- Deployed 2026-10-29: the Dockhand stack (named `cryptube`) runs the renamed app with the
+  pre-rename volumes (`EXISTING_VOLUMES=true`, PR #8); the server stylesheet mount became
+  opt-in (`compose.custom-css.yaml`, PR #9) because Dockhand can't mount repo files. The
+  user confirmed the library is intact. Nothing in progress.
 
 ## Next steps
-1. Point Dockhand at `https://github.com/scroguard/crypttube`.
-2. Server: stop the old stack *before* deploying the renamed one (two Postgres containers
-   must never share `pgdata`), check volume names, then redeploy with a rebuild.
-3. Behind a reverse proxy, set `TRUSTED_PROXY` (the proxy's own address) on the stack so
+1. Server: remove the leftover pre-rename containers if any remain (`docker ps -a | grep
+   goonstreamer`, then `docker rm <name>`; never their volumes).
+2. Behind a reverse proxy, set `TRUSTED_PROXY` (the proxy's own address) on the stack so
    logins are throttled per visitor (see README, "Reaching it from elsewhere").
-4. Local cleanup (once no session runs from the old path): `rm "/var/home/claude/personal
+3. Local cleanup (once no session runs from the old path): `rm "/var/home/claude/personal
    projects/goon-streamer"` (a link to `crypttube`) and
    `rm -r ~/.claude/projects/-var-home-claude-personal-projects-goon-streamer` (copied).
-5. Redeploy with a rebuild for the theming changes (web and API images both changed); then
-   try Admin → Theme. Optional: `compose.custom-css.yaml` + `CUSTOM_CSS_FILE` for a server
-   stylesheet (README, "Theme").
-6. When a GPU is installed: follow README "Hardware transcoding", check the API log for
+4. Optional: `compose.custom-css.yaml` + `CUSTOM_CSS_FILE` for a server stylesheet
+   (README, "Theme").
+5. When a GPU is installed: follow README "Hardware transcoding", check the API log for
    `hardware encoding on: ...`, then try a transcode (player quality menu: 720p).
-7. Known limits: no key rotation for upload encryption; performer pictures taken from private
+6. Known limits: no key rotation for upload encryption; performer pictures taken from private
    uploads aren't encrypted; uploads aren't resumable.
 
 ## Context & architecture
