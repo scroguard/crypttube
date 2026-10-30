@@ -76,7 +76,10 @@ the API has a published port; only the other containers on the stack's network r
 The volumes are named `goon-streamer_pgdata`, `goon-streamer_uploads` and
 `goon-streamer_generated` (the project's former name), so installs from before the rename
 keep their data. If yours carry another prefix (`docker volume ls`), set
-`VOLUME_PREFIX` to it.
+`VOLUME_PREFIX` to it. If a redeploy then fails because the volumes "already exist" (they
+still carry the old project's label, which some Compose versions won't adopt), set
+`EXISTING_VOLUMES=true`: the stack then uses them as they are. Leave it unset on a fresh
+install, where the volumes don't exist yet.
 
 ## Services
 

@@ -152,11 +152,16 @@ configs:
 # Named explicitly so the data survives a project rename (the project used to be called
 # goon-streamer, and Compose prefixes volume names with the project name). VOLUME_PREFIX
 # lets an install whose volumes carry another prefix (e.g. a stack manager's stack name)
-# keep using them.
+# keep using them. Volumes made under the old project name are labelled with it, and some
+# Compose versions refuse to adopt them; EXISTING_VOLUMES=true uses them as they are
+# (they must exist then: leave it false on a fresh install).
 volumes:
   pgdata:
     name: ${VOLUME_PREFIX:-goon-streamer}_pgdata
+    external: ${EXISTING_VOLUMES:-false}
   generated:
     name: ${VOLUME_PREFIX:-goon-streamer}_generated
+    external: ${EXISTING_VOLUMES:-false}
   uploads:
     name: ${VOLUME_PREFIX:-goon-streamer}_uploads
+    external: ${EXISTING_VOLUMES:-false}
