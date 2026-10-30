@@ -42,10 +42,9 @@ async def apply(conn: asyncpg.Connection, file_id: int, old_path: str | None = N
     so a rename can't bring back a performer someone took off by hand. `only_link` limits
     the tags to that link (back-tagging one link mustn't apply the others)."""
     links = await conn.fetch(MATCHING_LINKS, file_id, old_path)
-    studio = next((w for w in links if w["studio_id"] is not None), None)
-    performers = [w["performer_id"] for w in links if w["performer_id"] is not None
-                  and only_link in (None, w["id"])]
-    studio_id = studio["studio_id"] if studio and only_link in (None, studio["id"]) else None
+    links = [w for w in links if only_link in (None, w["id"])]
+    performers = [w["performer_id"] for w in links if w["performer_id"] is not None]
+    studio_id = next((w["studio_id"] for w in links if w["studio_id"] is not None), None)
     if not performers and studio_id is None:
         return False
 

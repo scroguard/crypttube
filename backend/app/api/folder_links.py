@@ -15,7 +15,6 @@ import os
 from pathlib import Path
 from typing import Literal
 
-import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -110,20 +109,18 @@ async def add_link(kind: Kind, entity_id: int, body: LinkBody, request: Request,
     pool = request.app.state.pool
     path, root = _folder(body.path, await _roots(pool, acl))
     column = COLUMN[kind]
-    clash = "another studio is already linked to this folder, or to one above or below it"
-    if kind == "studios" and await pool.fetchval(
-            """SELECT EXISTS (SELECT 1 FROM folder_links
-                              WHERE studio_id IS NOT NULL AND studio_id <> $1
-                                AND (path = $2 OR starts_with(path, $2 || '/') OR starts_with($2, path || '/')))""",
-            entity_id, str(path)):
-        raise HTTPException(409, clash)
-    try:
-        link_id = await pool.fetchval(
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext('folder_links'))")  # one link at a time
+        if kind == "studios" and await conn.fetchval(
+                """SELECT EXISTS (SELECT 1 FROM folder_links
+                                  WHERE studio_id IS NOT NULL AND studio_id <> $1
+                                    AND (path = $2 OR starts_with(path, $2 || '/') OR starts_with($2, path || '/')))""",
+                entity_id, str(path)):
+            raise HTTPException(409, "another studio is already linked to this folder, or to one above or below it")
+        link_id = await conn.fetchval(
             f"""INSERT INTO folder_links ({column}, library_id, path, created_by) VALUES ($1, $2, $3, $4)
                 ON CONFLICT ({column}, path) WHERE {column} IS NOT NULL DO UPDATE SET created_by = EXCLUDED.created_by
                 RETURNING id""", entity_id, root["library_id"], str(path), acl.user_id)
-    except asyncpg.UniqueViolationError:    # another studio got there first
-        raise HTTPException(409, clash) from None
     job_id = None
     if body.scope == "all":
         job_id = await jobs.enqueue(pool, folder_links.JOB_KIND, {"link_id": link_id},

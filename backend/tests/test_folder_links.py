@@ -166,6 +166,18 @@ async def test_a_studio_already_set_is_never_replaced(app, client, lib):
     assert (await scene_of(pool, root / "videos" / "vp9.webm"))["studio_id"] == linked
 
 
+async def test_backfilling_a_studio_linked_above_and_below(app, client, lib, sample_media):
+    lid, root = lib
+    pool = app.state.pool
+    st = await studio(pool, "Acme")
+    shutil.copy(sample_media / "h264.mp4", root / "inbox" / "deep" / "v.mp4")
+    await scan(app, lid)
+    await link(client, "studios", st, root / "inbox")
+    await link(client, "studios", st, root / "inbox" / "deep", "all")
+    await drain(app)
+    assert (await scene_of(pool, root / "inbox" / "deep" / "v.mp4"))["studio_id"] == st
+
+
 async def test_a_new_images_folder_gallery_is_left_alone(app, client, lib, sample_media):
     lid, root = lib
     pool = app.state.pool
