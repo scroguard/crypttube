@@ -235,8 +235,19 @@ async def test_only_the_owner_edits_their_content(app, people, alice_lib, librar
     global_scene = next(i for i in await scene_ids(alice) if i != s)
     assert (await alice.patch(f"/api/scenes/{global_scene}", json={"title": "x"})).status_code == 403
     assert (await editor.patch(f"/api/scenes/{global_scene}", json={"title": "edited"})).status_code == 200
+    # a bulk edit with one item you can't edit is refused whole: nothing changes
+    before = (await alice.get(f"/api/scenes/{s}")).json()["rating"]
     r = await alice.post("/api/scenes/bulk", json={"ids": [s, global_scene], "set": {"rating": 5}})
     assert r.status_code == 403
+    assert (await alice.get(f"/api/scenes/{s}")).json()["rating"] == before != 5
+
+    # lists say which is which, so "select this page" can tell
+    assert {i["id"]: i["can_edit"] for i in (await alice.get("/api/scenes")).json()["items"]} == {
+        s: True, **{i: False for i in await scene_ids(alice) if i != s}}
+    assert {i["id"]: i["can_edit"] for i in (await editor.get("/api/scenes")).json()["items"]}[global_scene] is True
+    images = (await alice.get("/api/images")).json()["items"]
+    assert {i["can_edit"] for i in images} == {True, False}
+    assert all(i["can_edit"] for i in (await alice.get(f"/api/galleries/{alice_lib['gallery']}/images")).json()["items"])
 
 
 # --- personal metadata ------------------------------------------------------------

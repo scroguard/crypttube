@@ -13,7 +13,7 @@ import { releaseFocus, useEscape } from "../lib/useEscape";
 import { useBrowseView } from "../lib/viewPref";
 import { useMarquee } from "../lib/useMarquee";
 import BulkBar, { fetchMatchingIds } from "./BulkBar";
-import { matchingNote } from "../lib/selection";
+import { matchingNote, skippedNote } from "../lib/selection";
 import { Field } from "./ui";
 
 const SORTS = {
@@ -54,15 +54,20 @@ export default function SceneBrowser({ fixed = {}, groupable = false, scope }: {
   useEscape(!!selected, () => { setSelected(null); setNote(null); });   // Esc leaves select mode
   // Adds to what is already selected, so pages can be gone through one by one.
   const selectShown = () => {
-    setSelected((s) => new Set([...(s ?? []), ...list.items.filter((i) => (i as { can_edit?: boolean }).can_edit !== false).map((i) => i.id)]));
-    setNote(null);
+    const editable = list.items.filter((i) => i.can_edit);
+    const selection = new Set([...(selected ?? []), ...editable.map((i) => i.id)]);
+    const skipped = list.items.length - editable.length;
+    setSelected(selection);
+    setNote(skipped ? { text: skippedNote(skipped), selection } : null);
   };
   // A paged list starts each page with nothing selected, unless the user chose to keep
   // the selection across pages (account page).
   const keepAcrossPages = usePreferences().data?.keep_selection_across_pages ?? false;
   const shownPage = list.paging?.page;
   useEffect(() => {
-    if (!keepAcrossPages) setSelected((s) => (s && s.size ? new Set() : s));
+    if (keepAcrossPages) return;
+    setSelected((s) => (s && s.size ? new Set() : s));
+    setNote(null);
   }, [shownPage]); // eslint-disable-line react-hooks/exhaustive-deps
   const deselectAll = () => { setSelected((s) => (s ? new Set() : s)); setNote(null); };
   async function selectAllMatching() {

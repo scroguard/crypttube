@@ -656,6 +656,26 @@ test("scenes and images grouped by performer", async () => {
   await expect(page.getByTestId("scene-card")).toHaveCount(3);
 });
 
+test("selecting a page skips what you can't edit, and says so", async () => {
+  // A list that mixes both, as a shared library gives someone who isn't an editor.
+  await page.route(/\/api\/images\?/, async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.items[0].can_edit = false;
+    await route.fulfill({ response, json });
+  });
+  await page.goto("/images");
+  await page.getByRole("button", { name: "Select images" }).first().click();
+  await expect(page.getByTestId("image-tile").first()).toBeVisible();
+  const shown = await page.getByTestId("image-tile").count();
+  await page.getByRole("button", { name: /^Select (this page|all shown)$/ }).first().click();
+  const bulk = page.getByTestId("bulk-bar");
+  await expect(bulk).toContainText(`${shown - 1} selected`);
+  await expect(bulk.getByTestId("select-note")).toHaveText("1 you can't edit was skipped.");
+  await page.getByRole("button", { name: "Done selecting" }).first().click();
+  await page.unroute(/\/api\/images\?/);
+});
+
 test("search by folder, select all matching, assign a performer in bulk", async () => {
   // scenes: the search box matches folder names as well as titles
   await nav("Scenes").click();
