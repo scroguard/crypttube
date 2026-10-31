@@ -6,7 +6,7 @@ import { ErrorBox, Modal, Spinner } from "./ui";
 
 interface Link {
   id: number; path: string; library: string; relative: string;
-  watching: boolean; missing: boolean;
+  watching: boolean; missing: boolean; removing: boolean;
 }
 interface Listing {
   path: string | null;
@@ -25,9 +25,10 @@ export default function FolderLinks({ kind, id }: { kind: "performers" | "studio
     queryKey: ["detail", "folder-links", kind, id],
     queryFn: () => api<{ can_link: boolean; links: Link[] }>(`/folder-links/${kind}/${id}`),
     retry: false,
+    refetchInterval: (state) => (state.state.data?.links.some((l) => l.removing) ? 2000 : false),
   });
   const [adding, setAdding] = useState(false);
-  const remove = useWrite((linkId: number) => api(`/folder-links/${kind}/${id}/${linkId}`, { method: "DELETE" }));
+  const [removing, setRemoving] = useState<Link | null>(null);
   if (!q.data?.can_link) return null;
   const links = q.data.links;
   const who = kind === "performers" ? "this performer" : "this studio";
@@ -49,15 +50,85 @@ export default function FolderLinks({ kind, id }: { kind: "performers" | "studio
               {!l.missing && !l.watching && (
                 <span className="chip" title="This library isn't watched, so new files are tagged at its next scan">tagged at next scan</span>
               )}
-              <button className="ml-auto text-text-subtle hover:text-text" aria-label={`Stop watching ${l.relative}`}
-                      disabled={remove.isPending} onClick={() => remove.mutate(l.id)}>✕</button>
+              {l.removing && <span className="chip text-warning">removing tags…</span>}
+              <button className="ml-auto text-text-subtle hover:text-text" onClick={() => setRemoving(l)}
+                      aria-label={l.removing ? `Retry removing tags from ${l.relative}` : `Stop watching ${l.relative}`}>
+                {l.removing ? "↻" : "✕"}
+              </button>
             </li>
           ))}
         </ul>
       )}
-      {remove.isError && <ErrorBox error={remove.error} />}
       {adding && <AddFolderDialog kind={kind} id={id} who={who} onClose={() => setAdding(false)} />}
+      {removing && <RemoveFolderDialog kind={kind} id={id} who={who} link={removing} onClose={() => setRemoving(null)} />}
     </section>
+  );
+}
+
+function files(n: number) {
+  return `${n} ${n === 1 ? "file" : "files"}`;
+}
+
+function RemoveFolderDialog({ kind, id, who, link, onClose }: {
+  kind: "performers" | "studios"; id: number; who: string; link: Link; onClose: () => void;
+}) {
+  const [tags, setTags] = useState<"keep" | "remove">(link.removing ? "remove" : "keep");
+  const [older, setOlder] = useState(false);
+  const impact = useQuery({
+    queryKey: ["folder-link-impact", link.id],
+    queryFn: () => api<{ remove: number; covered: number; untracked: number }>(`/folder-links/${kind}/${id}/${link.id}/impact`),
+    retry: false,
+    gcTime: 0,   // the count has to be current: it says what the button will do
+  });
+  const remove = useWrite(() => api(`/folder-links/${kind}/${id}/${link.id}`, {
+    method: "DELETE", query: { tags, older: tags === "remove" && older ? "true" : undefined },
+  }));
+  const n = impact.data;
+  return (
+    <Modal title="Stop watching this folder" onClose={onClose}>
+      <div className="space-y-3 text-sm text-text">
+        <code className="block break-all text-xs text-text-muted">{link.library}{link.relative === "." ? "" : ` / ${link.relative}`}</code>
+        <fieldset className="space-y-1">
+          <legend className="label">Files it already tagged</legend>
+          <label className="flex items-center gap-2">
+            <input type="radio" name="tags" checked={tags === "keep"} disabled={link.removing} onChange={() => setTags("keep")} />
+            Leave the tags in place
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="radio" name="tags" checked={tags === "remove"} onChange={() => setTags("remove")} />
+            Remove {who} from {n ? files(n.remove) : "the files this folder tagged"}
+          </label>
+        </fieldset>
+        {impact.isPending && <Spinner className="my-2" />}
+        {impact.isError && <ErrorBox error={impact.error} />}
+        {tags === "remove" && n && n.untracked > 0 && (
+          <div className="space-y-1">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={older} onChange={(e) => setOlder(e.target.checked)} />
+              Also remove from {n.untracked} older {n.untracked === 1 ? "file" : "files"} in this folder, hand-set tags included
+            </label>
+            <p className="text-xs text-text-muted" data-testid="older-warning">
+              These tags have no record of how they got there: they were set by hand, or added
+              before tags were tracked. Ticking this removes all of them, hand-set ones included.
+              It can't be undone. Left unticked, those {n.untracked === 1 ? "file stays" : "files stay"} tagged.
+            </p>
+          </div>
+        )}
+        {tags === "remove" && n && n.covered > 0 && (
+          <p className="text-xs text-text-muted" data-testid="remove-keeps">
+            {files(n.covered)} stay tagged because another watched folder covers them.
+          </p>
+        )}
+        {remove.isError && <ErrorBox error={remove.error} />}
+        <div className="flex justify-end gap-2">
+          <button className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" disabled={remove.isPending || (tags === "remove" && !n)}
+                  onClick={() => remove.mutate(undefined, { onSuccess: onClose })}>
+            {tags === "remove" ? "Stop watching and remove" : "Stop watching"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
