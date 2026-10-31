@@ -153,14 +153,23 @@ async def link_impact(kind: Kind, entity_id: int, link_id: int, request: Request
 
 @router.delete("/{kind}/{entity_id}/{link_id}")
 async def remove_link(kind: Kind, entity_id: int, link_id: int, request: Request,
-                      tags: Literal["keep", "remove"] = "keep", acl: Acl = Depends(get_acl)) -> Response:
+                      tags: Literal["keep", "remove"] = "keep", older: bool = False,
+                      acl: Acl = Depends(get_acl)) -> Response:
     """Stop watching a folder, leaving its tags ("keep"), or taking back the tags it added
-    ("remove"), in the background. New tagging stops at once either way; asking to remove
-    again restarts a removal that stopped."""
+    ("remove"), in the background. With `older`, removing also takes the tags in the folder
+    that no link recorded, hand-set ones included. New tagging stops at once either way;
+    asking to remove again restarts a removal that stopped."""
+    if older and tags != "remove":
+        raise HTTPException(422, "older only applies when removing tags")
     link = await _own_link(request, acl, kind, entity_id, link_id)
     pool = request.app.state.pool
     if tags == "remove":
-        await pool.execute("UPDATE folder_links SET removing_at = coalesce(removing_at, now()) WHERE id = $1", link_id)
+        async with pool.acquire() as conn, conn.transaction():
+            if await conn.fetchval("UPDATE folder_links SET removing_at = coalesce(removing_at, now()) WHERE id = $1 RETURNING id",
+                                   link_id) is None:
+                raise HTTPException(404, "link not found")
+            if older:
+                await folder_links.claim_untracked(conn, link)
         job_id = await jobs.enqueue(pool, folder_links.REMOVE_JOB_KIND, {"link_id": link_id},
                                     dedupe_key=f"{folder_links.REMOVE_JOB_KIND}:{link_id}")
         return JSONResponse({"job_id": job_id}, status_code=202)

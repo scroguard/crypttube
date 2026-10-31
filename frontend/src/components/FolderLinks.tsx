@@ -73,12 +73,16 @@ function RemoveFolderDialog({ kind, id, who, link, onClose }: {
   kind: "performers" | "studios"; id: number; who: string; link: Link; onClose: () => void;
 }) {
   const [tags, setTags] = useState<"keep" | "remove">(link.removing ? "remove" : "keep");
+  const [older, setOlder] = useState(false);
   const impact = useQuery({
     queryKey: ["folder-link-impact", link.id],
     queryFn: () => api<{ remove: number; covered: number; untracked: number }>(`/folder-links/${kind}/${id}/${link.id}/impact`),
     retry: false,
+    gcTime: 0,   // the count has to be current: it says what the button will do
   });
-  const remove = useWrite(() => api(`/folder-links/${kind}/${id}/${link.id}`, { method: "DELETE", query: { tags } }));
+  const remove = useWrite(() => api(`/folder-links/${kind}/${id}/${link.id}`, {
+    method: "DELETE", query: { tags, older: tags === "remove" && older ? "true" : undefined },
+  }));
   const n = impact.data;
   return (
     <Modal title="Stop watching this folder" onClose={onClose}>
@@ -97,11 +101,23 @@ function RemoveFolderDialog({ kind, id, who, link, onClose }: {
         </fieldset>
         {impact.isPending && <Spinner className="my-2" />}
         {impact.isError && <ErrorBox error={impact.error} />}
-        {tags === "remove" && n && (n.covered > 0 || n.untracked > 0) && (
-          <ul className="list-disc space-y-1 pl-5 text-xs text-text-muted" data-testid="remove-keeps">
-            {n.covered > 0 && <li>{files(n.covered)} stay tagged because another watched folder covers them.</li>}
-            {n.untracked > 0 && <li>{files(n.untracked)} here stay tagged because the tag was set by hand or added before tags were tracked. Remove those by hand if you want them gone.</li>}
-          </ul>
+        {tags === "remove" && n && n.untracked > 0 && (
+          <div className="space-y-1">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={older} onChange={(e) => setOlder(e.target.checked)} />
+              Also remove from {n.untracked} older {n.untracked === 1 ? "file" : "files"} in this folder, hand-set tags included
+            </label>
+            <p className="text-xs text-text-muted" data-testid="older-warning">
+              These tags have no record of how they got there: they were set by hand, or added
+              before tags were tracked. Ticking this removes all of them, hand-set ones included.
+              It can't be undone. Left unticked, those {n.untracked === 1 ? "file stays" : "files stay"} tagged.
+            </p>
+          </div>
+        )}
+        {tags === "remove" && n && n.covered > 0 && (
+          <p className="text-xs text-text-muted" data-testid="remove-keeps">
+            {files(n.covered)} stay tagged because another watched folder covers them.
+          </p>
         )}
         {remove.isError && <ErrorBox error={remove.error} />}
         <div className="flex justify-end gap-2">

@@ -259,8 +259,8 @@ async def test_a_deleted_folder_is_reported_and_the_link_kept(app, client, lib):
     assert len(links) == 1 and links[0]["missing"] is True
 
 
-async def unlink(client, kind, entity_id, made, tags="remove"):
-    r = await client.delete(f"/api/folder-links/{kind}/{entity_id}/{made['id']}", params={"tags": tags})
+async def unlink(client, kind, entity_id, made, tags="remove", **params):
+    r = await client.delete(f"/api/folder-links/{kind}/{entity_id}/{made['id']}", params={"tags": tags, **params})
     assert r.status_code == (202 if tags == "remove" else 204), r.text
 
 
@@ -318,6 +318,126 @@ async def test_a_tag_from_before_tracking_stays(app, client, lib):
     await unlink(client, "performers", a, made)
     await drain(app)
     assert await pool.fetchval("SELECT count(*) FROM scene_performers") == 3
+
+
+async def test_older_tags_go_when_asked_for(app, client, lib, sample_media):
+    lid, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    shutil.copy(root / "archive.zip", root / "videos" / "set.zip")
+    await pool.execute("UPDATE files SET oshash = 'other' WHERE path = $1", str(root / "archive.zip"))
+    await scan(app, lid)
+    made = await link(client, "performers", a, root / "videos", "all")
+    await drain(app)
+    await pool.execute("DELETE FROM folder_link_tags")      # as if tagged before tracking
+    bea = await performer(pool, "Bea")
+    tagged = await scene_of(pool, root / "videos" / "h264.mp4")
+    await pool.execute("INSERT INTO scene_performers (scene_id, performer_id) VALUES ($1, $2)", tagged["id"], bea)
+
+    assert await impact(client, "performers", a, made) == {"remove": 0, "covered": 0, "untracked": 4}
+    await unlink(client, "performers", a, made, older="true")
+    await drain(app)
+    assert await pool.fetchval("SELECT count(*) FROM scene_performers WHERE performer_id = $1", a) == 0
+    assert await pool.fetchval("SELECT count(*) FROM gallery_performers") == 0
+    assert await pool.fetchval("SELECT count(*) FROM image_performers") == 0     # the zip's images too
+    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["performer_ids"] == [bea]
+    assert await pool.fetchval("SELECT count(*) FROM folder_links") == 0
+
+
+async def test_older_only_reaches_inside_the_folder(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    a, st = await performer(pool, "Ann"), await studio(pool, "Acme")
+    by_performer = await link(client, "performers", a, root / "inbox")
+    by_studio = await link(client, "studios", st, root / "inbox")
+    elsewhere = await scene_of(pool, root / "videos" / "h264.mp4")
+    await pool.execute("INSERT INTO scene_performers (scene_id, performer_id) VALUES ($1, $2)", elsewhere["id"], a)
+    await pool.execute("UPDATE scenes SET studio_id = $2 WHERE id = $1", elsewhere["id"], st)
+    await unlink(client, "performers", a, by_performer, older="true")
+    await unlink(client, "studios", st, by_studio, older="true")
+    await drain(app)
+    row = await scene_of(pool, root / "videos" / "h264.mp4")
+    assert row["performer_ids"] == [a] and row["studio_id"] == st
+
+
+async def test_older_studio_tags_go_and_other_studios_stay(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    st, other = await studio(pool, "Acme"), await studio(pool, "Other")
+    made = await link(client, "studios", st, root / "videos")
+    hand = await scene_of(pool, root / "videos" / "h264.mp4")
+    kept = await scene_of(pool, root / "videos" / "h265.mkv")
+    await pool.execute("UPDATE scenes SET studio_id = $2 WHERE id = $1", hand["id"], st)
+    await pool.execute("UPDATE scenes SET studio_id = $2 WHERE id = $1", kept["id"], other)
+    assert await impact(client, "studios", st, made) == {"remove": 0, "covered": 0, "untracked": 1}
+    await unlink(client, "studios", st, made, older="true")
+    await drain(app)
+    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["studio_id"] is None
+    assert (await scene_of(pool, root / "videos" / "h265.mkv"))["studio_id"] == other
+
+
+async def test_older_takes_what_was_there_when_asked(app, client, lib):
+    """Something tagged by hand while the job waits wasn't in the count, so it stays."""
+    _, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    made = await link(client, "performers", a, root / "videos")
+    first = await scene_of(pool, root / "videos" / "h264.mp4")
+    later = await scene_of(pool, root / "videos" / "h265.mkv")
+    await pool.execute("INSERT INTO scene_performers (scene_id, performer_id) VALUES ($1, $2)", first["id"], a)
+    await unlink(client, "performers", a, made, older="true")
+    await pool.execute("INSERT INTO scene_performers (scene_id, performer_id) VALUES ($1, $2)", later["id"], a)
+    await drain(app)
+    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["performer_ids"] == []
+    assert (await scene_of(pool, root / "videos" / "h265.mkv"))["performer_ids"] == [a]
+
+
+async def test_older_leaves_what_another_folder_covers(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    a = await performer(pool, "Ann")
+    inner = await link(client, "performers", a, root / "videos")
+    await link(client, "performers", a, root)
+    row = await scene_of(pool, root / "videos" / "h264.mp4")
+    await pool.execute("INSERT INTO scene_performers (scene_id, performer_id) VALUES ($1, $2)", row["id"], a)
+    assert await impact(client, "performers", a, inner) == {"remove": 0, "covered": 1, "untracked": 0}
+    await unlink(client, "performers", a, inner, older="true")
+    await drain(app)
+    assert (await scene_of(pool, root / "videos" / "h264.mp4"))["performer_ids"] == [a]
+
+
+async def test_older_needs_a_removal(app, client, lib):
+    _, root = lib
+    a = await performer(app.state.pool, "Ann")
+    made = await link(client, "performers", a, root / "videos")
+    r = await client.delete(f"/api/folder-links/performers/{a}/{made['id']}", params={"tags": "keep", "older": "true"})
+    assert r.status_code == 422
+    assert await app.state.pool.fetchval("SELECT count(*) FROM folder_links") == 1
+
+
+async def test_a_stopped_removal_finishes_the_older_tags(app, client, lib, monkeypatch):
+    _, root = lib
+    pool = app.state.pool
+    monkeypatch.setattr(folder_links, "BATCH", 1)
+    a = await performer(pool, "Ann")
+    made = await link(client, "performers", a, root / "videos", "all")
+    await drain(app)
+    await pool.execute("DELETE FROM folder_link_tags")
+    await unlink(client, "performers", a, made, older="true")
+
+    class Stops:
+        calls = 0
+        async def cancelled(self):
+            Stops.calls += 1
+            return Stops.calls > 1
+        async def progress(self, *a):
+            pass
+
+    assert (await folder_links.remove_tags(pool, Stops(), made["id"])).startswith("stopped")
+    assert await pool.fetchval("SELECT count(*) FROM scene_performers") == 2
+    await unlink(client, "performers", a, made)     # the older tags were claimed the first time
+    await drain(app)
+    assert await pool.fetchval("SELECT count(*) FROM scene_performers") == 0
 
 
 async def test_a_folder_still_linked_keeps_the_tag(app, client, lib, sample_media):

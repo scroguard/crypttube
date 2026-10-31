@@ -1459,13 +1459,23 @@ test("watched folder: link a folder to a performer and tag what's already there"
   await expect.poll(async () => (await (await page.request.get(`/api/performers/${id}`)).json()).scene_count,
                     { timeout: 30_000 }).toBeGreaterThan(0);
 
-  // stop watching and take the tags back
+  // one scene becomes hand-tagged: taken off and put back, so the folder no longer owns it
+  const scenes = (await (await page.request.get(`/api/scenes?performer_ids=${id}`)).json()).items;
+  const hand = { headers: { "X-Requested-With": "e2e" } };
+  for (const performer_ids of [[], [id]])
+    expect((await page.request.patch(`/api/scenes/${scenes[0].id}`, { ...hand, data: { performer_ids } })).ok()).toBeTruthy();
+
+  // stop watching and take the tags back, the hand-set one included
   await section.getByRole("button", { name: /Stop watching/ }).click();
   const stop = page.getByRole("dialog", { name: "Stop watching this folder" });
   await expect(stop.getByRole("radio", { name: "Leave the tags in place" })).toBeChecked();
   const remove = stop.getByRole("radio", { name: /Remove this performer from \d+ files?/ });
   await expect(remove).toBeVisible();
   await remove.check();
+  const older = stop.getByRole("checkbox", { name: "Also remove from 1 older file in this folder, hand-set tags included" });
+  await expect(older).not.toBeChecked();
+  await expect(stop.getByTestId("older-warning")).toContainText("hand-set ones included");
+  await older.check();
   await stop.getByRole("button", { name: "Stop watching and remove" }).click();
   await expect(stop).toBeHidden();
   await expect(section.locator("code")).toHaveCount(0, { timeout: 30_000 });

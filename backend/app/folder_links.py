@@ -5,7 +5,8 @@ it) is tagged with everyone linked to that folder.
 back-tagging job. It only ever adds: a performer already there is left alone and a studio
 already set is never replaced, so running it twice changes nothing. It also records what it
 added (folder_link_tags), which is what unlinking a folder may take back: `remove_tags`
-touches nothing else, so tags set by hand and tags from before the records began stay.
+touches nothing else, so tags set by hand and tags from before the records began stay,
+unless the person unlinking asks for those too (`claim_untracked`).
 
 A folder can have many performers but one studio, and folders holding different studios
 can't nest (api/folder_links.py refuses it), so at most one studio ever covers a file.
@@ -118,25 +119,53 @@ def _covered(column: str) -> str:
                              AND o.{column} = $2 AND o.id <> $1 AND o.removing_at IS NULL))"""
 
 
+def _untracked(column: str) -> str:
+    """Tags on what the folder's files hold that no link recorded: set by hand, or from
+    before tags were recorded. Takes the link id, the performer or studio, the library and
+    the folder with a trailing slash."""
+    holds = (f"JOIN {{kind}}_performers j ON j.{{kind}}_id = c.id AND j.performer_id = $2"
+             if column == "performer_id" else "")
+    studio = "" if column == "performer_id" else "WHERE c.studio_id = $2"
+    parts = [f"""SELECT '{kind}'::text AS kind, c.id AS content_id, {file} AS file_id
+                 FROM {table} c {holds.format(kind=kind)} {via} {studio}"""
+             for kind, table, file, via in (
+                 ("scene", "scenes", "c.file_id", ""),
+                 ("image", "images", "c.file_id", ""),
+                 ("gallery", "galleries", "c.zip_file_id", ""),
+                 ("image", "images", "g.zip_file_id",
+                  "JOIN gallery_images gi ON gi.image_id = c.id JOIN galleries g ON g.id = gi.gallery_id"))]
+    return f"""SELECT t.kind, t.content_id, t.file_id, {_covered(column)} AS covered
+               FROM ({' UNION '.join(parts)}) t JOIN files f ON f.id = t.file_id
+               WHERE f.library_id = $3 AND starts_with(f.path, $4) AND f.zip_file_id IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM folder_link_tags r JOIN folder_links o ON o.id = r.link_id
+                                 WHERE r.kind = t.kind AND r.content_id = t.content_id AND o.{column} = $2)"""
+
+
 async def impact(pool: asyncpg.Pool, link) -> dict:
     """What removing a link's tags would do, in files: `remove` lose the tag, `covered` keep
     it through another linked folder, and `untracked` are in the folder with a tag no link
-    recorded (set by hand, or from before tags were recorded), which always stays."""
+    recorded, which stays unless they're asked for (`claim_untracked`)."""
     column, value = _entity(link)
-    row = await pool.fetchrow(
-        f"""SELECT count(DISTINCT t.file_id) FILTER (WHERE NOT {_covered(column)}) AS remove,
-                   count(DISTINCT t.file_id) FILTER (WHERE {_covered(column)}) AS covered
-            FROM folder_link_tags t JOIN files f ON f.id = t.file_id WHERE t.link_id = $1""", link["id"], value)
-    has_tag = "$1 = ANY(c.performer_ids)" if column == "performer_id" else "c.studio_id = $1"
-    parts = [f"""SELECT f.id FROM {table} c JOIN files f ON f.id = c.{join}
-                 WHERE f.library_id = $3 AND starts_with(f.path, $2) AND f.zip_file_id IS NULL AND {has_tag}
-                   AND NOT EXISTS (SELECT 1 FROM folder_link_tags t JOIN folder_links o ON o.id = t.link_id
-                                   WHERE t.kind = '{kind}' AND t.content_id = c.id AND o.{column} = $1)"""
-             for kind, table, join in (("scene", "scenes", "file_id"), ("image", "images", "file_id"),
-                                       ("gallery", "galleries", "zip_file_id"))]
-    untracked = await pool.fetchval(f"SELECT count(*) FROM ({' UNION '.join(parts)}) x",
-                                    value, link["path"] + "/", link["library_id"])
-    return {"remove": row["remove"], "covered": row["covered"], "untracked": untracked}
+    return dict(await pool.fetchrow(
+        f"""WITH u AS ({_untracked(column)}),
+                 r AS (SELECT t.file_id, {_covered(column)} AS covered
+                       FROM folder_link_tags t JOIN files f ON f.id = t.file_id WHERE t.link_id = $1)
+            SELECT (SELECT count(DISTINCT file_id) FROM r WHERE NOT covered) AS remove,
+                   (SELECT count(*) FROM (SELECT file_id FROM r WHERE covered
+                                          UNION SELECT file_id FROM u WHERE covered) c) AS covered,
+                   (SELECT count(DISTINCT file_id) FROM u WHERE NOT covered) AS untracked""",
+        link["id"], value, link["library_id"], link["path"] + "/"))
+
+
+async def claim_untracked(conn: asyncpg.Connection, link) -> None:
+    """Make the folder's untracked tags this link's, so `remove_tags` takes them too. Done
+    in the request, so however long the job takes, a tag set after this has no record and
+    stays."""
+    column, value = _entity(link)
+    await conn.execute(
+        f"""INSERT INTO folder_link_tags (link_id, kind, content_id, file_id)
+            SELECT $1::bigint, kind, content_id, file_id FROM ({_untracked(column)}) u WHERE NOT covered
+            ON CONFLICT DO NOTHING""", link["id"], value, link["library_id"], link["path"] + "/")
 
 
 async def _take_back(conn, link, kind: str, content_id: int, file_id: int) -> bool:

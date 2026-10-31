@@ -70,8 +70,10 @@
   `items from ink/` (untracked, excluded locally in `.git/info/exclude`).
 - Unlinking with "remove tags": `folder_link_tags` records what each link added; triggers
   drop a record when its tag goes, so a tag re-added by hand counts as hand-set. A tag with
-  no record is never claimed or removed. `folder_links.removing_at` stops tagging at once;
-  the job deletes the link when it's done, and asking again resumes it.
+  no record is never claimed by tagging; `older=true` on the unlink claims the folder's
+  unrecorded tags (except those another link covers) in the request, so the job takes
+  exactly what was there then. `folder_links.removing_at` stops tagging at once; the job
+  deletes the link when it's done, and asking again resumes it.
 - Watched folders: `app/folder_links.py` `apply` is the only writer (scanner, Move, backfill
   job). It runs in the indexing transaction, so a failure leaves the file "new" for the next
   scan. Links are checked against their creator's rights at tag time.
