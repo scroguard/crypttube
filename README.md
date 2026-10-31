@@ -167,6 +167,8 @@ Highlights:
   and tags). **Select all matching** selects everything that matches the current search and
   filters, loaded or not (`GET /api/ids/{scenes,images}`, editable items only, up to
   100,000), so "search a performer's folder → select all → add performer" is three steps.
+  It replaces the current selection, and the selection bar says how many items aren't on this
+  page, what it replaced and how many it skipped because you can't edit them.
 - **Editing** (editors/admins): scenes, galleries, images, performers (incl. images),
   studios, tags (hierarchy, merge); create tags/performers/studios inline from pickers.
 - **Watched folders**: on a performer's or studio's page, link folders; files that arrive

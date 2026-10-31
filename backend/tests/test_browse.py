@@ -573,9 +573,11 @@ async def test_ids_of_everything_matching(app, client, login_as, seed):
 
     # only what the caller may edit: a viewer can edit nothing in a global library
     viewer = await login_as("idsviewer", "viewer")
-    assert (await viewer.get("/api/ids/scenes")).json() == {"ids": [], "truncated": False, "limit": 100_000}
+    assert (await viewer.get("/api/ids/scenes")).json() == {"ids": [], "truncated": False, "limit": 100_000,
+                                                            "skipped": len(present)}
     editor = await login_as("idseditor", "editor")
-    assert len((await editor.get("/api/ids/scenes")).json()["ids"]) == len(present)
+    body = (await editor.get("/api/ids/scenes")).json()
+    assert len(body["ids"]) == len(present) and body["skipped"] == 0
     # and the ids can be bulk-edited in one go
     ids = (await editor.get("/api/ids/scenes", params={"q": "Scene 1"})).json()["ids"]
     r = await editor.post("/api/scenes/bulk", json={"ids": ids, "performers": {"mode": "add", "ids": [seed["performers"]["Carol"]]}})
@@ -586,7 +588,7 @@ async def test_select_all_is_capped(app, client, seed, monkeypatch):
     from app.api import browse
     monkeypatch.setattr(browse, "SELECT_ALL_LIMIT", 5)
     body = (await client.get("/api/ids/scenes")).json()
-    assert len(body["ids"]) == 5 and body["truncated"] is True
+    assert len(body["ids"]) == 5 and body["truncated"] is True and body["skipped"] == 0
 
 
 async def test_offset_jumps_to_a_page(client, seed):

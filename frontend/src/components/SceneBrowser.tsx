@@ -13,6 +13,7 @@ import { releaseFocus, useEscape } from "../lib/useEscape";
 import { useBrowseView } from "../lib/viewPref";
 import { useMarquee } from "../lib/useMarquee";
 import BulkBar, { fetchMatchingIds } from "./BulkBar";
+import { matchingNote } from "../lib/selection";
 import { Field } from "./ui";
 
 const SORTS = {
@@ -47,7 +48,9 @@ export default function SceneBrowser({ fixed = {}, groupable = false, scope }: {
   const query = { ...toQuery(f, SCENE_FILTERS), ...fixed };
   const list = useInfiniteList<SceneItem>("/scenes", query, { withTotal: true, enabled: !grouped });
 
-  const [note, setNote] = useState<string | null>(null);
+  // Belongs to the selection it describes: any change to that makes a new Set, and hides it.
+  const [matched, setNote] = useState<{ text: string; selection: Set<number> } | null>(null);
+  const note = matched && matched.selection === selected ? matched.text : undefined;
   useEscape(!!selected, () => { setSelected(null); setNote(null); });   // Esc leaves select mode
   // Adds to what is already selected, so pages can be gone through one by one.
   const selectShown = () => {
@@ -63,9 +66,11 @@ export default function SceneBrowser({ fixed = {}, groupable = false, scope }: {
   }, [shownPage]); // eslint-disable-line react-hooks/exhaustive-deps
   const deselectAll = () => { setSelected((s) => (s ? new Set() : s)); setNote(null); };
   async function selectAllMatching() {
+    const before = selected?.size ?? 0;
     const r = await fetchMatchingIds("scenes", query);
-    setSelected(new Set(r.ids));
-    setNote(r.truncated ? `Selected the first ${r.limit.toLocaleString()} matches.` : r.ids.length ? null : "Nothing here that you can edit.");
+    const selection = new Set(r.ids);
+    setSelected(selection);
+    setNote({ text: matchingNote(r, before, list.items.map((i) => i.id)), selection });
   }
   const active = ["tags", "xtags", "performers", "unassigned", "studios", "res", "rating", "organized", "played", "missing"]
     .filter((k) => f[k] !== undefined).length;
@@ -106,7 +111,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false, scope }: {
             <button className="btn-ghost" onClick={deselectAll} disabled={!selected?.size}>Deselect all</button>
           </>
         )}
-        {note && <span className="text-xs text-warning">{note}</span>}
+        {note && !selected?.size && <span className="text-xs text-warning">{note}</span>}
         {!grouped && <PageSizeSelect />}
         <span className="ml-auto text-sm text-text-subtle" data-testid="total">
           {!grouped && list.total != null && plural(list.total, "scene")}
@@ -195,7 +200,7 @@ export default function SceneBrowser({ fixed = {}, groupable = false, scope }: {
         </div>
       )}
       {selected && selected.size > 0 && (
-        <BulkBar kind="scenes" ids={[...selected]} onDone={() => setSelected(new Set())} onSelectAll={selectShown} />
+        <BulkBar kind="scenes" ids={[...selected]} note={note} onDone={() => setSelected(new Set())} onSelectAll={selectShown} />
       )}
     </div>
   );

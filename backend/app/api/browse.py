@@ -335,12 +335,15 @@ def editable_clause(acl: Acl, alias: str, q: Q) -> str:
     return f"{alias}.library_id IN ({owned})"
 
 
-async def _matching_ids(pool, from_: str, alias: str, where: list[str], args: list) -> dict:
+async def _matching_ids(pool, from_: str, alias: str, where: list[str], editable: str, args: list) -> dict:
+    """What "select all" selects, and `skipped`: the matches the viewer sees but can't edit."""
+    match = " AND ".join(where)
     rows = await pool.fetch(
-        f"SELECT {alias}.id FROM {from_} WHERE {' AND '.join(where)} ORDER BY {alias}.id LIMIT {SELECT_ALL_LIMIT + 1}",
+        f"SELECT {alias}.id FROM {from_} WHERE {match} AND {editable} ORDER BY {alias}.id LIMIT {SELECT_ALL_LIMIT + 1}",
         *args)
+    skipped = await pool.fetchval(f"SELECT count(*) FROM {from_} WHERE {match} AND NOT coalesce({editable}, false)", *args)
     ids = [r["id"] for r in rows[:SELECT_ALL_LIMIT]]
-    return {"ids": ids, "truncated": len(rows) > SELECT_ALL_LIMIT, "limit": SELECT_ALL_LIMIT}
+    return {"ids": ids, "truncated": len(rows) > SELECT_ALL_LIMIT, "limit": SELECT_ALL_LIMIT, "skipped": skipped}
 
 
 @router.get("/ids/scenes")
@@ -351,8 +354,8 @@ async def scene_ids_matching(request: Request, f: Annotated[SceneFilter, Query()
     pool = request.app.state.pool
     f = await expand_hierarchies(pool, f)
     q = Q()
-    where = [*scene_where(q, f, acl), editable_clause(acl, "s", q)]
-    return await _matching_ids(pool, SCENE_FROM, "s", where, q.args)
+    where = scene_where(q, f, acl)
+    return await _matching_ids(pool, SCENE_FROM, "s", where, editable_clause(acl, "s", q), q.args)
 
 
 @router.get("/scenes/{scene_id}")
@@ -550,11 +553,11 @@ async def image_ids_matching(request: Request, f: Annotated[ImageIdsFilter, Quer
     pool = request.app.state.pool
     f = await expand_hierarchies(pool, f)
     q = Q()
-    where = [IMAGE_PRESENT, *content_where(q, f, "image", "i", acl), editable_clause(acl, "i", q)]
+    where = [IMAGE_PRESENT, *content_where(q, f, "image", "i", acl)]
     if f.gallery_id is not None:
         where.append(f"EXISTS (SELECT 1 FROM gallery_images gi WHERE gi.image_id = i.id "
                      f"AND gi.gallery_id = {q.p(f.gallery_id)})")
-    return await _matching_ids(pool, IMAGE_FROM, "i", where, q.args)
+    return await _matching_ids(pool, IMAGE_FROM, "i", where, editable_clause(acl, "i", q), q.args)
 
 
 class GalleryImagesParams(ListParams):

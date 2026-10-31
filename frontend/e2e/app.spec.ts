@@ -411,6 +411,15 @@ test("items per page: paged browsing instead of continuous scroll", async () => 
   await below.getByRole("button", { name: "Select images" }).click();
   await below.getByRole("button", { name: "Select this page" }).click();
   await expect(page.getByTestId("bulk-bar")).toContainText("5 selected");   // still on page 2
+  // "Select all matching" says what it did beyond this page, until the selection changes
+  await below.getByRole("button", { name: "Select all matching" }).click();
+  const selectNote = page.getByTestId("select-note");
+  await expect(selectNote).toContainText("are not on this page.");
+  await expect(selectNote).toContainText("This replaced your earlier selection of 5.");
+  await below.getByRole("button", { name: "Deselect all" }).click();
+  await below.getByRole("button", { name: "Select this page" }).click();
+  await expect(page.getByTestId("bulk-bar")).toContainText("5 selected");
+  await expect(selectNote).toHaveCount(0);
   // scrolled down, the site header, the toolbar and the selection buttons stay on screen
   await page.setViewportSize({ width: 1440, height: 420 });
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
@@ -665,6 +674,7 @@ test("search by folder, select all matching, assign a performer in bulk", async 
   await page.getByRole("button", { name: "Select all matching" }).click();
   const bulk = page.getByTestId("bulk-bar");
   await expect(bulk).toContainText("12 selected");
+  await expect(bulk.getByTestId("select-note")).toHaveText("Selected all 12 matches.");
   await bulk.getByLabel("Performers…").fill("Brad");
   await page.getByRole("option", { name: "Create “Brad”" }).click();
   await bulk.getByRole("button", { name: "Add performers" }).click();

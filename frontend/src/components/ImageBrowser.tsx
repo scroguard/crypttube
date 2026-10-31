@@ -5,6 +5,7 @@ import type { ImageItem } from "../api/types";
 import { useMarquee } from "../lib/useMarquee";
 import { SearchBox } from "./FilterBar";
 import BulkBar, { fetchMatchingIds } from "./BulkBar";
+import { matchingNote } from "../lib/selection";
 import { ImageTile } from "./Cards";
 import InfiniteGrid from "./InfiniteGrid";
 import Lightbox from "./Lightbox";
@@ -24,7 +25,9 @@ export default function ImageBrowser({ path, query: given = {}, selecting, onSel
   const list = useInfiniteList<ImageItem>(path, query, { limit: 120, withTotal: true });
   const [open, setOpen] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number> | null>(selecting ? new Set() : null);
-  const [note, setNote] = useState<string | null>(null);
+  // Belongs to the selection it describes: any change to that makes a new Set, and hides it.
+  const [matched, setNote] = useState<{ text: string; selection: Set<number> } | null>(null);
+  const note = matched && matched.selection === selected ? matched.text : undefined;
   // Follow the parent's select mode without remounting (which would lose the current page).
   useEffect(() => {
     if (selecting === undefined) return;
@@ -60,9 +63,11 @@ export default function ImageBrowser({ path, query: given = {}, selecting, onSel
   }, [shownPage]); // eslint-disable-line react-hooks/exhaustive-deps
   const deselectAll = () => { setSelected((s) => (s ? new Set() : s)); setNote(null); };
   async function selectAllMatching() {
+    const before = selected?.size ?? 0;
     const r = await fetchMatchingIds("images", idsQuery);
-    setSelected(new Set(r.ids));
-    setNote(r.truncated ? `Selected the first ${r.limit.toLocaleString()} matches.` : r.ids.length ? null : "Nothing here that you can edit.");
+    const selection = new Set(r.ids);
+    setSelected(selection);
+    setNote({ text: matchingNote(r, before, list.items.map((i) => i.id)), selection });
   }
   return (
     <>
@@ -73,7 +78,7 @@ export default function ImageBrowser({ path, query: given = {}, selecting, onSel
         <div className="sticky z-20 -mx-4 mb-2 flex flex-wrap items-center justify-end gap-2 bg-bg/90 px-4 py-1.5 backdrop-blur"
              style={{ top: "calc(3.5rem + var(--toolbar-h, 0px))" }} data-testid="select-top">
           {scope && <span className="mr-auto"><SearchBox value={q} onChange={setQ} placeholder={`Search in ${scope}…`} /></span>}
-          {note && <span className="text-xs text-warning">{note}</span>}
+          {note && !selected?.size && <span className="text-xs text-warning">{note}</span>}
           {selected && (
           <>
             <button className="btn-ghost" onClick={selectShown}
@@ -112,7 +117,7 @@ export default function ImageBrowser({ path, query: given = {}, selecting, onSel
         </div>
       )}
       {selected && selected.size > 0 && (
-        <BulkBar kind="images" ids={[...selected]} onDone={() => setSelected(new Set())}
+        <BulkBar kind="images" ids={[...selected]} note={note} onDone={() => setSelected(new Set())}
                  onSelectAll={selectShown} />
       )}
       {/* In paged mode the lightbox steps through the current page only. */}
