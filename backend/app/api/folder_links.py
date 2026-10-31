@@ -173,7 +173,6 @@ async def remove_link(kind: Kind, entity_id: int, link_id: int, request: Request
         job_id = await jobs.enqueue(pool, folder_links.REMOVE_JOB_KIND, {"link_id": link_id},
                                     dedupe_key=f"{folder_links.REMOVE_JOB_KIND}:{link_id}")
         return JSONResponse({"job_id": job_id}, status_code=202)
-    if link["removing_at"] is not None:
+    if await pool.fetchval("DELETE FROM folder_links WHERE id = $1 AND removing_at IS NULL RETURNING id", link_id) is None:
         raise HTTPException(409, "this folder's tags are already being removed")
-    await pool.execute("DELETE FROM folder_links WHERE id = $1", link_id)
     return Response(status_code=204)
