@@ -25,6 +25,7 @@ export default function FolderLinks({ kind, id }: { kind: "performers" | "studio
     queryKey: ["detail", "folder-links", kind, id],
     queryFn: () => api<{ can_link: boolean; links: Link[] }>(`/folder-links/${kind}/${id}`),
     retry: false,
+    refetchInterval: (state) => (state.state.data?.links.some((l) => l.removing) ? 2000 : false),
   });
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Link | null>(null);

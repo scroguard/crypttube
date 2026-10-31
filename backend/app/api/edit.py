@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import counts, crypto, generated, jobs
+from app import counts, crypto, folder_links, generated, jobs
 from app.api import media as media_api
 from app.api.libraries import media_file_path
 from app.auth import require_admin
@@ -245,6 +245,10 @@ async def bulk_edit(kind_path: str, body: BulkEdit, request: Request, acl: Acl) 
             await _bulk_links(conn, f"{kind}_tags", f"{kind}_id", "tag_id", ids, body.tags)
         if body.performers:
             await _bulk_links(conn, f"{kind}_performers", f"{kind}_id", "performer_id", ids, body.performers)
+            if body.performers.mode != "remove" and body.performers.ids:
+                await folder_links.disown(conn, kind, ids, "performer_id", body.performers.ids)
+        if fields.get("studio_id") is not None:
+            await folder_links.disown(conn, kind, ids, "studio_id", [fields["studio_id"]])
 
     await _write(request, fn)
     return {"updated": len(ids)}

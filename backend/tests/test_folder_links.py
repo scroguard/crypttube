@@ -377,6 +377,38 @@ async def test_a_hand_edit_changes_who_owns_the_tag(app, client, lib):
     assert (await scene_of(pool, root / "videos" / "h265.mkv"))["performer_ids"] == [a]
 
 
+async def test_a_bulk_edit_makes_the_tag_the_persons(app, client, lib):
+    _, root = lib
+    pool = app.state.pool
+    a, st = await performer(pool, "Ann"), await studio(pool, "Acme")
+    by_performer = await link(client, "performers", a, root / "videos", "all")
+    by_studio = await link(client, "studios", st, root / "videos", "all")
+    await drain(app)
+    scene = await scene_of(pool, root / "videos" / "h264.mp4")
+    r = await client.post("/api/scenes/bulk", json={"ids": [scene["id"]], "set": {"studio_id": st},
+                                                    "performers": {"ids": [a], "mode": "add"}})
+    assert r.status_code == 200, r.text
+    assert await impact(client, "performers", a, by_performer) == {"remove": 2, "covered": 0, "untracked": 1}
+    await unlink(client, "performers", a, by_performer)
+    await unlink(client, "studios", st, by_studio)
+    await drain(app)
+    kept = await scene_of(pool, root / "videos" / "h264.mp4")
+    assert kept["performer_ids"] == [a] and kept["studio_id"] == st
+    gone = await scene_of(pool, root / "videos" / "vp9.webm")
+    assert gone["performer_ids"] == [] and gone["studio_id"] is None
+
+
+async def test_a_deleted_gallery_leaves_no_record(app, client, lib):
+    lid, root = lib
+    pool = app.state.pool
+    st = await studio(pool, "Acme")
+    made = await link(client, "studios", st, root, "all")
+    await drain(app)
+    assert await pool.fetchval("SELECT count(*) FROM folder_link_tags WHERE kind = 'gallery'") == 1
+    await pool.execute("DELETE FROM galleries WHERE zip_file_id IS NOT NULL")
+    assert await pool.fetchval("SELECT count(*) FROM folder_link_tags WHERE kind = 'gallery'") == 0
+
+
 async def test_a_file_moved_out_loses_the_tag_its_link_added(app, client, lib, sample_media):
     lid, root = lib
     pool = app.state.pool

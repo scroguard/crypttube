@@ -97,6 +97,14 @@ async def _tag_studio(conn, w, kind: str, table: str, ids: list[int], file_id: i
             SELECT count(*) FROM added""", ids, w["studio_id"], w["id"], kind, file_id)
 
 
+async def disown(conn: asyncpg.Connection, kind: str, ids: list[int], column: str, values: list[int]) -> None:
+    """Someone set these tags on purpose, so they're theirs now, whichever link added them."""
+    await conn.execute(
+        f"""DELETE FROM folder_link_tags t USING folder_links w
+            WHERE t.link_id = w.id AND t.kind = $1 AND t.content_id = ANY($2::bigint[])
+              AND w.{column} = ANY($3::bigint[])""", kind, ids, values)
+
+
 def _entity(link) -> tuple[str, int]:
     return ("performer_id", link["performer_id"]) if link["performer_id"] is not None else ("studio_id", link["studio_id"])
 
@@ -165,6 +173,8 @@ async def remove_tags(pool: asyncpg.Pool, ctx: JobContext, link_id: int) -> str:
     done = removed = 0
     while True:
         if await ctx.cancelled():
+            if removed:
+                await counts.request_refresh(pool)
             return f"stopped: {removed} tags removed so far"
         rows = await pool.fetch(
             f"SELECT kind, content_id, file_id FROM folder_link_tags WHERE link_id = $1 LIMIT {BATCH}", link_id)

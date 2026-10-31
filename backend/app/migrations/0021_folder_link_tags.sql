@@ -29,6 +29,18 @@ CREATE TRIGGER folder_link_tags_gone AFTER DELETE ON image_performers
 CREATE TRIGGER folder_link_tags_gone AFTER DELETE ON gallery_performers
     FOR EACH ROW EXECUTE FUNCTION folder_link_performer_removed('gallery', 'gallery_id');
 
+CREATE FUNCTION folder_link_content_deleted() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    DELETE FROM folder_link_tags WHERE kind = TG_ARGV[0] AND content_id = OLD.id;
+    RETURN NULL;
+END $$;
+CREATE TRIGGER folder_link_tags_content AFTER DELETE ON scenes
+    FOR EACH ROW EXECUTE FUNCTION folder_link_content_deleted('scene');
+CREATE TRIGGER folder_link_tags_content AFTER DELETE ON images
+    FOR EACH ROW EXECUTE FUNCTION folder_link_content_deleted('image');
+CREATE TRIGGER folder_link_tags_content AFTER DELETE ON galleries
+    FOR EACH ROW EXECUTE FUNCTION folder_link_content_deleted('gallery');
+
 CREATE FUNCTION folder_link_studio_changed() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     DELETE FROM folder_link_tags t USING folder_links w
