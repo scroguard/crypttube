@@ -74,6 +74,8 @@
   unrecorded tags (except those another link covers) in the request, so the job takes
   exactly what was there then. `folder_links.removing_at` stops tagging at once; the job
   deletes the link when it's done, and asking again resumes it.
+- "Select all matching": `GET /api/ids/*` also returns `skipped` (visible but not editable);
+  `lib/selection.ts` writes the note, which is tied to the selection Set it describes.
 - Watched folders: `app/folder_links.py` `apply` is the only writer (scanner, Move, backfill
   job). It runs in the indexing transaction, so a failure leaves the file "new" for the next
   scan. Links are checked against their creator's rights at tag time.

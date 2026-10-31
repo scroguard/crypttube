@@ -3,6 +3,7 @@ import type { Playback } from "../api/types";
 import { buildUrl } from "../api/client";
 import { SCENE_FILTERS, readFilters, toQuery, writeFilters } from "./filters";
 import { age, formatBytes, formatDuration, resolutionLabel } from "./format";
+import { matchingNote } from "./selection";
 import { sourceUrl, usableModes } from "./playback";
 import { isMediaFile } from "./upload";
 import { parsePageSize } from "./pageSize";
@@ -113,5 +114,24 @@ describe("upload file types", () => {
     expect(isMediaFile("notes.txt", fromServer)).toBe(false);
     expect(isMediaFile(".hidden.jpg", fromServer)).toBe(false);
     expect(isMediaFile("noextension", fromServer)).toBe(false);
+  });
+});
+
+describe("matchingNote", () => {
+  const r = (over = {}) => ({ ids: [1, 2, 3], truncated: false, limit: 100000, skipped: 0, ...over });
+  it("stays short when everything is on screen", () => {
+    expect(matchingNote(r(), 0, [1, 2, 3])).toBe("Selected all 3 matches.");
+    expect(matchingNote(r({ ids: [1] }), 0, [1])).toBe("Selected all 1 match.");
+  });
+  it("names what can't be seen from the grid", () => {
+    expect(matchingNote(r({ skipped: 1 }), 2, [1])).toBe(
+      "Selected all 3 matches. 2 of them are not on this page. This replaced your earlier selection of 2. 1 you can't edit was skipped.");
+  });
+  it("says when it stopped at the limit", () => {
+    expect(matchingNote(r({ truncated: true }), 0, [1, 2, 3])).toBe("Selected the first 3 matches.");
+  });
+  it("says when nothing could be selected, and what went", () => {
+    expect(matchingNote(r({ ids: [], skipped: 4 }), 2, [])).toBe(
+      "Nothing here that you can edit. This replaced your earlier selection of 2. 4 you can't edit were skipped.");
   });
 });

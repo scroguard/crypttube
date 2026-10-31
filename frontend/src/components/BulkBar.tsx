@@ -5,6 +5,7 @@ import { useMe, useWrite } from "../api/hooks";
 import DeleteMediaButton from "./DeleteMedia";
 import MoveDialog from "./MoveDialog";
 import EntityPicker, { creator } from "./EntityPicker";
+import type { Matching } from "../lib/selection";
 import { ErrorBox } from "./ui";
 
 const CHUNK = 5000;
@@ -13,13 +14,13 @@ interface Assigned { id: number; name: string; count: number }
 type AssignedKind = "tags" | "performers" | "studios";
 
 /** Fetch the ids of everything matching a list's filters that the user may edit. */
-export async function fetchMatchingIds(kind: "scenes" | "images", query: Query): Promise<{ ids: number[]; truncated: boolean; limit: number }> {
+export async function fetchMatchingIds(kind: "scenes" | "images", query: Query): Promise<Matching> {
   return api(`/ids/${kind}`, { query });
 }
 
 /** Actions on a selection of scenes, galleries or images (one set-based request each). */
-export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
-  kind: "scenes" | "galleries" | "images"; ids: number[]; onDone: () => void; onSelectAll: () => void;
+export default function BulkBar({ kind, ids, note, onDone, onSelectAll }: {
+  kind: "scenes" | "galleries" | "images"; ids: number[]; note?: string; onDone: () => void; onSelectAll: () => void;
 }) {
   const [tags, setTags] = useState<number[]>([]);
   const [performers, setPerformers] = useState<number[]>([]);
@@ -109,6 +110,7 @@ export default function BulkBar({ kind, ids, onDone, onSelectAll }: {
           <strong>{ids.length.toLocaleString()}</strong> selected
           <button className="ml-2 text-xs text-text-muted underline" onClick={onSelectAll}>select all shown</button>
           <button className="ml-2 text-xs text-text-muted underline" onClick={onDone}>clear</button>
+          {note && <p className="mt-0.5 max-w-xl text-xs text-warning" data-testid="select-note">{note}</p>}
         </div>
         <div className="flex items-end gap-2 max-sm:flex-wrap" role="group" aria-label="Tags">
           <div className="w-64"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} placeholder="Tags…" /></div>
