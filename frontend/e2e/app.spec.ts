@@ -577,9 +577,21 @@ test("assign performers to images (bulk + lightbox) and to a scene (inline)", as
   // lightbox: shows who is in the image, and can edit it
   await page.getByTestId("image-tile").first().click();
   await expect(page.getByTestId("lightbox-meta")).toContainText("Alice");
-  await page.getByTestId("lightbox").getByRole("button", { name: "Edit" }).click();
+  // make this image Alice's picture from the viewer: she has none, so nothing to confirm
+  const viewer = page.getByTestId("lightbox");
+  const refreshed = page.waitForResponse((r) => /\/api\/images\/\d+(\?|$)/.test(r.url()) && r.request().method() === "GET");
+  await viewer.getByRole("button", { name: "Set as Alice's picture" }).click();
+  await expect(viewer.getByRole("button", { name: "✓ Alice's picture" })).toBeVisible();
+  await refreshed;
+  await viewer.getByRole("button", { name: "Edit" }).click();
   const dialog = page.getByRole("dialog", { name: "Edit image" });
-  // make this image Alice's picture, straight from the image's edit dialog
+  // now she has one: the edit dialog offers it too, and asks before replacing it
+  const asked: string[] = [];
+  page.once("dialog", (d) => { asked.push(d.message()); return d.dismiss(); });
+  await dialog.getByRole("button", { name: "Set as Alice's picture" }).click();
+  await expect.poll(() => asked).toEqual(["Replace Alice's picture? The current one will be lost."]);
+  await expect(dialog.getByRole("button", { name: "Set as Alice's picture" })).toBeVisible();   // declined: unchanged
+  page.once("dialog", (d) => d.accept());
   await dialog.getByRole("button", { name: "Set as Alice's picture" }).click();
   await expect(dialog.getByRole("button", { name: "✓ Alice's picture" })).toBeVisible();
   const alice = await page.getByTestId("lightbox-meta").getByRole("link", { name: "Alice" }).getAttribute("href");

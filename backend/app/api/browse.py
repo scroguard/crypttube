@@ -238,6 +238,7 @@ SCENE_SORTS = {
 
 class SceneFilter(ContentFilter):
     sort: str = "created_at"
+    editable: bool = Field(False, description="only what the viewer may edit")
     duration_min: float | None = Field(None, ge=0)
     duration_max: float | None = Field(None, ge=0)
     height_min: int | None = Field(None, ge=0, description="minimum vertical resolution")
@@ -312,7 +313,7 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
         from_=SCENE_FROM,
         select=SCENE_SELECT,
         sorts=SCENE_SORTS,
-        where=lambda q: scene_where(q, f, acl),
+        where=lambda q: [*scene_where(q, f, acl), *([editable_clause(acl, "s", q)] if f.editable else [])],
         enrich=lambda q: _scene_enrich(q, acl),
     )
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
@@ -508,6 +509,7 @@ IMAGE_PRESENT = "f.missing_since IS NULL AND z.missing_since IS NULL"
 
 class ImageFilter(ContentFilter):
     sort: str = "created_at"
+    editable: bool = Field(False, description="only what the viewer may edit")
     thumb_w: int = 320
 
 
@@ -536,7 +538,8 @@ async def list_images(request: Request, f: Annotated[ImageFilter, Query()],
     f = await expand_hierarchies(request.app.state.pool, f)
     lq = ListQuery(
         alias="i", from_=IMAGE_FROM, select=IMAGE_SELECT, sorts=IMAGE_SORTS,
-        where=lambda q: [IMAGE_PRESENT, *content_where(q, f, "image", "i", acl)],
+        where=lambda q: [IMAGE_PRESENT, *content_where(q, f, "image", "i", acl),
+                         *([editable_clause(acl, "i", q)] if f.editable else [])],
     )
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
                           cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
@@ -603,7 +606,8 @@ async def get_image(image_id: int, request: Request, acl: Acl = Depends(get_acl)
                (SELECT jsonb_build_object('id', x.id, 'name', x.name) FROM studios x WHERE x.id = i.studio_id) AS studio,
                (SELECT coalesce(jsonb_agg(jsonb_build_object('id', g.id, 'title', g.title) ORDER BY g.id), '[]')
                 FROM gallery_images gi JOIN galleries g ON g.id = gi.gallery_id WHERE gi.image_id = i.id) AS galleries,
-               (SELECT coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name)
+               (SELECT coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'name', x.name, 'owner_id', x.owner_id,
+                                                             'has_image', x.image_path IS NOT NULL)
                                           ORDER BY x.name COLLATE natural_sort), '[]')
                 FROM image_performers l JOIN performers x ON x.id = l.performer_id
                 WHERE l.image_id = i.id) AS performers,
@@ -616,6 +620,8 @@ async def get_image(image_id: int, request: Request, acl: Acl = Depends(get_acl)
         raise HTTPException(404, "image not found")
     out = dict(row)
     _edit_flags(out, acl)
+    for p in out["performers"]:
+        p["can_edit"] = may_edit(acl, p.pop("owner_id"))
     out.update(image_urls(image_id, out.pop("file_id"), out.pop("mod_time"), 1280, out.pop("assets_rev")))
     del out["studio_id"]
     return out

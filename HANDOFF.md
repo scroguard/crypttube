@@ -74,6 +74,9 @@
   unrecorded tags (except those another link covers) in the request, so the job takes
   exactly what was there then. `folder_links.removing_at` stops tagging at once; the job
   deletes the link when it's done, and asking again resumes it.
+- Entity pictures from the library (`entity_image_from_library`, random) need edit rights
+  on the source as well as the entity, for admins too, so a shared image can't be
+  republished through a global performer. `/image/from-path` only reads `/media`.
 - "Select all matching": `GET /api/ids/*` also returns `skipped` (visible but not editable);
   `lib/selection.ts` writes the note, which is tied to the selection Set it describes.
 - Watched folders: `app/folder_links.py` `apply` is the only writer (scanner, Move, backfill

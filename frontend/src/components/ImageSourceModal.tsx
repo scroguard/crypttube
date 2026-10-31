@@ -125,7 +125,7 @@ function LibrarySource({ kind, id, onPick }: { kind: Kind; id: number; onPick: (
   const list = useInfiniteQuery({
     queryKey: ["image-source", what, q, filter],
     queryFn: ({ pageParam }) =>
-      api<Page<ImageItem | SceneItem>>(`/${what}`, { query: { ...filter, q: q || undefined, limit: 60, thumb_w: 320, cursor: pageParam } }),
+      api<Page<ImageItem | SceneItem>>(`/${what}`, { query: { ...filter, editable: true, q: q || undefined, limit: 60, thumb_w: 320, cursor: pageParam } }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });

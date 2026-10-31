@@ -169,6 +169,12 @@ Highlights:
   100,000), so "search a performer's folder → select all → add performer" is three steps.
   It replaces the current selection, and the selection bar says how many items aren't on this
   page, what it replaced and how many it skipped because you can't edit them.
+- **Performer pictures**: in the image viewer (or the image's Edit dialog), *Set as X's
+  picture* uses that image for a performer tagged on it, asking first if it replaces one;
+  the old picture isn't kept. You need edit rights on both the performer and the image,
+  for this, the library picker and the random picture alike. So end users can use their
+  own images on their own performers, and a user's library is never a source for anyone
+  else, admins included, even when it's shared with them.
 - **Editing** (editors/admins): scenes, galleries, images, performers (incl. images),
   studios, tags (hierarchy, merge); create tags/performers/studios inline from pickers.
 - **Watched folders**: on a performer's or studio's page, link folders; files that arrive
