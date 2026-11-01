@@ -656,7 +656,7 @@ test("scenes and images grouped by performer", async () => {
   await expect(page.getByTestId("scene-card")).toHaveCount(3);
 });
 
-test("selecting a page skips what you can't edit, and says so", async () => {
+test("what you can't edit can't be selected by click, box or page", async () => {
   // A list that mixes both, as a shared library gives someone who isn't an editor.
   await page.route(/\/api\/images\?/, async (route) => {
     const response = await route.fetch();
@@ -668,12 +668,45 @@ test("selecting a page skips what you can't edit, and says so", async () => {
   await page.getByRole("button", { name: "Select images" }).first().click();
   await expect(page.getByTestId("image-tile").first()).toBeVisible();
   const shown = await page.getByTestId("image-tile").count();
-  await page.getByRole("button", { name: /^Select (this page|all shown)$/ }).first().click();
   const bulk = page.getByTestId("bulk-bar");
+
+  // a click does nothing
+  const locked = page.getByTestId("image-tile").first();
+  await expect(locked).toHaveAttribute("aria-disabled", "true");
+  await locked.click({ force: true });
+  await expect(bulk).toHaveCount(0);
+
+  // a box started on it takes only the next one
+  const from = (await locked.boundingBox())!;
+  const to = (await page.getByTestId("image-tile").nth(1).boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect(bulk).toContainText("1 selected");
+  await page.getByRole("button", { name: "Deselect all" }).first().click();
+
+  await page.getByRole("button", { name: /^Select (this page|all shown)$/ }).first().click();
   await expect(bulk).toContainText(`${shown - 1} selected`);
   await expect(bulk.getByTestId("select-note")).toHaveText("1 you can't edit was skipped.");
   await page.getByRole("button", { name: "Done selecting" }).first().click();
   await page.unroute(/\/api\/images\?/);
+
+  // scene cards too
+  await page.route(/\/api\/scenes\?/, async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.items[0].can_edit = false;
+    await route.fulfill({ response, json });
+  });
+  await page.goto("/scenes");
+  await page.getByRole("button", { name: "Select", exact: true }).first().click();
+  const card = page.getByTestId("scene-card").first();
+  await card.getByRole("link").first().click({ force: true });
+  await expect(page).toHaveURL(/\/scenes(\?|$)/);
+  await expect(bulk).toHaveCount(0);
+  await page.getByRole("button", { name: "Done selecting" }).first().click();
+  await page.unroute(/\/api\/scenes\?/);
 });
 
 test("search by folder, select all matching, assign a performer in bulk", async () => {

@@ -63,15 +63,20 @@ function SpriteFrame({ cue, cues, width }: { cue: SpriteCue; cues: SpriteCue[]; 
   );
 }
 
+const NOT_EDITABLE = "You can't edit this, so it can't be selected";
+
 export const SceneCard = memo(function SceneCard({ scene, selected, onToggle }: {
   scene: SceneItem; selected?: boolean; onToggle?: (id: number) => void;
 }) {
   const { box, cue, cues, handlers } = useHoverScrub(scene);
   const res = resolutionLabel(scene.height);
   const progress = scene.resume_time && scene.duration ? Math.min(1, scene.resume_time / scene.duration) : 0;
+  const locked = !!onToggle && !scene.can_edit;
   return (
-    <div className="group" data-testid="scene-card" data-select-id={onToggle ? scene.id : undefined}>
-      <Link to={`/scenes/${scene.id}`} onClick={(e) => { if (onToggle) { e.preventDefault(); onToggle(scene.id); } }}>
+    <div className={`group ${locked ? "opacity-50" : ""}`} data-testid="scene-card" title={locked ? NOT_EDITABLE : undefined}
+         data-select-id={onToggle && !locked ? scene.id : undefined} data-select-locked={locked ? "" : undefined}>
+      <Link to={`/scenes/${scene.id}`} aria-disabled={locked || undefined}
+            onClick={(e) => { if (onToggle) { e.preventDefault(); if (!locked) onToggle(scene.id); } }}>
         <div ref={box} {...handlers}
              className={`relative aspect-video overflow-hidden rounded-lg bg-surface ring-2 ${selected ? "ring-accent" : "ring-transparent"}`}>
           <img src={scene.screenshot_url} alt="" loading="lazy" decoding="async"
@@ -85,7 +90,7 @@ export const SceneCard = memo(function SceneCard({ scene, selected, onToggle }: 
           {progress > 0 && (
             <div className="absolute inset-x-0 bottom-0 h-1 bg-border"><div className="h-full bg-accent" style={{ width: `${progress * 100}%` }} /></div>
           )}
-          {onToggle && (
+          {onToggle && !locked && (
             <div className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded border-2 ${selected ? "border-accent bg-accent text-accent-fg" : "border-text/80 bg-overlay"}`}>
               {selected && "✓"}
             </div>
@@ -130,17 +135,20 @@ export const GalleryCard = memo(function GalleryCard({ gallery }: { gallery: Gal
 export const ImageTile = memo(function ImageTile({ image, onOpen, selected, onToggle }: {
   image: ImageItem; onOpen: () => void; selected?: boolean; onToggle?: (id: number) => void;
 }) {
+  const locked = !!onToggle && !image.can_edit;
   return (
-    <button onClick={() => (onToggle ? onToggle(image.id) : onOpen())} data-testid="image-tile" aria-pressed={onToggle ? !!selected : undefined}
-            data-select-id={onToggle ? image.id : undefined}
-            className={`relative block aspect-square w-full overflow-hidden rounded-md bg-surface ring-2 focus:ring-focus ${selected ? "ring-accent" : "ring-transparent"}`}>
+    <button onClick={() => (onToggle ? !locked && onToggle(image.id) : onOpen())} data-testid="image-tile"
+            aria-pressed={onToggle && !locked ? !!selected : undefined} aria-disabled={locked || undefined}
+            title={locked ? NOT_EDITABLE : undefined}
+            data-select-id={onToggle && !locked ? image.id : undefined} data-select-locked={locked ? "" : undefined}
+            className={`relative block aspect-square w-full overflow-hidden rounded-md bg-surface ring-2 focus:ring-focus ${selected ? "ring-accent" : "ring-transparent"} ${locked ? "opacity-50" : ""}`}>
       <img src={image.thumbnail_url} alt={image.title ?? ""} loading="lazy" decoding="async"
            className="h-full w-full object-cover transition-transform duration-200 hover:scale-[1.03]" />
       {image.live_url && (
         <span className="absolute left-1.5 top-1.5 rounded bg-overlay px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-text"
               data-testid="live-badge">LIVE</span>
       )}
-      {onToggle && (
+      {onToggle && !locked && (
         <span className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded border-2 text-sm ${selected ? "border-accent bg-accent text-accent-fg" : "border-text/80 bg-overlay"}`}>
           {selected && "✓"}
         </span>
