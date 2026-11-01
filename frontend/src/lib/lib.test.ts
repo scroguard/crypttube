@@ -3,7 +3,7 @@ import type { Playback } from "../api/types";
 import { buildUrl } from "../api/client";
 import { SCENE_FILTERS, readFilters, toQuery, writeFilters } from "./filters";
 import { age, formatBytes, formatDuration, resolutionLabel } from "./format";
-import { matchingNote } from "./selection";
+import { matchingNote, skippedNote } from "./selection";
 import { sourceUrl, usableModes } from "./playback";
 import { isMediaFile } from "./upload";
 import { parsePageSize } from "./pageSize";
@@ -118,6 +118,10 @@ describe("upload file types", () => {
 });
 
 describe("matchingNote", () => {
+  it("counts what it skipped the same way as the page buttons", () => {
+    expect(skippedNote(1)).toBe("1 you can't edit was skipped.");
+    expect(skippedNote(1200)).toBe(`${(1200).toLocaleString()} you can't edit were skipped.`);
+  });
   const r = (over = {}) => ({ ids: [1, 2, 3], truncated: false, limit: 100000, skipped: 0, ...over });
   it("stays short when everything is on screen", () => {
     expect(matchingNote(r(), 0, [1, 2, 3])).toBe("Selected all 3 matches.");

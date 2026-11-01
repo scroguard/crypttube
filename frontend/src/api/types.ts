@@ -24,6 +24,7 @@ export interface AuthStatus {
 }
 
 export interface SceneItem {
+  can_edit: boolean;
   id: number;
   title: string | null;
   duration: number | null;
@@ -109,6 +110,7 @@ export interface GalleryDetail extends GalleryItem {
 }
 
 export interface ImageItem {
+  can_edit: boolean;
   id: number;
   title: string | null;
   width: number | null;

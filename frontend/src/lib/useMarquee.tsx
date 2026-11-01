@@ -69,7 +69,7 @@ export function useMarquee(enabled: boolean, onAdd: (ids: number[]) => void): { 
       const target = e.target as HTMLElement;
       // Controls keep their own behaviour (search box, buttons in the bars, menus…).
       if (target.closest("input, textarea, select, nav, [data-no-marquee], [role=dialog], [role=listbox]")) return;
-      if (target.closest("button, a") && !target.closest("[data-select-id]")) return;
+      if (target.closest("button, a") && !target.closest("[data-select-id], [data-select-locked]")) return;
       start = { x: e.clientX + scrollX, y: e.clientY + scrollY };
       pointer = { x: e.clientX, y: e.clientY };
     };
@@ -98,7 +98,7 @@ export function useMarquee(enabled: boolean, onAdd: (ids: number[]) => void): { 
     };
     // No native image/link drag-and-drop while selecting: it would hijack the gesture.
     const onDragStart = (e: DragEvent) => {
-      if ((e.target as HTMLElement).closest?.("[data-select-id]")) e.preventDefault();
+      if ((e.target as HTMLElement).closest?.("[data-select-id], [data-select-locked]")) e.preventDefault();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && dragging && stop();
 

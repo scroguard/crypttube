@@ -273,12 +273,14 @@ def scene_where(q: Q, f: SceneFilter, acl: Acl) -> list[str]:
 SCENE_FROM = "scenes s JOIN files f ON f.id = s.file_id"
 SCENE_SELECT = """s.id, s.title, s.duration, s.width, s.height, s.release_date, s.rating,
                   s.organized, s.play_count, s.studio_id, s.created_at,
-                  s.assets_rev, f.id AS file_id, f.oshash, f.missing_since IS NOT NULL AS missing"""
+                  s.assets_rev, f.id AS file_id, f.oshash, f.missing_since IS NOT NULL AS missing,
+                  (SELECT l.owner_id FROM library_paths l WHERE l.id = s.library_id) AS library_owner_id"""
 
 
-def finish_scene(it: dict, thumb_w: int) -> dict:
+def finish_scene(it: dict, thumb_w: int, acl: Acl) -> dict:
     """Turn a SCENE_SELECT (+ enrich) row into the list item clients get."""
     it["screenshot_url"] = scene_thumb(it, thumb_w)
+    it["can_edit"] = may_edit(acl, it.pop("library_owner_id"))
     for k in ("file_id", "oshash", "studio_id", "assets_rev"):
         del it[k]
     return it
@@ -292,7 +294,7 @@ async def scenes_by_id(pool, ids: list[int], acl: Acl, thumb_w: int) -> dict[int
     rows = await pool.fetch(
         f"""WITH p AS (SELECT {SCENE_SELECT} FROM {SCENE_FROM} WHERE s.id = ANY({ph}::bigint[]))
             SELECT p.* {cols} FROM p {joins}""", *q.args)
-    return {r["id"]: finish_scene(dict(r), thumb_w) for r in rows}
+    return {r["id"]: finish_scene(dict(r), thumb_w, acl) for r in rows}
 
 
 def _scene_enrich(q: Q, acl: Acl) -> tuple[str, str]:
@@ -319,7 +321,7 @@ async def list_scenes(request: Request, f: Annotated[SceneFilter, Query()],
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
                           cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
     for it in page.items:
-        finish_scene(it, f.thumb_w)
+        finish_scene(it, f.thumb_w, acl)
     return page_response(page)
 
 
@@ -501,7 +503,8 @@ IMAGE_SORTS = {
     "rating": Sort("coalesce(i.rating, -1)", "smallint"),
 }
 IMAGE_SELECT = """i.id, i.title, i.width, i.height, i.rating, i.organized, i.assets_rev,
-                  f.id AS file_id, f.mod_time, i.live_scene_id"""
+                  f.id AS file_id, f.mod_time, i.live_scene_id,
+                  (SELECT l.owner_id FROM library_paths l WHERE l.id = i.library_id) AS library_owner_id"""
 IMAGE_JOINS = "JOIN files f ON f.id = i.file_id LEFT JOIN files z ON z.id = f.zip_file_id"
 IMAGE_FROM = f"images i {IMAGE_JOINS}"
 IMAGE_PRESENT = "f.missing_since IS NULL AND z.missing_since IS NULL"
@@ -513,22 +516,23 @@ class ImageFilter(ContentFilter):
     thumb_w: int = 320
 
 
-def finish_image(it: dict, w: int) -> dict:
+def finish_image(it: dict, w: int, acl: Acl) -> dict:
+    it["can_edit"] = may_edit(acl, it.pop("library_owner_id"))
     it.update(image_urls(it["id"], it.pop("file_id"), it.pop("mod_time"), w, it.pop("assets_rev")))
     live = it.pop("live_scene_id", None)
     it["live_url"] = f"/api/images/{it['id']}/live.mp4?s={live}" if live else None
     return it
 
 
-def _image_items(page, w: int) -> dict:
+def _image_items(page, w: int, acl: Acl) -> dict:
     for it in page.items:
-        finish_image(it, w)
+        finish_image(it, w, acl)
     return page_response(page)
 
 
 async def images_by_id(pool, ids: list[int], acl: Acl, thumb_w: int) -> dict[int, dict]:
     rows = await pool.fetch(f"SELECT {IMAGE_SELECT} FROM {IMAGE_FROM} WHERE i.id = ANY($1::bigint[])", ids)
-    return {r["id"]: finish_image(dict(r), thumb_w) for r in rows}
+    return {r["id"]: finish_image(dict(r), thumb_w, acl) for r in rows}
 
 
 @router.get("/images")
@@ -543,7 +547,7 @@ async def list_images(request: Request, f: Annotated[ImageFilter, Query()],
     )
     page = await paginate(request.app.state.pool, lq, sort=f.sort, desc=f.desc,
                           cursor=f.cursor, offset=f.offset, limit=f.limit, with_total=f.with_total)
-    return _image_items(page, f.thumb_w)
+    return _image_items(page, f.thumb_w, acl)
 
 
 class ImageIdsFilter(ImageFilter):
@@ -590,7 +594,7 @@ async def gallery_images(gallery_id: int, request: Request, f: Annotated[Gallery
     )
     page = await paginate(pool, lq, sort="position", desc=f.desc, cursor=f.cursor,
                           offset=f.offset, limit=f.limit, with_total=f.with_total)
-    return _image_items(page, f.thumb_w)
+    return _image_items(page, f.thumb_w, acl)
 
 
 @router.get("/images/{image_id}")

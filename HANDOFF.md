@@ -79,6 +79,9 @@
   republished through a global performer. `/image/from-path` only reads `/media`.
 - "Select all matching": `GET /api/ids/*` also returns `skipped` (visible but not editable);
   `lib/selection.ts` writes the note, which is tied to the selection Set it describes.
+- Scene and image list items carry `can_edit`. Bulk edit is all-or-nothing per request (403
+  if any item isn't editable), but the client sends chunks of 5,000. Cards lock what can't
+  be edited while selecting, so a click or box can't pick it.
 - Watched folders: `app/folder_links.py` `apply` is the only writer (scanner, Move, backfill
   job). It runs in the indexing transaction, so a failure leaves the file "new" for the next
   scan. Links are checked against their creator's rights at tag time.
