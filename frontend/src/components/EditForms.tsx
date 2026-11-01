@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api/client";
 import { useWrite } from "../api/hooks";
-import type { Ref } from "../api/types";
+import type { ImageDetail, Ref } from "../api/types";
 import EntityPicker, { creator } from "./EntityPicker";
 import ImageSourceModal, { CropModal } from "./ImageSourceModal";
 import { ErrorBox, Field, Modal, Toggle } from "./ui";
@@ -71,8 +71,13 @@ export function ContentEditModal({ kind, item, onClose }: {
         <Field label="Studio"><EntityPicker kind="studios" single value={studio} onChange={setStudio} onCreate={creator("studios")} /></Field>
         <div className="sm:col-span-2"><Field label="Performers"><EntityPicker kind="performers" value={performers} onChange={setPerformers} onCreate={creator("performers")} /></Field></div>
         <div className="sm:col-span-2"><Field label="Tags"><EntityPicker kind="tags" value={tags} onChange={setTags} onCreate={creator("tags")} /></Field></div>
-        {kind === "images" && item.performers.length > 0 && (
-          <div className="sm:col-span-2"><UseAsPerformerPicture imageId={item.id} performers={item.performers} /></div>
+        {kind === "images" && (item as ImageDetail).performers.some((p) => p.can_edit) && (
+          <div className="sm:col-span-2" data-testid="use-as-picture">
+            <span className="label">Use as performer picture</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <PerformerPictureButtons imageId={item.id} performers={(item as ImageDetail).performers} className="btn-ghost py-1" />
+            </div>
+          </div>
         )}
         {kind !== "images" && (
           <div className="sm:col-span-2"><Field label="Details"><textarea className="input min-h-24" value={details} onChange={(e) => setDetails(e.target.value)} /></Field></div>
@@ -87,24 +92,26 @@ export function ContentEditModal({ kind, item, onClose }: {
   );
 }
 
-/** For an image: make it the profile picture of a performer it is assigned to. */
-function UseAsPerformerPicture({ imageId, performers }: { imageId: number; performers: Ref[] }) {
+/** For an image: make it the profile picture of a performer it is assigned to. Offered for
+ *  performers the viewer may edit; the server checks that, and the image, again. */
+export function PerformerPictureButtons({ imageId, performers, className }: {
+  imageId: number; performers: ImageDetail["performers"]; className: string;
+}) {
   const [done, setDone] = useState<Set<number>>(new Set());
   const use = useWrite((performerId: number) =>
     api(`/performers/${performerId}/image/from-library`, { json: { image_id: imageId } }));
+  const replace = (p: ImageDetail["performers"][number]) =>
+    !p.has_image || confirm(`Replace ${p.name}'s picture? The current one will be lost.`);
   return (
-    <div data-testid="use-as-picture">
-      <span className="label">Use as performer picture</span>
-      <div className="flex flex-wrap items-center gap-2">
-        {performers.map((p) => (
-          <button key={p.id} type="button" className="btn-ghost py-1" disabled={use.isPending}
-                  onClick={() => use.mutate(p.id, { onSuccess: () => setDone((d) => new Set(d).add(p.id)) })}>
-            {done.has(p.id) ? `✓ ${p.name}'s picture` : `Set as ${p.name}'s picture`}
-          </button>
-        ))}
-      </div>
-      {use.isError && <ErrorBox error={use.error} className="mt-2" />}
-    </div>
+    <>
+      {performers.filter((p) => p.can_edit).map((p) => (
+        <button key={p.id} type="button" className={className} disabled={use.isPending}
+                onClick={() => replace(p) && use.mutate(p.id, { onSuccess: () => setDone((d) => new Set(d).add(p.id)) })}>
+          {done.has(p.id) ? `✓ ${p.name}'s picture` : `Set as ${p.name}'s picture`}
+        </button>
+      ))}
+      {use.isError && <ErrorBox error={use.error} />}
+    </>
   );
 }
 

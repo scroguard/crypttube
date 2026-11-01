@@ -212,6 +212,72 @@ async def test_image_from_library_respects_visibility(app, people, alice_lib):
     assert (await editor.post(f"/api/performers/{mine}/image/from-library", json={"image_id": hers})).status_code == 404
 
 
+async def _first_image(c, alice_lib):
+    return (await c.get(f"/api/galleries/{alice_lib['gallery']}/images")).json()["items"][0]["id"]
+
+
+async def test_a_private_image_never_reaches_a_performer(app, people, alice_lib):
+    """Not for an admin either, by any of the ways in, even tagged with their performer."""
+    alice, admin = people["alice"], people["admin"]
+    hers = await _first_image(alice, alice_lib)
+    target = (await admin.post("/api/performers", json={"name": "Global One"})).json()["id"]
+    r = await alice.patch(f"/api/images/{hers}", json={"performer_ids": [target]})
+    assert r.status_code == 200, r.text
+    assert (await admin.get(f"/api/images/{hers}")).status_code == 404
+    for body in ({"image_id": hers}, {"scene_id": alice_lib["scene"]}):
+        assert (await admin.post(f"/api/performers/{target}/image/from-library", json=body)).status_code == 404
+    assert (await admin.post(f"/api/performers/{target}/image/random")).status_code == 404
+    assert (await admin.get(f"/api/performers/{target}")).json()["image_url"] is None
+
+
+async def test_a_shared_image_is_seen_but_cant_become_a_picture(app, people, alice_lib):
+    """Sharing lets people look. It doesn't let them put the image in front of others."""
+    alice, bob, admin = people["alice"], people["bob"], people["admin"]
+    await alice.patch(f"/api/my/libraries/{alice_lib['id']}",
+                      json={"visibility": "users", "shared_user_ids": [bob.user_id, admin.user_id]})
+    hers = await _first_image(alice, alice_lib)
+    global_one = (await admin.post("/api/performers", json={"name": "Global Two"})).json()["id"]
+    r = await alice.patch(f"/api/images/{hers}", json={"performer_ids": [global_one]})
+    assert r.status_code == 200, r.text
+    assert (await admin.get(f"/api/images/{hers}")).status_code == 200      # the admin can look
+    for body in ({"image_id": hers}, {"scene_id": alice_lib["scene"]}):
+        r = await admin.post(f"/api/performers/{global_one}/image/from-library", json=body)
+        assert r.status_code == 403
+    assert (await admin.post(f"/api/performers/{global_one}/image/random")).status_code == 404
+    assert (await admin.get(f"/api/performers/{global_one}")).json()["image_url"] is None
+
+    # and the picker doesn't offer it, while the owner's still does
+    for path in ("images", "scenes"):
+        assert (await bob.get(f"/api/{path}", params={"editable": True})).json()["items"] == []
+        assert (await bob.get(f"/api/{path}")).json()["items"]
+        assert (await alice.get(f"/api/{path}", params={"editable": True})).json()["items"]
+
+
+async def test_an_end_user_uses_only_their_own_images_on_their_own_performers(app, people, alice_lib, indexed):
+    alice, admin = people["alice"], people["admin"]
+    hers = await _first_image(alice, alice_lib)
+    mine = (await alice.post("/api/performers", json={"name": "Hers Too"})).json()["id"]
+    shared = (await admin.post("/api/performers", json={"name": "Global Three"})).json()["id"]
+    r = await alice.patch(f"/api/images/{hers}", json={"performer_ids": [mine, shared]})
+    assert r.status_code == 200, r.text
+
+    # the shared performer stays out of reach, and the image says so
+    detail = {p["name"]: p for p in (await alice.get(f"/api/images/{hers}")).json()["performers"]}
+    assert detail["Hers Too"] == {"id": mine, "name": "Hers Too", "has_image": False, "can_edit": True}
+    assert detail["Global Three"]["can_edit"] is False
+    assert (await alice.post(f"/api/performers/{shared}/image/from-library", json={"image_id": hers})).status_code == 403
+    assert (await alice.post(f"/api/performers/{shared}/image/random")).status_code == 403
+
+    assert (await alice.post(f"/api/performers/{mine}/image/random")).status_code == 200
+    assert (await alice.get(f"/api/images/{hers}")).json()["performers"][1]["has_image"] is True
+
+    # the main library isn't hers to edit, so it's no source either
+    main = (await admin.get("/api/images")).json()["items"]
+    plain = next(i["id"] for i in main if i["id"] != hers)
+    r = await alice.post(f"/api/performers/{mine}/image/from-library", json={"image_id": plain})
+    assert r.status_code == 403
+
+
 async def test_image_from_media_store_is_admin_only(client, login_as, indexed):
     root = indexed["root"]
     (root / "loose").mkdir()
@@ -253,7 +319,7 @@ async def test_browse_lists_image_files_with_previews(client, login_as, indexed)
 async def test_random_image_from_the_assigned_ones(app, client, indexed):
     perf = (await client.post("/api/performers", json={"name": "Random Pick"})).json()["id"]
     r = await client.post(f"/api/performers/{perf}/image/random")
-    assert r.status_code == 404 and "no images are assigned" in r.json()["detail"]
+    assert r.status_code == 404 and "no images you can use are assigned" in r.json()["detail"]
 
     mine = [i for p, i in indexed["images"].items() if "pics/img" in p]          # 3 of the 6 images
     for iid in mine:

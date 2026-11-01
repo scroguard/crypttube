@@ -693,12 +693,16 @@ class ImageFromLibrary(Body):
 async def entity_image_from_library(kind: str, entity_id: int, body: ImageFromLibrary, request: Request,
                                     acl: Acl) -> Response:
     """Use an image that is already in the system: an indexed image, or a scene's
-    screenshot. The source must be visible to whoever is doing this."""
+    screenshot. Whoever does this must be able to edit the source, not just see it: a
+    picture is shown to everyone who sees the performer, so it mustn't carry an image out
+    of the library it was shared from. That goes for admins too (app/acl.py: private means
+    private), so a user's library is only ever a source for its owner."""
     await _editable_entity(kind, entity_id, request, acl)
     if (body.image_id is None) == (body.scene_id is None):
         raise HTTPException(422, "give exactly one of image_id or scene_id")
     if body.image_id is not None:
         img = await media_api._image(request, body.image_id, acl)   # 404 if hidden or missing
+        await require_content_edit(request.app.state.pool, acl, "images", [body.image_id])
 
         def read() -> bytes:
             with generated.open_image_source(img["path"], img["zip_path"]) as f:
@@ -706,6 +710,7 @@ async def entity_image_from_library(kind: str, entity_id: int, body: ImageFromLi
         data = await asyncio.to_thread(read)
     else:
         scene = await media_api._scene(request, body.scene_id, acl)
+        await require_content_edit(request.app.state.pool, acl, "scenes", [body.scene_id])
         version = generated.scene_version(scene["oshash"], scene["file_id"])
         shot = generated.screenshot_path(get_settings().generated_dir, version)
         if not generated.usable(shot):
@@ -725,10 +730,11 @@ ASSIGNED = {"performers": "{p} = ANY(i.performer_ids)", "tags": "{p} = ANY(i.tag
 
 async def entity_image_random(kind: str, entity_id: int, body: RandomImage, request: Request, acl: Acl) -> dict:
     """Use a random one of the images assigned to this performer (or tag, or studio), among
-    those the caller can see. Returns which image was used."""
+    those the caller can edit (see entity_image_from_library). Returns which image was used."""
     await _editable_entity(kind, entity_id, request, acl)
     q = Q()
-    where = [ASSIGNED[kind].format(p=q.p(entity_id)), browse.IMAGE_PRESENT, *visible(acl, "image", "i", q)]
+    where = [ASSIGNED[kind].format(p=q.p(entity_id)), browse.IMAGE_PRESENT, *visible(acl, "image", "i", q),
+             browse.editable_clause(acl, "i", q)]
     base = f"""SELECT i.id, i.assets_rev, f.id AS file_id, f.mod_time FROM images i
                JOIN files f ON f.id = i.file_id LEFT JOIN files z ON z.id = f.zip_file_id
                WHERE {' AND '.join(where)}"""
@@ -740,7 +746,7 @@ async def entity_image_random(kind: str, entity_id: int, body: RandomImage, requ
     if row is None:   # nothing else to choose from (or no previous pick)
         row = await pool.fetchrow(f"{base} ORDER BY random() LIMIT 1", *q.args)
     if row is None:
-        raise HTTPException(404, f"no images are assigned to this {kind[:-1]} yet")
+        raise HTTPException(404, f"no images you can use are assigned to this {kind[:-1]} yet")
     await entity_image_from_library(kind, entity_id, ImageFromLibrary(image_id=row["id"]), request, acl)
     return {"image_id": row["id"],
             **browse.image_urls(row["id"], row["file_id"], row["mod_time"], 320, row["assets_rev"])}

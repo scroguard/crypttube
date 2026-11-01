@@ -125,7 +125,7 @@ export interface ImageDetail extends ImageItem {
   file: { path: string; zip_path: string | null; size: number; missing: boolean };
   studio: Ref | null;
   galleries: { id: number; title: string | null }[];
-  performers: Ref[];
+  performers: (Ref & { can_edit: boolean; has_image: boolean })[];
   tags: Ref[];
   can_edit: boolean;
   mine: boolean;

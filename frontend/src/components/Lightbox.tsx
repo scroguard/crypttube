@@ -4,7 +4,7 @@ import { useDetail, useRate } from "../api/hooks";
 import type { ImageDetail, ImageItem } from "../api/types";
 import { formatBytes } from "../lib/format";
 import { releaseFocus } from "../lib/useEscape";
-import { ContentEditModal } from "./EditForms";
+import { ContentEditModal, PerformerPictureButtons } from "./EditForms";
 import { Rating } from "./ui";
 
 /**
@@ -96,7 +96,10 @@ export default function Lightbox({ images, index, onIndex, onClose, onNearEnd, t
                   onChange={detail.can_edit ? rate.save : undefined} error={rate.error} />
         )}
         {detail?.can_edit && detail.id === image.id && (
-          <button onClick={() => setEditing(true)} className="hover:text-text">Edit</button>
+          <>
+            <PerformerPictureButtons key={image.id} imageId={image.id} performers={detail.performers} className="hover:text-text" />
+            <button onClick={() => setEditing(true)} className="hover:text-text">Edit</button>
+          </>
         )}
         {image.live_url && (
           <button onClick={() => setMoving((m) => !m)} aria-pressed={moving} data-testid="live-button"
