@@ -9,13 +9,14 @@ import io
 import logging
 import os
 import signal
+import time
 import traceback
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import asyncpg
 
-from app import counts, crypto, folder_links, generated, jobs, maintenance
+from app import counts, crypto, folder_links, generated, jobs, maintenance, upload_encryption
 from app.config import Settings, get_settings
 from app.db import create_pool, migrate
 from app.deletion import DeleteError
@@ -379,45 +380,90 @@ async def handle_delete_duplicates(pool: asyncpg.Pool, settings: Settings, ctx: 
 
 
 async def handle_encrypt_uploads(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
-    """Encrypt users' uploads (and what was generated from them) that aren't yet: run when
-    encryption is turned on after files were uploaded, and harmless to run again."""
+    """Encrypt users' uploads (and what was generated from them) that aren't yet: every media
+    file in users' libraries on disk, indexed or not. Run when the worker starts with a key,
+    on request, and on a schedule (app.upload_encryption); harmless to run again. A scheduled
+    run only looks at generated files of what it encrypts itself (anything generated from an
+    upload while a key is set is written encrypted already)."""
     if not crypto.enabled():
         return "encryption of user uploads is off (no key): nothing to do"
     root = settings.generated_dir
+    scheduled = bool(payload.get("scheduled"))
+    cutoff_ns = time.time_ns() - int(settings.encrypt_settle_seconds * 1e9)
     rows = await pool.fetch(
         """SELECT f.id, f.path, f.oshash, f.mod_time, s.id AS scene_id, i.id AS image_id
            FROM files f JOIN library_paths l ON l.id = f.library_id
            LEFT JOIN scenes s ON s.file_id = f.id LEFT JOIN images i ON i.file_id = f.id
            WHERE l.owner_id IS NOT NULL AND f.zip_file_id IS NULL AND f.missing_since IS NULL
            ORDER BY f.id""")
-    members = await pool.fetch(
+    indexed = {r["path"] for r in rows}
+    roots = await upload_encryption.library_roots(pool)
+    unindexed = [p for p in await asyncio.to_thread(upload_encryption.media_files, roots) if p not in indexed]
+    members = [] if scheduled else await pool.fetch(
         """SELECT m.id, m.mod_time FROM files m JOIN files z ON z.id = m.zip_file_id
            JOIN library_paths l ON l.id = z.library_id JOIN images i ON i.file_id = m.id
            WHERE l.owner_id IS NOT NULL""")
-    done = files = assets = failed = 0
+    total = len(rows) + len(unindexed)
+    done = files = assets = failed = recent = 0
+
+    async def encrypt(path: str) -> bool:
+        nonlocal files, failed, recent
+        try:
+            result = await asyncio.to_thread(_encrypt_settled, path, cutoff_ns)
+        except FileNotFoundError:
+            return False                                # deleted since: nothing to protect
+        except OSError as e:
+            failed += 1
+            log.warning("could not encrypt %s: %s", path, e)
+            return False
+        if result is None:
+            recent += 1
+            return False
+        files += result
+        return result
+
     for row in rows:
         if await ctx.cancelled():
             break
-        try:
-            if await asyncio.to_thread(crypto.encrypt_file_in_place, row["path"]):
-                files += 1
-        except OSError as e:
-            failed += 1
-            log.warning("could not encrypt %s: %s", row["path"], e)
+        encrypted = await encrypt(row["path"])
         derived = []
-        if row["scene_id"]:
-            version = generated.scene_version(row["oshash"], row["id"])
-            derived = generated.scene_asset_files(root, version)
-        elif row["image_id"]:
-            derived = generated.image_asset_files(root, generated.image_version(row["id"], row["mod_time"]))
+        if encrypted or not scheduled:
+            if row["scene_id"]:
+                version = generated.scene_version(row["oshash"], row["id"])
+                derived = generated.scene_asset_files(root, version)
+            elif row["image_id"]:
+                derived = generated.image_asset_files(root, generated.image_version(row["id"], row["mod_time"]))
         assets += await asyncio.to_thread(_encrypt_existing, derived)
         done += 1
-        await ctx.progress(done / max(len(rows), 1), f"{done} of {len(rows)} uploaded files")
+        await ctx.progress(done / max(total, 1), f"{done} of {total} uploaded files")
+    for path in unindexed:                              # not scanned yet: nothing generated from them
+        if await ctx.cancelled():
+            break
+        await encrypt(path)
+        done += 1
+        await ctx.progress(done / max(total, 1), f"{done} of {total} uploaded files")
     for m in members:                                   # thumbnails of images inside uploaded zips
         assets += await asyncio.to_thread(
             _encrypt_existing, generated.image_asset_files(root, generated.image_version(m["id"], m["mod_time"])))
+    if not await ctx.cancelled():
+        # What is still unencrypted on disk, for Maintenance (read there instead of walking
+        # the disk on every page load).
+        await maintenance.set_state(pool, upload_encryption.LEFT_KEY, recent + failed)
     message = f"encrypted {files} uploaded files and {assets} generated files"
+    if recent:
+        message += f"; {recent} changed in the last {settings.encrypt_settle_seconds:g} s, left for the next run"
     return message + (f"; {failed} could not be encrypted (see the worker log)" if failed else "")
+
+
+def _encrypt_settled(path: str, cutoff_ns: int) -> bool | None:
+    """Encrypt a file unless it changed after cutoff: it may still be being written (None:
+    left for the next run). A copy in progress must never be swapped, as the copier would go
+    on writing into the file we replaced, so this holds for every file, scanned or not."""
+    if os.stat(path).st_mtime_ns > cutoff_ns:
+        return None if not crypto.is_encrypted(path) else False
+    if crypto.encrypt_file_in_place(path):
+        return True
+    return None if not crypto.is_encrypted(path) else False     # changed while being read
 
 
 def _encrypt_existing(paths) -> int:
@@ -446,13 +492,16 @@ SCHEDULE_CHECK_SECONDS = 60
 
 
 async def schedule_loop(pool: asyncpg.Pool, stop: asyncio.Event) -> None:
-    """Queue the daily maintenance job when it is due. This loop only ever enqueues that
-    one job, at most once per day, and the job itself enqueues nothing but a counts refresh."""
+    """Queue the scheduled jobs when they are due: daily maintenance (which enqueues nothing
+    but a counts refresh) and, with a key set, encryption of uploads every
+    encrypt_uploads_interval_minutes (which enqueues nothing)."""
+    interval = get_settings().encrypt_uploads_interval_minutes
     while not stop.is_set():
         try:
             await maintenance.enqueue_if_due(pool)
+            await upload_encryption.enqueue_if_due(pool, interval)
         except (OSError, asyncpg.PostgresError):
-            log.exception("maintenance schedule check failed")
+            log.exception("schedule check failed")
         try:
             await asyncio.wait_for(stop.wait(), SCHEDULE_CHECK_SECONDS)
         except TimeoutError:

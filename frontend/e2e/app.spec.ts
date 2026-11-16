@@ -1009,6 +1009,12 @@ test("user creates a private library and uploads a video", async () => {
   // indexed in the background, then shown
   await expect(page.getByTestId("scene-card")).toHaveCount(1, { timeout: 40_000 });
   await page.screenshot({ path: `${SHOTS}/13-my-library.png` });
+  // the owner can ask for a scan (files copied in without the app); once per cooldown
+  await page.getByTestId("scan-library").click();
+  await expect(page.getByTestId("scan-library")).toHaveText("Scan queued");
+  await page.reload();
+  await page.getByTestId("scan-library").click();
+  await expect(page.getByText(/asked for recently: try again in \d+ s/)).toBeVisible();
   // (this stack runs with encryption of uploads on: the file on disk is encrypted, the
   // browser gets the real thing)
   const stream = await page.request.get(`/api${await page.getByTestId("scene-card").getByRole("link").first().getAttribute("href")}/stream`, { headers: { Range: "bytes=0-3" } });
@@ -1214,7 +1220,7 @@ test("maintenance: check, clean up media deleted outside the app, run routine ma
 
     // encryption of uploads is on in this stack, and nothing is left unencrypted
   await expect(page.getByTestId("encryption")).toContainText("On");
-  await expect(page.getByTestId("encryption-counts")).toContainText(/(\d+) of \1 uploaded files encrypted/);
+  await expect(page.getByTestId("encryption-counts")).toContainText(/(\d+) of \1 indexed uploads encrypted/);
 
   // routine maintenance: change the schedule, run it now
     const routine = page.getByTestId("routine");

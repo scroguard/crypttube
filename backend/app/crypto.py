@@ -454,7 +454,8 @@ def ffmpeg_input(path: str):
 def encrypt_file_in_place(path: str | os.PathLike) -> bool:
     """Encrypt a plain file where it is: written beside it, then swapped in atomically,
     keeping its permissions and modification time (so a rescan sees nothing new).
-    Returns False if it was already encrypted."""
+    Returns False if it was already encrypted, or changed while being read (then it's left
+    as it is)."""
     path = Path(path)
     if is_encrypted(path):
         return False
@@ -470,6 +471,12 @@ def encrypt_file_in_place(path: str | os.PathLike) -> bool:
             os.fsync(raw.fileno())
         os.chmod(tmp, st.st_mode & 0o7777)
         os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+        now = path.stat()
+        if (now.st_ino, now.st_size, now.st_mtime_ns) != (st.st_ino, st.st_size, st.st_mtime_ns):
+            # Replaced or written to while we read it (an upload, a copy): keep the new
+            # content, drop ours, and leave it for the next run.
+            tmp.unlink(missing_ok=True)
+            return False
         os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)

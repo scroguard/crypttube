@@ -201,6 +201,8 @@ function Routine({ data }: { data: Overview }) {
 
 interface EncryptionStatus {
   enabled: boolean; key_id: string | null; uploaded_files: number; encrypted_files: number; job: JobState | null;
+  plaintext_files: number | null; interval_minutes: number;
+  last_run: { status: string; message: string | null; error: string | null; finished_at: string } | null;
 }
 
 /** Encryption at rest of users' uploads: on/off (set by the stack's key file), progress. */
@@ -213,7 +215,7 @@ function Encryption() {
   const run = useWrite(() => api("/maintenance/encryption/run", { method: "POST" }));
   const e = q.data;
   if (!e) return null;
-  const pending = e.uploaded_files - e.encrypted_files;
+  const pending = e.plaintext_files ?? e.uploaded_files - e.encrypted_files;
   return (
     <section className="card mb-6 p-5" data-testid="encryption">
       <h2 className="mb-1 text-lg font-semibold">Encryption of user uploads</h2>
@@ -224,15 +226,24 @@ function Encryption() {
             Files users upload, and the previews made from them, are stored encrypted (key {e.key_id}).
           </p>
           <p className="mt-2 text-sm text-text-muted" data-testid="encryption-counts">
-            {e.encrypted_files} of {e.uploaded_files} uploaded files encrypted
-            {pending > 0 && !active(e.job ?? undefined) && " (the rest are encrypted by a background job)"}.
+            {e.encrypted_files} of {e.uploaded_files} indexed uploads encrypted.{" "}
+            <span data-testid="encryption-plaintext">
+              {pending === 0 ? "No unencrypted files on disk."
+                : `${pending} left unencrypted on disk by the last run (indexed or not; changed too recently, or failed): ${
+                    active(e.job ?? undefined) ? "being encrypted now" : e.interval_minutes > 0 ? "the next run tries again" : "press Encrypt the rest now"}.`}
+            </span>
+          </p>
+          <p className="mt-1 text-xs text-text-subtle" data-testid="encryption-schedule">
+            {e.interval_minutes > 0 ? `Runs every ${e.interval_minutes} minutes.` : "Not scheduled (ENCRYPT_UPLOADS_INTERVAL_MINUTES=0)."}
+            {e.last_run && ` Last run ${new Date(e.last_run.finished_at).toLocaleString()}: ${e.last_run.status}`}
+            {e.last_run?.error && ` (${e.last_run.error})`}
           </p>
           {pending > 0 && (
             <button className="btn-ghost mt-3" disabled={run.isPending || active(e.job ?? undefined)}
                     onClick={() => run.mutate(undefined)}>Encrypt the rest now</button>
           )}
           <JobLine job={e.job ?? undefined} />
-          {e.job && !active(e.job) && e.job.message && <p className="mt-2 text-xs text-text-subtle">Last run: {e.job.message}</p>}
+          {e.last_run?.message && <p className="mt-2 text-xs text-text-subtle">Last run: {e.last_run.message}</p>}
         </>
       ) : (
         <p className="text-sm text-text-muted">

@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import counts, crypto, jobs, maintenance
+from app import counts, crypto, jobs, maintenance, upload_encryption
+from app.config import get_settings
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
@@ -58,8 +59,15 @@ async def encryption_status(pool) -> dict:
     total, encrypted = await asyncio.to_thread(_encryption_counts, paths)
     job = await pool.fetchrow(
         "SELECT id, status, progress, message, error FROM jobs WHERE kind = 'encrypt_uploads' ORDER BY id DESC LIMIT 1")
+    last = await pool.fetchrow(
+        """SELECT id, status, message, error, finished_at FROM jobs
+           WHERE kind = 'encrypt_uploads' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1""")
+    # What the last run left unencrypted on disk (indexed or not); null until a run finished.
+    plaintext = await maintenance.get_state(pool, upload_encryption.LEFT_KEY) if crypto.enabled() else None
     return {"enabled": crypto.enabled(), "key_id": crypto.key_id().hex() if crypto.enabled() else None,
-            "uploaded_files": total, "encrypted_files": encrypted, "job": dict(job) if job else None}
+            "uploaded_files": total, "encrypted_files": encrypted, "job": dict(job) if job else None,
+            "plaintext_files": plaintext, "last_run": dict(last) if last else None,
+            "interval_minutes": get_settings().encrypt_uploads_interval_minutes}
 
 
 @router.get("/encryption")

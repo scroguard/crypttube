@@ -371,6 +371,12 @@ Besides the global libraries an admin adds from `/media`, users can have their o
   Editors/admins create the global ones, which anyone may use on their own content.
 - Deleting a user (or a library) removes the uploaded files as well.
 - Uploads (and their previews) can be stored encrypted: see "Encrypting user uploads".
+- Uploads are indexed as they arrive. For files that reached a library another way (copied
+  into the `uploads` volume), the owner presses **Scan for new files** on the library's page
+  (`POST /api/my/libraries/{id}/scan`, optionally `{"path": "<folder inside it>"}`). Only the
+  owner can scan a library; anyone else gets 404. Per library, a scan can be asked for once
+  every `MY_LIBRARY_COOLDOWN_SECONDS` (default 300), and so can **Rebuild previews**
+  (separately); sooner is answered 429 with `Retry-After`.
 
 API: `/api/my/libraries` (list/create), `/api/my/libraries/{id}` (PATCH/DELETE),
 `/api/my/libraries/{id}/files` (GET list, `PUT ?path=` upload raw body, `DELETE ?path=`),
@@ -441,6 +447,15 @@ them).
    their previews in place (keeping their timestamps, so nothing is rescanned). Progress
    is under **Admin → Maintenance → Encryption of user uploads**. New uploads are
    encrypted as they stream in.
+
+5. **On a schedule** (`ENCRYPT_UPLOADS_INTERVAL_MINUTES`, default 15; 0 = off), the worker
+   runs Encrypt uploads again. It covers every media file in users' libraries on disk,
+   scanned or not, so a file copied straight into the volume doesn't stay readable for
+   long. It skips files changed in the last minute (they may still be being written), files
+   already encrypted, and files that change while it reads them; one run at a time, never
+   alongside a scan or preview generation (those wait while it runs). A run with nothing to
+   do reads only each file's first bytes; on a very large library, a longer interval keeps
+   those pauses rare. Maintenance shows the last run and how many files it left unencrypted.
 
 Without `UPLOADS_KEY_FILE` the secret is an empty file and encryption is off. A key file
 that is unreadable or malformed stops the api and worker at startup with an explanation,
