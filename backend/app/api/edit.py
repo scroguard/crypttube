@@ -12,7 +12,6 @@ from typing import Literal
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -598,7 +597,9 @@ def _normalize_image(data: bytes, dest, max_size: int = ENTITY_IMAGE_MAX, crop=N
             im.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
             if im.mode not in ("RGB", "RGBA"):
                 im = im.convert("RGBA" if "A" in im.getbands() or "transparency" in im.info else "RGB")
-            _atomic_write(dest, lambda f: im.save(f, "WEBP", quality=85, method=4))
+            # Encrypted whenever a key is set: the picture may come from a private upload.
+            with crypto.encrypted_outputs():
+                _atomic_write(dest, lambda f: im.save(f, "WEBP", quality=85, method=4))
     except (OSError, ValueError, Image.DecompressionBombError) as e:
         raise HTTPException(422, f"not a usable image: {e}") from e
 
@@ -645,7 +646,7 @@ async def crop_entity_image(kind: str, entity_id: int, body: Crop, request: Requ
     src = _source_path(kind, entity_id)
     if not src.exists():                       # set before originals were kept: crop what there is
         src = get_settings().generated_dir / rel
-    data = await asyncio.to_thread(src.read_bytes)
+    data = await asyncio.to_thread(crypto.read_all, src)
     await asyncio.to_thread(_normalize_image, data, get_settings().generated_dir / rel, ENTITY_IMAGE_MAX,
                             (body.x, body.y, min(body.w, 1 - body.x), min(body.h, 1 - body.y)))
     # touching the row bumps updated_at, which versions the image URL
@@ -661,7 +662,8 @@ async def get_entity_image_source(kind: str, entity_id: int, request: Request, a
         raise HTTPException(404, "no image")
     src = _source_path(kind, entity_id)
     path = src if src.exists() else get_settings().generated_dir / rel
-    return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "private, no-cache"})
+    return Response(await asyncio.to_thread(crypto.read_all, path), media_type="image/webp",
+                    headers={"Cache-Control": "private, no-cache"})
 
 
 async def _editable_entity(kind: str, entity_id: int, request: Request, acl: Acl) -> None:
@@ -785,7 +787,8 @@ async def get_entity_image(kind: str, entity_id: int, request: Request, v: str |
     path = get_settings().generated_dir / f"entities/{kind}/{entity_id}.webp"
     if not path.exists():
         raise HTTPException(404, "no image")
-    return FileResponse(path, media_type="image/webp", headers={
+    # Decrypted in memory (pictures are small), never to a file.
+    return Response(await asyncio.to_thread(crypto.read_all, path), media_type="image/webp", headers={
         "Cache-Control": "private, max-age=31536000, immutable" if v == version else "private, no-cache"})
 
 

@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import ClientDisconnect
 
-from app import counts
+from app import counts, crypto
 from app.api.edit import MAX_SOURCE_IMAGE, _normalize_image
 from app.api.libraries import _list_images
 from app.auth import User, require_admin
@@ -401,7 +401,7 @@ async def images_from_folder(body: ImagesFromFolder, request: Request) -> dict:
         def store(src=file, dest=generated_dir / rel) -> None:
             if src["size"] > MAX_SOURCE_IMAGE:
                 raise HTTPException(413, "image too large")
-            _normalize_image(Path(src["path"]).read_bytes(), dest)
+            _normalize_image(crypto.read_all(src["path"]), dest)
         try:
             await asyncio.to_thread(store)
         except (HTTPException, OSError):

@@ -337,6 +337,17 @@ def private_outputs(source: str | os.PathLike | None):
         _private_outputs.reset(token)
 
 
+@contextlib.contextmanager
+def encrypted_outputs():
+    """Write what's generated inside this block encrypted whenever a key is set, whatever
+    its source (performer/studio/tag pictures: one may come from a private upload)."""
+    token = _private_outputs.set(enabled())
+    try:
+        yield
+    finally:
+        _private_outputs.reset(token)
+
+
 @contextlib.asynccontextmanager
 async def async_private_outputs(source: str | os.PathLike | None):
     with private_outputs(source):
@@ -477,6 +488,10 @@ def encrypt_file_in_place(path: str | os.PathLike) -> bool:
             # content, drop ours, and leave it for the next run.
             tmp.unlink(missing_ok=True)
             return False
+        # Known limit: a writer that still holds the old file open and writes between the
+        # check above and this rename would write into the replaced file, and that data is
+        # lost. Callers only pass files unchanged for a settle period (see the worker's
+        # encrypt_uploads), which makes this very unlikely; no lock is taken.
         os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
