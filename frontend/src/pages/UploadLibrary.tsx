@@ -88,6 +88,7 @@ export default function UploadLibrary() {
   const uploader = useUploader(id);
   const del = useWrite(() => api(`/my/libraries/${id}`, { method: "DELETE" }));
   const rebuild = useWrite(() => api(`/my/libraries/${id}/regenerate`, { method: "POST" }));
+  const scan = useWrite(() => api(`/my/libraries/${id}/scan`, { method: "POST" }));
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
 
@@ -115,6 +116,9 @@ export default function UploadLibrary() {
         </span>
         <QuotaBar used={libs.data.used_bytes} quota={libs.data.quota_bytes} />
         <button className="btn-ghost" onClick={() => setSettings(true)}>Sharing & settings</button>
+        <button className="btn-ghost" disabled={scan.isPending || scan.isSuccess} data-testid="scan-library"
+                title="Look for files added to this library without uploading them here (uploads are indexed automatically)"
+                onClick={() => scan.mutate(undefined)}>{scan.isSuccess ? "Scan queued" : "Scan for new files"}</button>
         <button className="btn-ghost" disabled={rebuild.isPending || rebuild.isSuccess}
                 title="Discard and rebuild this library's thumbnails and previews"
                 onClick={() => rebuild.mutate()}>{rebuild.isSuccess ? "Rebuild queued" : "Rebuild previews"}</button>
@@ -175,6 +179,8 @@ export default function UploadLibrary() {
       {tab === "content" ? <EntityContent filter={{ library_ids: [id] }} scope="this library" /> : <FileList libraryId={id} />}
       {settings && <LibrarySettings library={lib} onClose={() => setSettings(false)} />}
       {del.isError && <ErrorBox error={del.error} className="mt-3" />}
+      {scan.isError && <ErrorBox error={scan.error} className="mt-3" />}
+      {rebuild.isError && <ErrorBox error={rebuild.error} className="mt-3" />}
     </div>
   );
 }

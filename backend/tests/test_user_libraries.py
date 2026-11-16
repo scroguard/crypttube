@@ -21,7 +21,7 @@ async def people(app, clean, client, login_as):
 
 async def drain(app):
     """Run queued jobs (scans, generation) and bring the per-viewer counts up to date."""
-    settings = get_settings().model_copy(update={"scan_settle_seconds": 0})
+    settings = get_settings().model_copy(update={"scan_settle_seconds": 0, "encrypt_settle_seconds": 0})
     while await worker.run_one(app.state.pool, settings):
         pass
     await counts.refresh(app.state.pool)

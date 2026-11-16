@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     watcher_polling: bool = False
     watcher_quiet_seconds: float = 5
     watcher_max_wait_seconds: float = 60
+    # users' own libraries: the least time between a user's scan (or preview rebuild) requests
+    # for one library; a request sooner is answered 429 with Retry-After
+    my_library_cooldown_seconds: float = 300
+    # encryption of uploads on a schedule (only when a key is set; 0 = never on a schedule):
+    # catches files that reached a user's library without the app. Files changed within
+    # encrypt_settle_seconds may still be being written and wait for the next run.
+    encrypt_uploads_interval_minutes: float = 15
+    encrypt_settle_seconds: float = 60
     # auth: set true when served over HTTPS (reverse proxy with TLS)
     cookie_secure: bool = False
     # media delivery

@@ -188,12 +188,64 @@ async def delete_library(library_id: int, request: Request, user: User = Depends
     return Response(status_code=204)
 
 
+async def _enqueue_requested(pool, kind: str, library_id: int, payload: dict, dedupe_key: str) -> int:
+    """Check the cooldown and queue the job as one step (concurrent requests can't both pass)."""
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"my-library:{kind}:{library_id}")
+        await _cooldown(conn, kind, library_id)
+        return await jobs.enqueue(conn, kind, {**payload, "library_id": library_id, "requested": "user"},
+                                  dedupe_key=dedupe_key)
+
+
+async def _cooldown(pool, kind: str, library_id: int) -> None:
+    """At most one of my requests of this kind per library per cooldown (my_library_cooldown_seconds).
+    Only jobs a user asked for count: an upload's own scan never holds a scan request back."""
+    cooldown = get_settings().my_library_cooldown_seconds
+    age = await pool.fetchval(
+        """SELECT extract(epoch FROM now() - max(created_at))::float8 FROM jobs
+           WHERE kind = $1 AND payload->>'library_id' = $2 AND payload->>'requested' = 'user'""",
+        kind, str(library_id))
+    if age is not None and age < cooldown:
+        wait = int(cooldown - age) + 1
+        raise HTTPException(429, f"asked for recently: try again in {wait} s", headers={"Retry-After": str(wait)})
+
+
 @router.post("/libraries/{library_id}/regenerate", status_code=202)
 async def regenerate_library(library_id: int, request: Request, user: User = Depends(require_user)) -> dict:
     """Rebuild all previews and thumbnails of one of my libraries."""
     await _own_library(request, user, library_id)
-    job_id = await jobs.enqueue(request.app.state.pool, "generate", {"force": True, "library_id": library_id},
-                                dedupe_key=f"generate:force:{library_id}")
+    job_id = await _enqueue_requested(request.app.state.pool, "generate", library_id, {"force": True},
+                                      f"generate:force:{library_id}")
+    return {"job_id": job_id}
+
+
+class ScanBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str | None = Field(None, max_length=1000)   # a folder inside the library, relative to it
+
+
+@router.post("/libraries/{library_id}/scan", status_code=202)
+async def scan_library(library_id: int, request: Request, body: ScanBody | None = None,
+                       user: User = Depends(require_user)) -> dict:
+    """Look for new, changed or removed files in one of my libraries (or one folder of it),
+    e.g. files that reached it without the app. Uploads are indexed without this."""
+    lib = await _own_library(request, user, library_id)
+    root = Path(lib["path"])
+    sub = None
+    if body and body.path and body.path.strip("/"):
+        rel = PurePosixPath(body.path.replace("\\", "/").strip("/"))
+        if rel.is_absolute() or len(rel.parts) > MAX_DEPTH or any(
+                p in (".", "..") or p.startswith(".") for p in rel.parts):
+            raise HTTPException(422, "invalid folder")
+        target = root / rel
+        if not target.resolve().is_relative_to(root.resolve()):
+            raise HTTPException(422, "path is outside the library")
+        if not target.is_dir():
+            # A scan of a mistyped folder would mark everything "under" it missing.
+            raise HTTPException(422, "folder does not exist")
+        sub = str(target)
+    job_id = await _enqueue_requested(request.app.state.pool, "scan", library_id, {"path": sub},
+                                      scan_dedupe_key(library_id, sub))
     return {"job_id": job_id}
 
 

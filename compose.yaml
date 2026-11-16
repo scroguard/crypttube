@@ -28,6 +28,10 @@ x-backend: &backend
     GENERATE_CONCURRENCY: ${GENERATE_CONCURRENCY:-2}
     # Live transcodes at once (more get a 503 and retry); raise it with a GPU.
     MAX_TRANSCODES: ${MAX_TRANSCODES:-2}
+    # With an uploads key: encrypt files that reached users' libraries without the app, every
+    # N minutes (0 = only at start and on request). Users' scan/rebuild requests: min seconds apart.
+    ENCRYPT_UPLOADS_INTERVAL_MINUTES: ${ENCRYPT_UPLOADS_INTERVAL_MINUTES:-15}
+    MY_LIBRARY_COOLDOWN_SECONDS: ${MY_LIBRARY_COOLDOWN_SECONDS:-300}
     COOKIE_SECURE: ${COOKIE_SECURE:-false}
     # "Set image from URL" makes the server download a picture when a user asks for it
     # (public internet addresses only). Set to false to forbid any outbound request.

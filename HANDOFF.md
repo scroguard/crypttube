@@ -17,6 +17,15 @@
   opt-in (`compose.custom-css.yaml`, PR #9) because Dockhand can't mount repo files. The
   user confirmed the library is intact. Nothing in progress.
 
+- User-started scans and scheduled encryption (branch `my-libraries/scan-and-scheduled-encryption`,
+  Justin 11/16: "build it, encrypt on a schedule"): `POST /api/my/libraries/{id}/scan` (owner only,
+  optional folder, per-library cooldown, with a separate one for Rebuild previews: 429 + Retry-After);
+  `encrypt_uploads` now covers every media file on disk in users' libraries (indexed or not) and the
+  worker queues it every `ENCRYPT_UPLOADS_INTERVAL_MINUTES` (15) with a key set. Files changed in the
+  last `encrypt_settle_seconds` (60) wait; the swap is skipped if the file changes while read.
+  Maintenance shows the last run and what it left unencrypted (system_state `encrypt_uploads_left`).
+  Backend 372 passed, e2e 50 passed.
+
 ## Next steps
 1. Server: remove the leftover pre-rename containers if any remain (`docker ps -a | grep
    goonstreamer`, then `docker rm <name>`; never their volumes).
