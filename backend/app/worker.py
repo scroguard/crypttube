@@ -382,9 +382,10 @@ async def handle_delete_duplicates(pool: asyncpg.Pool, settings: Settings, ctx: 
 async def handle_encrypt_uploads(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobContext, payload: dict) -> str:
     """Encrypt users' uploads (and what was generated from them) that aren't yet: every media
     file in users' libraries on disk, indexed or not. Run when the worker starts with a key,
-    on request, and on a schedule (app.upload_encryption); harmless to run again. A scheduled
-    run only looks at generated files of what it encrypts itself (anything generated from an
-    upload while a key is set is written encrypted already)."""
+    on request, and on a schedule (app.upload_encryption); harmless to run again. Every run
+    also sweeps performer/studio/tag pictures (generated/entities). Of the other generated
+    files, a scheduled run only looks at those of what it encrypts itself (anything generated
+    from an upload while a key is set is written encrypted already)."""
     if not crypto.enabled():
         return "encryption of user uploads is off (no key): nothing to do"
     root = settings.generated_dir
@@ -442,6 +443,9 @@ async def handle_encrypt_uploads(pool: asyncpg.Pool, settings: Settings, ctx: jo
         await encrypt(path)
         done += 1
         await ctx.progress(done / max(total, 1), f"{done} of {total} uploaded files")
+    # Performer/studio/tag pictures (any of them may come from a private upload): small, few.
+    assets += await asyncio.to_thread(
+        _encrypt_existing, sorted((root / "entities").glob("*/*.webp")) if (root / "entities").is_dir() else [])
     for m in members:                                   # thumbnails of images inside uploaded zips
         assets += await asyncio.to_thread(
             _encrypt_existing, generated.image_asset_files(root, generated.image_version(m["id"], m["mod_time"])))

@@ -406,8 +406,10 @@ deletes its video too. Existing libraries are paired on their next scan.
 ## Encrypting user uploads
 
 Files users upload to their own libraries, and everything generated from them
-(thumbnails, screenshots, scrub previews, viewer copies), can be stored encrypted. The
-main libraries are not touched: encrypting the disk they live on is the admin's job.
+(thumbnails, screenshots, scrub previews, viewer copies), can be stored encrypted. So are
+all performer, studio and tag pictures (any of them may have been taken from a private
+upload); they're small, and are decrypted in memory when served. The main libraries are
+not touched: encrypting the disk they live on is the admin's job.
 
 **What it protects against:** someone who gets the `uploads` and `generated` volumes, a
 backup of them, or a disk from the server, but not the key, sees only encrypted data.
@@ -450,12 +452,14 @@ them).
 
 5. **On a schedule** (`ENCRYPT_UPLOADS_INTERVAL_MINUTES`, default 15; 0 = off), the worker
    runs Encrypt uploads again. It covers every media file in users' libraries on disk,
-   scanned or not, so a file copied straight into the volume doesn't stay readable for
-   long. It skips files changed in the last minute (they may still be being written), files
+   scanned or not (and the performer, studio and tag pictures), so a file copied straight
+   into the volume doesn't stay readable for long. It skips files changed in the last minute (they may still be being written), files
    already encrypted, and files that change while it reads them; one run at a time, never
    alongside a scan or preview generation (those wait while it runs). A run with nothing to
-   do reads only each file's first bytes; on a very large library, a longer interval keeps
-   those pauses rare. Maintenance shows the last run and how many files it left unencrypted.
+   do still walks every user library and reads each file's first bytes (one small read
+   per file: thousands of files take seconds, hundreds of thousands can take minutes, during
+   which scans and previews wait). On a large library, raise
+   `ENCRYPT_UPLOADS_INTERVAL_MINUTES` to make those pauses rarer. Maintenance shows the last run and how many files it left unencrypted.
 
 Without `UPLOADS_KEY_FILE` the secret is an empty file and encryption is off. A key file
 that is unreadable or malformed stops the api and worker at startup with an explanation,

@@ -4,7 +4,8 @@ Uploads through the app are encrypted as they stream in. Files can also reach a 
 library without the app (copied into the uploads volume), or have been uploaded before
 encryption was turned on. The `encrypt_uploads` job (app.worker) encrypts those in place;
 the worker queues it every `encrypt_uploads_interval_minutes` while a key is set. It covers
-every media file in users' libraries on disk, indexed or not.
+every media file in users' libraries on disk, indexed or not, and every performer/studio/tag
+picture (generated/entities).
 
 It is safe to run on a schedule:
 - files changed within `encrypt_settle_seconds` are left for the next run (still being written);

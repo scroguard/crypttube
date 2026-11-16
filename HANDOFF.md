@@ -38,8 +38,9 @@
    (README, "Theme").
 5. When a GPU is installed: follow README "Hardware transcoding", check the API log for
    `hardware encoding on: ...`, then try a transcode (player quality menu: 720p).
-6. Known limits: no key rotation for upload encryption; performer pictures taken from private
-   uploads aren't encrypted; uploads aren't resumable.
+6. Known limits: no key rotation for upload encryption; uploads aren't resumable; scheduled
+   encryption swaps a file by rename after a settle period and a re-stat, so a writer still
+   holding the old file open past both could lose what it writes next (very unlikely; no lock).
 
 ## Context & architecture
 - Everything runs in Docker Compose. `compose.yaml` stands alone (Dockhand stack);
