@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # The same way as locally: the stack's own Postgres and the backend image (ffmpeg included).
       # A throwaway password and empty media folder; nothing here is a real secret or real media.
       - name: Start the database
