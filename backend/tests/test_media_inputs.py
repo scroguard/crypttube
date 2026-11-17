@@ -1,6 +1,7 @@
 """ffprobe and ffmpeg only ever read the file they're given: no other files or network addresses."""
 
 import socket
+import subprocess
 import threading
 
 import pytest
@@ -53,7 +54,7 @@ async def test_probe_reads_only_the_file(tmp_path, listener, encrypted):
     try:
         with pytest.raises(media.ProbeError):
             await media.ffprobe(str(p), timeout=20)
-        with pytest.raises(Exception):
+        with pytest.raises(media.ProbeError):
             await generated.make_screenshot(str(p), 2.0, tmp_path / "shot.webp")
     finally:
         crypto.set_key(None)
@@ -71,3 +72,21 @@ async def test_real_media_still_works_plain_and_encrypted(tmp_path, sample_media
         assert (await media.ffprobe(str(p)))["streams"]
     finally:
         crypto.set_key(None)
+
+
+def test_input_options():
+    assert media.input_options("/media/a.mp4")[:2] == ["-protocol_whitelist", "file"]
+    assert media.input_options("http://127.0.0.1:41234/tok")[:2] == ["-protocol_whitelist", "http,tcp"]
+    assert media.input_options("http://10.0.0.5:80/x")[:2] == ["-protocol_whitelist", "file"]   # only the loopback stream
+    assert "-format_whitelist" in media.input_options("/media/a.mp4")
+
+
+async def test_a_format_outside_the_list_is_refused(tmp_path):
+    """Proves the options are applied: ffmpeg would read this MP3 without them (renamed .mp4, which the library
+    would list as a video); with them it's refused, and the scan records it as unreadable rather than failing."""
+    p = tmp_path / "song.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=1", "-f", "mp3", str(p)], check=True)
+    plain = subprocess.run(["ffprobe", "-v", "error", "-show_format", str(p)], capture_output=True, text=True)
+    assert plain.returncode == 0 and "format_name=mp3" in plain.stdout          # readable without the options
+    with pytest.raises(media.ProbeError, match="whitelist"):
+        await media.ffprobe(str(p))
