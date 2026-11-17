@@ -9,11 +9,16 @@ jobs:
       - env: { GH_TOKEN: "${{ github.token }}", REPO: "${{ github.repository }}", BEFORE: "${{ github.event.before }}", AFTER: "${{ github.sha }}", ALLOW: "" }
         run: |
           set -euo pipefail
-          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then shas="$AFTER"; else shas=$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.commits[].sha'); fi
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then shas="$AFTER"; else
+            read -r total listed < <(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '"\(.total_commits) \(.commits | length)"')
+            # the compare API lists at most 250 commits: a bigger push can't be checked, so it fails
+            [ "$total" -gt "$listed" ] && { echo "::error::$total commits pushed but only $listed could be checked"; exit 1; }
+            shas=$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.commits[].sha')
+          fi
           bad=0
           for s in $shas; do
             case " $ALLOW " in *" $s "*) continue ;; esac
-            n=$(gh api "repos/$REPO/commits/$s/pulls" --jq '[.[] | select(.merged_at != null)] | length')
+            n=$(gh api "repos/$REPO/commits/$s/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')
             [ "$n" = "0" ] && { echo "::error::Commit $s is on main but isn't part of any merged PR"; bad=1; }
           done
           exit $bad
