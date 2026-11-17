@@ -141,8 +141,8 @@ class _Backoff:
     MAX_DELAY = 300.0
     MAX_KEYS = 10_000
 
-    def __init__(self, free: int, window: float, clock):
-        self.free, self.window, self.clock = free, window, clock
+    def __init__(self, free: int, window: float, clock, max_delay: float = MAX_DELAY):
+        self.free, self.window, self.clock, self.max_delay = free, window, clock, max_delay
         self._state: dict[object, tuple[int, float, float]] = {}    # failures, allowed_at, last failure
 
     def retry_after(self, key) -> float:
@@ -151,11 +151,11 @@ class _Backoff:
 
     def failure(self, key) -> None:
         now = self.clock()
-        if len(self._state) > self.MAX_KEYS:
-            self._state = {k: v for k, v in self._state.items() if v[1] > now or now - v[2] < self.window}
-        failures, _, last = self._state.get(key, (0, 0.0, now))
+        failures, _, last = self._state.pop(key, (0, 0.0, now))   # re-inserted below: the newest last
+        if len(self._state) >= self.MAX_KEYS:
+            del self._state[next(iter(self._state))]                # bounded: drop the least recent key
         failures = 1 if now - last >= self.window else failures + 1
-        delay = 0.0 if failures <= self.free else min(2.0 ** (failures - self.free), self.MAX_DELAY)
+        delay = 0.0 if failures <= self.free else min(2.0 ** min(failures - self.free, 16), self.max_delay)
         self._state[key] = (failures, now + delay, now)
 
     def clear(self, key) -> None:
@@ -165,7 +165,8 @@ class _Backoff:
 class LoginThrottle:
     """Login backoff, in memory (one API process on a home server; resets on restart), on three keys:
     - (client IP, username): 3 free failures; the usual typo case.
-    - username, from any address: 10 free, so guessing one account from many addresses is slowed too.
+    - username, from any address: 10 free, then at most 30 s apart, so guessing one account from many
+      addresses is slowed too, while someone failing on purpose can't hold the real user out for long.
     - client IP, for any username: 20 free, so one address can't try many accounts.
     A correct password clears the first two, not the address's (one valid account mustn't reset it)."""
 
@@ -173,7 +174,7 @@ class LoginThrottle:
 
     def __init__(self, clock=time.monotonic):
         self.pair = _Backoff(3, self.WINDOW, clock)
-        self.account = _Backoff(10, self.WINDOW, clock)
+        self.account = _Backoff(10, self.WINDOW, clock, max_delay=30.0)
         self.address = _Backoff(20, self.WINDOW, clock)
 
     def retry_after(self, key: tuple[str, str]) -> float:

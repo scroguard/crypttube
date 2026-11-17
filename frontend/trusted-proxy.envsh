@@ -9,7 +9,7 @@ if [ -z "${TRUSTED_PROXY:-}" ]; then
 # If a reverse proxy is in front of CryptTube, every visitor looks like the proxy, so the
 # login throttle treats them all as one address. Set TRUSTED_PROXY in .env to the proxy's
 # address as this container sees it (see README, "Behind a reverse proxy").
-# Without a proxy in front, this warning can be ignored.
+# Without a proxy in front, set TRUSTED_PROXY=127.0.0.1 in .env to silence this.
 ##########################################################################################
 MSG
   export TRUSTED_PROXY=127.0.0.1

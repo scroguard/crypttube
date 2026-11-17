@@ -249,3 +249,24 @@ def test_a_correct_login_doesnt_reset_the_address_and_failures_age_out():
     clock[0] += auth.LoginThrottle.WINDOW + 400          # an hour later (past any delay): forgotten
     t.failure(("10.0.0.1", "user0"))
     assert t.retry_after(("10.0.0.1", "user0")) == 0
+
+
+def test_failing_on_purpose_holds_an_account_back_30_s_at_most():
+    clock = [0.0]
+    t = auth.LoginThrottle(clock=lambda: clock[0])
+    for i in range(500):                                  # from many addresses, as fast as allowed
+        t.failure((f"10.{i // 250}.0.{i % 250}", "admin"))
+    assert t.retry_after(("192.0.2.1", "admin")) <= 30
+
+
+def test_years_of_failures_dont_overflow_and_keys_stay_bounded(monkeypatch):
+    monkeypatch.setattr(auth._Backoff, "MAX_KEYS", 50)
+    clock = [0.0]
+    t = auth.LoginThrottle(clock=lambda: clock[0])
+    for _ in range(3000):
+        clock[0] += 301
+        t.failure(("10.0.0.1", "u"))
+    assert t.retry_after(("10.0.0.1", "u")) == auth._Backoff.MAX_DELAY
+    for i in range(200):
+        t.failure((f"10.1.0.{i}", f"user{i}"))
+    assert len(t.pair._state) <= 50 and len(t.address._state) <= 50
