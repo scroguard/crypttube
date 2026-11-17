@@ -8,6 +8,7 @@ new folder's.
 """
 
 import asyncio
+import contextlib
 import errno
 import os
 import re
@@ -149,16 +150,38 @@ def _free_stem(dest: Path, stem: str, exts: list[str]) -> str:
 
 
 def _move_file(src: str, dst: str) -> None:
-    """Rename; across filesystems copy (keeping times) then remove. Never overwrites."""
-    if os.path.lexists(dst):
-        raise FileExistsError(dst)
+    """Move a file without ever replacing one already at `dst` (FileExistsError instead), even when two
+    moves race for the same name: a hard link is created atomically or fails if the name exists.
+    Across filesystems: an exclusive-create copy (keeping times), then remove the original."""
     try:
-        os.rename(src, dst)
+        os.link(src, dst, follow_symlinks=False)
+    except FileExistsError:
+        raise
     except OSError as e:
-        if e.errno != errno.EXDEV:
+        # EXDEV: another filesystem. EPERM/ENOTSUP/EMLINK: no hard link here (FAT, some network mounts,
+        # or protected_hardlinks for a file the server doesn't own). Either way an exclusive-create copy.
+        if e.errno not in (errno.EXDEV, errno.EPERM, errno.ENOTSUP, errno.EMLINK):
             raise
-        shutil.copy2(src, dst)
+        _copy_exclusive(src, dst)
+    try:
         os.unlink(src)
+    except OSError:
+        with contextlib.suppress(OSError):      # don't leave a second name (or copy) behind
+            os.unlink(dst)
+        raise
+
+
+def _copy_exclusive(src: str, dst: str) -> None:
+    with open(src, "rb") as fin:
+        fout = open(dst, "xb")                  # FileExistsError if the name is taken: nothing to clean up
+        try:
+            with fout:
+                shutil.copyfileobj(fin, fout, 1 << 20)
+            shutil.copystat(src, dst)
+        except BaseException:
+            with contextlib.suppress(OSError):  # only the file this call created
+                os.unlink(dst)
+            raise
 
 
 @router.post("")
@@ -244,6 +267,20 @@ async def _move_one(pool, files: list[tuple[int, str]], dest: Path, dest_lib: in
             return {"name": f"{stem}{exts[0]}", "suggested": f"{_free_stem(dest, stem, exts)}{exts[0]}"}
         else:
             return "a file with that name is already in that folder"
+    for _attempt in range(5):
+        outcome = await _move_to(pool, files, dest, dest_lib, stem)
+        if outcome is _RACED and on_conflict == "ask":
+            return {"name": f"{stem}{exts[0]}", "suggested": f"{_free_stem(dest, stem, exts)}{exts[0]}"}
+        if outcome is not _RACED or on_conflict != "rename":
+            return "a file with that name is already in that folder" if outcome is _RACED else outcome
+        stem = _free_stem(dest, stem, exts)                # someone took the name meanwhile: next free one
+    return "a file with that name is already in that folder"
+
+
+_RACED = object()
+
+
+async def _move_to(pool, files: list[tuple[int, str]], dest: Path, dest_lib: int, stem: str):
     targets = [(fid, src, str(dest / f"{stem}{Path(src).suffix}")) for fid, src in files]
     done = []
     try:
@@ -262,7 +299,7 @@ async def _move_one(pool, files: list[tuple[int, str]], dest: Path, dest_lib: in
             except OSError:
                 pass
         if isinstance(e, FileExistsError):
-            return "a file with that name is already in that folder"
+            return _RACED
         if isinstance(e, PermissionError):
             return "the server isn't allowed to change that folder"
         if isinstance(e, OSError):
