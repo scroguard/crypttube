@@ -205,7 +205,7 @@ async def test_concurrent_guesses_are_throttled(app, anon, login_as, monkeypatch
     await login_as("cora", "viewer")
     bad = {"username": "cora", "password": "wrong-password"}
     codes = [r.status_code for r in await asyncio.gather(*(anon.post("/api/auth/login", json=bad) for _ in range(10)))]
-    assert codes.count(401) == auth.LoginThrottle.FREE_ATTEMPTS + 1 and codes.count(429) == 6
+    assert codes.count(401) == 3 + 1 and codes.count(429) == 6
 
 
 def test_throttle_backoff_caps():
@@ -214,6 +214,38 @@ def test_throttle_backoff_caps():
     key = ("1.2.3.4", "u")
     for _ in range(30):
         t.failure(key)
-    assert t.retry_after(key) == auth.LoginThrottle.MAX_DELAY
+    assert t.retry_after(key) == auth._Backoff.MAX_DELAY
     t.success(key)
-    assert t.retry_after(key) == 0
+    assert t.pair.retry_after(key) == 0 and t.account.retry_after("u") == 0
+    assert t.retry_after(key) == auth._Backoff.MAX_DELAY      # the address's own count isn't reset by a success
+
+
+def test_one_account_guessed_from_many_addresses_is_slowed():
+    clock = [0.0]
+    t = auth.LoginThrottle(clock=lambda: clock[0])
+    for i in range(10):                                  # 10 addresses, one guess each: all free
+        assert t.retry_after((f"10.0.0.{i}", "tess")) == 0
+        t.failure((f"10.0.0.{i}", "tess"))
+    t.failure(("10.0.0.99", "tess"))                     # the 11th, from yet another address
+    assert t.retry_after(("10.0.0.100", "tess")) > 0     # the account itself now waits, from anywhere
+    assert t.retry_after(("10.0.0.100", "other")) == 0   # other accounts don't
+
+
+def test_one_address_trying_many_accounts_is_slowed():
+    t = auth.LoginThrottle(clock=lambda: 0.0)
+    for i in range(21):
+        t.failure(("10.0.0.1", f"user{i}"))
+    assert t.retry_after(("10.0.0.1", "fresh")) > 0
+    assert t.retry_after(("10.0.0.2", "fresh")) == 0
+
+
+def test_a_correct_login_doesnt_reset_the_address_and_failures_age_out():
+    clock = [0.0]
+    t = auth.LoginThrottle(clock=lambda: clock[0])
+    for i in range(21):
+        t.failure(("10.0.0.1", f"user{i}"))
+    t.success(("10.0.0.1", "mine"))                      # their own valid account
+    assert t.retry_after(("10.0.0.1", "user0")) > 0
+    clock[0] += auth.LoginThrottle.WINDOW + 400          # an hour later (past any delay): forgotten
+    t.failure(("10.0.0.1", "user0"))
+    assert t.retry_after(("10.0.0.1", "user0")) == 0

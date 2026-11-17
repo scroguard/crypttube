@@ -1,0 +1,16 @@
+#!/bin/sh
+# Sourced by the nginx image's entrypoint before the config template is filled in.
+# TRUSTED_PROXY is the reverse proxy's address, so the visitor's own address (not the proxy's)
+# reaches the API's login throttle. Unset is right only when nothing sits in front of this container.
+if [ -z "${TRUSTED_PROXY:-}" ]; then
+  cat >&2 <<'MSG'
+##########################################################################################
+# WARNING: TRUSTED_PROXY is not set.
+# If a reverse proxy is in front of CryptTube, every visitor looks like the proxy, so the
+# login throttle treats them all as one address. Set TRUSTED_PROXY in .env to the proxy's
+# address as this container sees it (see README, "Behind a reverse proxy").
+# Without a proxy in front, this warning can be ignored.
+##########################################################################################
+MSG
+  export TRUSTED_PROXY=127.0.0.1
+fi
