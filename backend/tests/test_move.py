@@ -170,3 +170,72 @@ async def test_name_clashes_ask_or_rename(app, client, indexed):
     assert r.json()["conflicts"][0]["name"] == "img1.jpg"
     for bad in ("../x", ".hidden", "a/b", "  "):
         assert (await mv(client, "images", [pics["img10.jpg"]], dest, names={str(pics["img10.jpg"]): bad})).status_code == 422
+
+
+def test_two_moves_to_the_same_name_never_replace_a_file(tmp_path):
+    """Two moves racing for one name: one wins, the other is told the name is taken; both files survive."""
+    import threading
+    from app.api.move import _move_file
+    for round_ in range(50):
+        d = tmp_path / str(round_)
+        d.mkdir()
+        a, b, dst = d / "a.mp4", d / "b.mp4", d / "same.mp4"
+        a.write_bytes(b"A"), b.write_bytes(b"B")
+        start, results = threading.Barrier(2), {}
+
+        def go(src, key):
+            start.wait()
+            try:
+                _move_file(str(src), str(dst))
+                results[key] = "moved"
+            except FileExistsError:
+                results[key] = "taken"
+        ts = [threading.Thread(target=go, args=(a, "a")), threading.Thread(target=go, args=(b, "b"))]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        assert sorted(results.values()) == ["moved", "taken"]
+        loser = a if results["a"] == "taken" else b
+        assert loser.read_bytes() in (b"A", b"B") and dst.read_bytes() != loser.read_bytes()
+
+
+def test_a_move_across_filesystems_copies_without_replacing(tmp_path, monkeypatch):
+    import errno
+    from app.api import move as m
+
+    def no_link(*a, **kw):
+        raise OSError(errno.EXDEV, "cross-device")
+    monkeypatch.setattr(m.os, "link", no_link)
+    src, dst = tmp_path / "a.mp4", tmp_path / "b.mp4"
+    src.write_bytes(b"A")
+    m._move_file(str(src), str(dst))
+    assert dst.read_bytes() == b"A" and not src.exists()
+    src.write_bytes(b"C")
+    try:
+        m._move_file(str(src), str(dst))
+        raise AssertionError("replaced")
+    except FileExistsError:
+        pass
+    assert dst.read_bytes() == b"A" and src.read_bytes() == b"C"
+
+
+async def test_rename_mode_picks_the_next_name_if_another_move_takes_it(app, client, indexed, monkeypatch):
+    """The name was free when checked but taken just before the move: with rename it moves under the next name."""
+    from app.api import move as m
+    root = indexed["root"]
+    pics = {Path(p).name: (i, p) for p, i in indexed["images"].items() if "/pics/" in p}
+    a, a_path = pics["img1.jpg"]
+    dest = root / "racedir"
+    dest.mkdir()
+    real = m._move_to
+    calls = []
+
+    async def racing(pool, files, d, lib, stem):
+        if not calls:                                    # another move grabs the name first
+            (d / f"{stem}.jpg").write_bytes(b"theirs")
+        calls.append(stem)
+        return await real(pool, files, d, lib, stem)
+    monkeypatch.setattr(m, "_move_to", racing)
+    r = await mv(client, "images", [a], dest, on_conflict="rename")
+    assert r.status_code == 200 and r.json()["moved"] == 1, r.text
+    assert calls == ["img1", "img1 (2)"]
+    assert (dest / "img1.jpg").read_bytes() == b"theirs" and (dest / "img1 (2).jpg").exists()
