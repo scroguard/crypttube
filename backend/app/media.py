@@ -259,6 +259,22 @@ def _probe_image_file(fp) -> ImageInfo:
         raise ProbeError(f"unreadable image: {e}") from e
 
 
+# Limits for zip archives. A member is read only if it's an image no larger than ARCHIVE_MAX_MEMBER once
+# unpacked, and not compressed more than ARCHIVE_MAX_RATIO to 1 (real photos barely compress); an archive
+# with more than ARCHIVE_MAX_MEMBERS entries, or more than ARCHIVE_MAX_TOTAL of images, isn't read further.
+ARCHIVE_MAX_MEMBER = 200 * 1024 * 1024
+ARCHIVE_MAX_TOTAL = 50 * 1024 * 1024 * 1024
+ARCHIVE_MAX_MEMBERS = 50_000
+ARCHIVE_MAX_RATIO = 100
+
+
+def member_ok(zi: zipfile.ZipInfo) -> bool:
+    """Whether a zip member is within the size and compression limits."""
+    if zi.file_size > ARCHIVE_MAX_MEMBER:
+        return False
+    return zi.file_size <= 1024 * 1024 or zi.file_size <= ARCHIVE_MAX_RATIO * max(zi.compress_size, 1)
+
+
 @dataclass(frozen=True)
 class ArchiveMember:
     path: str
@@ -274,13 +290,23 @@ def read_archive(path: str) -> tuple[list[ArchiveMember], int]:
     except zipfile.BadZipFile as e:
         raise ProbeError(f"bad archive: {e}") from e
     with zf:
-        for zi in zf.infolist():
+        infos = zf.infolist()
+        if len(infos) > ARCHIVE_MAX_MEMBERS:
+            raise ProbeError(f"archive has {len(infos)} entries (the limit is {ARCHIVE_MAX_MEMBERS})")
+        total = 0
+        for zi in infos:
             name = zi.filename
             parts = PurePosixPath(name).parts
             if zi.is_dir() or any(p.startswith(".") or p == "__MACOSX" for p in parts):
                 continue
             if classify(name) != "image":
                 continue
+            if not member_ok(zi):
+                bad += 1
+                continue
+            total += zi.file_size
+            if total > ARCHIVE_MAX_TOTAL:
+                raise ProbeError("archive's images are larger in total than the limit")
             try:
                 with zf.open(zi) as fp:
                     members.append(ArchiveMember(name, zi.file_size, probe_image(fp)))

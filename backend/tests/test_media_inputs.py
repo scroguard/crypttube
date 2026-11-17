@@ -90,3 +90,48 @@ async def test_a_format_outside_the_list_is_refused(tmp_path):
     assert plain.returncode == 0 and "format_name=mp3" in plain.stdout          # readable without the options
     with pytest.raises(media.ProbeError, match="whitelist"):
         await media.ffprobe(str(p))
+
+
+def _zip(path, members):
+    import zipfile
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in members:
+            zf.writestr(name, data)
+
+
+def _png(size=(8, 8)) -> bytes:
+    import io
+    from PIL import Image
+    b = io.BytesIO()
+    Image.new("RGB", size, (200, 10, 10)).save(b, "PNG")
+    return b.getvalue()
+
+
+def test_archive_members_over_the_limits_are_not_read(tmp_path):
+    """A member that unpacks to far more than it takes in the archive is counted unreadable, not unpacked."""
+    from app import media
+    z = tmp_path / "a.zip"
+    _zip(z, [("ok.png", _png()), ("huge.png", b"\0" * (20 * 1024 * 1024))])   # 20 MB of zeros: ~1000:1
+    members, bad = media.read_archive(str(z))
+    assert [m.path for m in members] == ["ok.png"] and bad == 1
+
+
+def test_opening_a_member_streams_it_and_refuses_one_over_the_limits(tmp_path):
+    import pytest
+    from app import generated, media
+    z = tmp_path / "a.zip"
+    _zip(z, [("ok.png", _png()), ("huge.png", b"\0" * (20 * 1024 * 1024))])
+    with generated.open_image_source("ok.png", str(z)) as f:
+        assert f.read() == _png() and f.seekable()
+    with pytest.raises(media.ProbeError):
+        generated.open_image_source("huge.png", str(z))
+
+
+def test_an_archive_with_too_many_entries_isnt_read(tmp_path, monkeypatch):
+    import pytest
+    from app import media
+    monkeypatch.setattr(media, "ARCHIVE_MAX_MEMBERS", 3)
+    z = tmp_path / "a.zip"
+    _zip(z, [(f"{i}.png", _png()) for i in range(4)])
+    with pytest.raises(media.ProbeError, match="entries"):
+        media.read_archive(str(z))
