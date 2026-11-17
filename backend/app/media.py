@@ -160,6 +160,19 @@ def background(cmd: list[str]) -> list[str]:
     return [*_background_prefix(), *cmd]
 
 
+# ffprobe and ffmpeg read exactly the file they're given and nothing it might point to. Two explicit limits, so this
+# doesn't rest on any one ffmpeg build's defaults:
+# - protocols: the local file, or, for an encrypted upload, only the loopback stream (crypto.ffmpeg_input);
+# - demuxers: real media containers only (no playlist, concat or other formats that open further inputs).
+INPUT_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,asf,flv,mpeg,mpegts,mpegvideo,ogg,h264,hevc"
+
+
+def input_options(src: str) -> list[str]:
+    """Options that go right before an input (`-i src` for ffmpeg, the path for ffprobe)."""
+    protocols = "http,tcp" if src.startswith("http://127.0.0.1:") else "file"
+    return ["-protocol_whitelist", protocols, "-format_whitelist", INPUT_FORMATS]
+
+
 async def ffprobe(path: str, timeout: float = 60) -> dict:
     with crypto.ffmpeg_input(path) as src:
         return await _ffprobe(src, timeout)
@@ -168,7 +181,7 @@ async def ffprobe(path: str, timeout: float = 60) -> dict:
 async def _ffprobe(path: str, timeout: float) -> dict:
     proc = await asyncio.create_subprocess_exec(
         *background(["ffprobe", "-v", "error", "-threads", "1", "-print_format", "json",
-                     "-show_format", "-show_streams", path]),
+                     "-show_format", "-show_streams", *input_options(path), path]),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:

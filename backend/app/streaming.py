@@ -13,6 +13,8 @@ from collections.abc import AsyncIterator, Callable
 
 from starlette.responses import StreamingResponse
 
+from app import media
+
 log = logging.getLogger(__name__)
 
 MIME_TYPES = {
@@ -115,7 +117,7 @@ def ffmpeg_args(path: str, mode: str, start: float, height: int | None, video_co
     args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *pre]
     if start > 0:
         args += ["-ss", f"{start:.3f}"]
-    args += ["-i", path, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]
+    args += [*media.input_options(path), "-i", path, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]
     if mode == "remux":
         args += ["-c:v", "copy"]
         if video_codec == "hevc":

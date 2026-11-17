@@ -19,7 +19,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from app import crypto
+from app import crypto, media
 from app.media import ProbeError, background
 
 THUMB_WIDTHS = (160, 320, 640, 1280)
@@ -97,7 +97,7 @@ async def make_live_clip(path: str, dest: Path) -> None:
         with crypto.ffmpeg_input(path) as src:
             scale = (f"scale='min({LIVE_CLIP_MAX},iw)':'min({LIVE_CLIP_MAX},ih)'"
                      ":force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p")
-            args = ["-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-threads", "2",
+            args = [*media.input_options(src), "-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn", "-threads", "2",
                     "-vf", scale, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
                     "-c:a", "aac", "-b:a", "128k", "-ac", "2"]
             if crypto.outputs_private():
@@ -277,7 +277,7 @@ async def _frame_at(path: str, seconds: float, width: int, *, fast: bool) -> Ima
     # and several of these run at once.
     with crypto.ffmpeg_input(path) as src:
         out = await _run_ffmpeg([
-            "-threads", "1", *seek, "-ss", f"{seconds:.3f}", "-i", src, "-frames:v", "1", "-an", "-sn",
+            "-threads", "1", *seek, "-ss", f"{seconds:.3f}", *media.input_options(src), "-i", src, "-frames:v", "1", "-an", "-sn",
             "-vf", f"scale='min({width},iw)':-2", "-f", "image2pipe", "-c:v", "png", "-",
         ])
     if not out:
