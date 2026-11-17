@@ -222,8 +222,8 @@ async def test_rename_mode_picks_the_next_name_if_another_move_takes_it(app, cli
     """The name was free when checked but taken just before the move: with rename it moves under the next name."""
     from app.api import move as m
     root = indexed["root"]
-    pics = {Path(p).name: (i, p) for p, i in indexed["images"].items() if "/pics/" in p}
-    a, a_path = pics["img1.jpg"]
+    pics = {Path(p).name: i for p, i in indexed["images"].items() if "/pics/" in p}
+    a = pics["img1.jpg"]
     dest = root / "racedir"
     dest.mkdir()
     real = m._move_to
@@ -239,3 +239,77 @@ async def test_rename_mode_picks_the_next_name_if_another_move_takes_it(app, cli
     assert r.status_code == 200 and r.json()["moved"] == 1, r.text
     assert calls == ["img1", "img1 (2)"]
     assert (dest / "img1.jpg").read_bytes() == b"theirs" and (dest / "img1 (2).jpg").exists()
+
+
+def _no_link(monkeypatch, err):
+    import errno as E
+    from app.api import move as m
+
+    def fail(*a, **kw):
+        raise OSError(getattr(E, err), err)
+    monkeypatch.setattr(m.os, "link", fail)
+    return m
+
+
+def test_without_hard_links_a_taken_name_is_never_replaced(tmp_path, monkeypatch):
+    """No hard links (FAT, protected_hardlinks): the fallback is an exclusive-create copy, not a rename."""
+    m = _no_link(monkeypatch, "EPERM")
+    src, dst = tmp_path / "a.mp4", tmp_path / "b.mp4"
+    src.write_bytes(b"A"), dst.write_bytes(b"theirs")
+    try:
+        m._move_file(str(src), str(dst))
+        raise AssertionError("replaced")
+    except FileExistsError:
+        pass
+    assert dst.read_bytes() == b"theirs" and src.read_bytes() == b"A"
+    dst.unlink()
+    m._move_file(str(src), str(dst))
+    assert dst.read_bytes() == b"A" and not src.exists()
+
+
+def test_a_failed_copy_never_removes_someone_elses_file(tmp_path, monkeypatch):
+    m = _no_link(monkeypatch, "EXDEV")
+    dst = tmp_path / "b.mp4"
+    dst.write_bytes(b"theirs")
+    try:
+        m._move_file(str(tmp_path / "gone.mp4"), str(dst))          # the source vanished
+        raise AssertionError("moved")
+    except FileNotFoundError:
+        pass
+    assert dst.read_bytes() == b"theirs"
+
+
+def test_if_the_original_cant_be_removed_no_second_copy_is_left(tmp_path, monkeypatch):
+    from app.api import move as m
+    src, dst = tmp_path / "a.mp4", tmp_path / "b.mp4"
+    src.write_bytes(b"A")
+    real = m.os.unlink
+
+    def stuck(p, *a, **kw):
+        if str(p) == str(src):
+            raise PermissionError(13, "read-only folder")
+        return real(p, *a, **kw)
+    monkeypatch.setattr(m.os, "unlink", stuck)
+    try:
+        m._move_file(str(src), str(dst))
+        raise AssertionError("moved")
+    except PermissionError:
+        pass
+    assert src.read_bytes() == b"A" and not dst.exists()
+
+
+async def test_ask_mode_offers_a_name_when_another_move_takes_it(app, client, indexed, monkeypatch):
+    from app.api import move as m
+    root = indexed["root"]
+    a = {Path(p).name: i for p, i in indexed["images"].items() if "/pics/" in p}["img1.jpg"]
+    dest = root / "askdir"
+    dest.mkdir()
+    real = m._move_to
+
+    async def racing(pool, files, d, lib, stem):
+        (d / f"{stem}.jpg").write_bytes(b"theirs")
+        return await real(pool, files, d, lib, stem)
+    monkeypatch.setattr(m, "_move_to", racing)
+    r = await mv(client, "images", [a], dest, on_conflict="ask")
+    assert r.status_code == 200, r.text
+    assert r.json()["conflicts"] and r.json()["conflicts"][0]["suggested"] == "img1 (2).jpg", r.text
