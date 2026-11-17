@@ -48,7 +48,7 @@ async def handle_scan(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobConte
                           settle_seconds=payload.get("settle", settings.scan_settle_seconds),
                           probe_concurrency=settings.scan_probe_concurrency)
         try:
-            stats: ScanStats = await scanner.scan(lid, path)
+            stats: ScanStats = await scanner.scan(lid, path, allow_missing=bool(payload.get("allow_missing")))
         except ScanError as e:
             if len(library_ids) == 1 and totals is None:   # (a cleanup carries on without it)
                 raise
@@ -344,7 +344,7 @@ async def handle_cleanup(pool: asyncpg.Pool, settings: Settings, ctx: jobs.JobCo
             raise ScanError(f"{totals.unsettled} files changed in the last few seconds and may still be "
                             "copying; nothing was removed. Run the cleanup again in a moment.")
     report = await maintenance.cleanup(pool, settings.generated_dir, ctx, dry_run=dry_run,
-                                       min_missing_days=int(payload.get("min_missing_days", 0)))
+                                       min_missing_days=int(payload.get("min_missing_days", 7)))
     removed, swept = report["removed"], report["generated"]
     if not dry_run and (removed["files"] or removed["galleries"]):
         await counts.request_refresh(pool)

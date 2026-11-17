@@ -26,7 +26,7 @@ class Settings(Body):
 class CleanupRequest(Body):
     dry_run: bool = True
     scan: bool = True                 # rescan first, so files deleted since the last scan are noticed
-    min_missing_days: int = Field(0, ge=0, le=3650)
+    min_missing_days: int = Field(7, ge=0, le=3650)   # a file must be missing a week before cleanup forgets it
 
 
 @router.get("")

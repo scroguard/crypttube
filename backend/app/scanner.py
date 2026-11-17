@@ -73,16 +73,32 @@ def _is_within(path: Path, root: Path) -> bool:
     return path == root or path.is_relative_to(root)
 
 
-def walk(root: Path, library_root: Path, excludes: list[str], skip_dir: Path) -> list[Entry]:
-    """Collect media files under root. Runs in a worker thread."""
+# A scan that would newly mark more than this share of a folder's files missing stops instead (a mount
+# that is half there, or a folder that briefly reads as empty), unless the request says it's intended.
+MISSING_CAP_SHARE = 0.2
+MISSING_CAP_MIN = 50
+
+
+def walk(root: Path, library_root: Path, excludes: list[str], skip_dir: Path,
+         unreadable_dirs: list[str] | None = None) -> list[Entry]:
+    """Collect media files under root. Runs in a worker thread. A folder that can't be listed is added to
+    `unreadable_dirs` (its files are then unknown, not missing); if `root` itself can't be, ScanError."""
     entries = []
+    failed = unreadable_dirs if unreadable_dirs is not None else []
+
+    def on_error(e: OSError) -> None:
+        if e.filename is not None and os.path.realpath(e.filename) == os.path.realpath(root):
+            raise ScanError(f"couldn't read {root}: {e.strerror or e}")
+        if e.filename is None:                  # can't tell which folder: treat it as the whole scan failing
+            raise ScanError(f"couldn't read part of {root}: {e.strerror or e}")
+        failed.append(str(e.filename))
     private = crypto.is_private(library_root)
 
     def excluded(p: str) -> bool:
         rel = os.path.relpath(p, library_root)
         return any(fnmatch.fnmatch(rel, pat) for pat in excludes)
 
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=on_error):
         dirnames[:] = [
             d for d in dirnames
             if not d.startswith(".")
@@ -134,7 +150,7 @@ class Scanner:
         self._has_links = False
         self._moved_from: dict[int, str] = {}
 
-    async def scan(self, library_id: int, subpath: str | None = None) -> ScanStats:
+    async def scan(self, library_id: int, subpath: str | None = None, *, allow_missing: bool = False) -> ScanStats:
         lib = await self.pool.fetchrow("SELECT * FROM library_paths WHERE id = $1", library_id)
         if lib is None:
             raise ScanError(f"library {library_id} does not exist")
@@ -150,8 +166,9 @@ class Scanner:
 
         self._has_links = await self.pool.fetchval(
             "SELECT EXISTS (SELECT 1 FROM folder_links WHERE library_id = $1)", library_id)
+        unreadable_dirs: list[str] = []
         entries = await asyncio.to_thread(
-            walk, root, lib_root, list(lib["exclude_patterns"]), self.generated_dir
+            walk, root, lib_root, list(lib["exclude_patterns"]), self.generated_dir, unreadable_dirs
         )
         existing = {
             r["path"]: r
@@ -165,7 +182,10 @@ class Scanner:
 
         settle_cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.settle_seconds)
         seen = {e.path for e in entries}
-        vanished = [r for p, r in existing.items() if p not in seen]
+        # Files under a folder that couldn't be listed are unknown, not missing.
+        blind = tuple(d.rstrip("/") + "/" for d in unreadable_dirs)
+        vanished = [r for p, r in existing.items() if p not in seen and not p.startswith(blind)]
+
         # Files known to be unreadable are left alone until they change.
         unreadable = {
             r["path"]: (r["size"], r["mod_time"])
@@ -207,6 +227,12 @@ class Scanner:
             r["id"] for r in vanished
             if r["missing_since"] is None and r["id"] not in moved.values()
         ]
+        # Counted after moves are matched, so renaming a big folder isn't mistaken for losing it.
+        if not allow_missing and len(still_vanished) > max(MISSING_CAP_MIN, MISSING_CAP_SHARE * len(existing)):
+            raise ScanError(
+                f"this scan would mark {len(still_vanished)} of {len(existing)} files in {root} missing, so it "
+                "stopped before marking them. If the storage is fine and they really were removed, use "
+                "\"Scan, accepting missing files\" for this library.")
         if still_vanished:
             await self.pool.execute(
                 "UPDATE files SET missing_since = now() WHERE id = ANY($1)", still_vanished

@@ -235,3 +235,71 @@ def test_helper_processes_run_at_low_priority():
     from app import media
     cmd = media.background(["ffprobe", "x"])
     assert cmd[-2:] == ["ffprobe", "x"] and cmd[:3] == ["nice", "-n", "15"] and "ionice" in cmd
+
+
+async def test_a_scan_that_would_mark_too_many_missing_stops(app, library, monkeypatch):
+    """A half-mounted share or a folder that briefly reads empty: the scan stops and changes nothing,
+    unless it's asked to accept the missing files."""
+    import app.scanner as sc
+    monkeypatch.setattr(sc, "MISSING_CAP_MIN", 0)
+    lid, root = library
+    await scan(app, lid)
+    pool = app.state.pool
+    hidden = root.parent / (root.name + "-videos-away")
+    shutil.move(root / "videos", hidden)
+    try:
+        with pytest.raises(ScanError, match="missing"):
+            await scan(app, lid)
+        assert await pool.fetchval("SELECT count(*) FROM files WHERE missing_since IS NOT NULL") == 0
+        stats = await Scanner(pool, get_settings().generated_dir, settle_seconds=0).scan(lid, None, allow_missing=True)
+        assert stats.missing == 3
+    finally:
+        shutil.move(hidden, root / "videos")
+
+
+async def test_a_folder_that_cant_be_read_marks_nothing_under_it_missing(app, library, monkeypatch):
+    import errno
+    import app.scanner as sc
+    lid, root = library
+    await scan(app, lid)
+    real = os.walk
+
+    def flaky(top, onerror=None, **kw):
+        for dirpath, dirnames, filenames in real(top, onerror=onerror, **kw):
+            if "videos" in dirnames:
+                dirnames.remove("videos")
+                onerror(OSError(errno.EIO, "Input/output error", os.path.join(dirpath, "videos")))
+            yield dirpath, dirnames, filenames
+    monkeypatch.setattr(sc.os, "walk", flaky)
+    stats = await scan(app, lid)
+    assert stats.missing == 0
+    assert await app.state.pool.fetchval("SELECT count(*) FROM files WHERE missing_since IS NOT NULL") == 0
+
+
+async def test_cleanup_waits_a_week_by_default():
+    import inspect
+    from app import maintenance
+    from app.api.maintenance import CleanupRequest
+    assert CleanupRequest().min_missing_days == 7
+    assert inspect.signature(maintenance.cleanup).parameters["min_missing_days"].default == 7
+
+
+async def test_renaming_a_big_folder_is_not_mistaken_for_losing_it(app, library, monkeypatch):
+    import app.scanner as sc
+    monkeypatch.setattr(sc, "MISSING_CAP_MIN", 0)
+    lid, root = library
+    await scan(app, lid)
+    (root / "videos").rename(root / "videos-renamed")
+    try:
+        stats = await scan(app, lid)                 # the cap counts after moves are matched
+        assert stats.missing == 0 and stats.moved == 3
+    finally:
+        (root / "videos-renamed").rename(root / "videos")
+
+
+async def test_allow_missing_gets_its_own_queued_job(app, client, library):
+    lid, _ = library
+    a = (await client.post(f"/api/libraries/{lid}/scan")).json()["job_id"]
+    b = (await client.post(f"/api/libraries/{lid}/scan", json={"allow_missing": True})).json()["job_id"]
+    assert a != b
+    assert await app.state.pool.fetchval("SELECT payload->>'allow_missing' FROM jobs WHERE id = $1", b) == "true"

@@ -331,7 +331,7 @@ async def sweep_generated(db, root: Path, *, delete: bool, ctx: jobs.JobContext 
 # ---------------------------------------------------------------------------
 
 async def cleanup(pool: asyncpg.Pool, root: Path, ctx: jobs.JobContext | None, *, dry_run: bool,
-                  min_missing_days: int = 0) -> dict:
+                  min_missing_days: int = 7) -> dict:
     """Forget missing files and sweep what they leave behind. A dry run does the same
     work inside a transaction that is rolled back, and deletes no files."""
     async with pool.acquire() as conn:

@@ -23,8 +23,9 @@ export default function Libraries() {
   const add = useWrite((p: string) => api<Library>("/libraries", { json: { path: p, watch: true } }));
   const patch = useWrite(({ id, ...body }: { id: number } & Partial<Library>) => api(`/libraries/${id}`, { method: "PATCH", json: body }));
   const del = useWrite((id: number) => api(`/libraries/${id}`, { method: "DELETE" }));
-  const scan = useWrite(({ id, path }: { id: number | null; path?: string }) =>
-    api<{ job_id: number }>(id ? `/libraries/${id}/scan` : "/libraries/scan", path ? { json: { path } } : { method: "POST" }));
+  const scan = useWrite(({ id, path, allow_missing }: { id: number | null; path?: string; allow_missing?: boolean }) =>
+    api<{ job_id: number }>(id ? `/libraries/${id}/scan` : "/libraries/scan",
+                            path || allow_missing ? { json: { path, allow_missing } } : { method: "POST" }));
   const generate = useWrite((body: { force?: boolean; library_id?: number }) =>
     api<{ job_id: number }>("/generate", { json: body }));
   const queued = (r: { job_id: number }) => setNotice(`Queued job #${r.job_id}.`);
@@ -64,6 +65,9 @@ export default function Libraries() {
                 <span className="mr-auto" />
                 <button className="btn-ghost py-1" onClick={() => scan.mutate({ id: lib.id }, { onSuccess: queued })}>Scan</button>
                 <button className="btn-ghost py-1" onClick={() => setScanIn(lib)}>Scan folder…</button>
+                <button className="btn-ghost py-1" title="Use only when many files really were removed: a normal scan stops rather than mark a large share missing"
+                        onClick={() => { if (window.confirm(`Scan ${lib.path} and mark every file that isn't there as missing?`)) scan.mutate({ id: lib.id, allow_missing: true }, { onSuccess: queued }); }}>
+                  Scan, accepting missing files</button>
                 <button className="btn-ghost py-1" title="Discard and rebuild this library's thumbnails and previews"
                         onClick={() => confirm(`Rebuild all thumbnails and previews for ${lib.path}?`)
                           && generate.mutate({ force: true, library_id: lib.id }, { onSuccess: queued })}>Rebuild previews</button>

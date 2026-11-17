@@ -84,7 +84,7 @@ async def test_cleanup_dry_run_then_real(app, client, indexed):
     assert before_counts == (3, 6, 2, 10)
 
     # nothing is gone: a cleanup finds nothing to do and removes nothing
-    msg = await run_job(app, "cleanup", {"dry_run": False})
+    msg = await run_job(app, "cleanup", {"dry_run": False, "min_missing_days": 0})
     assert msg.startswith("removed 0 scenes, 0 images, 0 galleries and 0 generated files")
     assert (await counts(app), generated_files()) == (before_counts, before_files)
 
@@ -95,7 +95,7 @@ async def test_cleanup_dry_run_then_real(app, client, indexed):
     (root / "archive.zip").unlink()
 
     # dry run: reports, changes nothing (the rescan marks files missing, which is not a removal)
-    msg = await run_job(app, "cleanup", {"dry_run": True})
+    msg = await run_job(app, "cleanup", {"dry_run": True, "min_missing_days": 0})
     assert msg.startswith("would remove 1 scenes, 6 images, 2 galleries and ")
     report = (await client.get("/api/maintenance")).json()["cleanup_report"]
     assert report["dry_run"] is True
@@ -110,7 +110,7 @@ async def test_cleanup_dry_run_then_real(app, client, indexed):
     assert (await client.get("/api/maintenance")).json()["missing_files"] == 6
 
     # for real
-    msg = await run_job(app, "cleanup", {"dry_run": False})
+    msg = await run_job(app, "cleanup", {"dry_run": False, "min_missing_days": 0})
     assert msg.startswith("removed 1 scenes, 6 images, 2 galleries and 13 generated files")
     assert await counts(app) == (2, 0, 0, 2)
     after = generated_files()
@@ -126,7 +126,7 @@ async def test_cleanup_dry_run_then_real(app, client, indexed):
     assert not (gen / "thumbs" / "images").exists() or not any((gen / "thumbs" / "images").iterdir())
 
     # and again: nothing more to do
-    assert (await run_job(app, "cleanup", {"dry_run": False})).startswith("removed 0 scenes, 0 images, 0 galleries and 0 ")
+    assert (await run_job(app, "cleanup", {"dry_run": False, "min_missing_days": 0})).startswith("removed 0 scenes, 0 images, 0 galleries and 0 ")
 
 
 async def test_moved_files_keep_their_metadata(app, client, indexed):
@@ -135,7 +135,7 @@ async def test_moved_files_keep_their_metadata(app, client, indexed):
     root = indexed["root"]
     (root / "renamed").mkdir()
     (root / "videos" / "h264.mp4").rename(root / "renamed" / "moved.mp4")
-    await run_job(app, "cleanup", {"dry_run": False})
+    await run_job(app, "cleanup", {"dry_run": False, "min_missing_days": 0})
     scene = (await client.get(f"/api/scenes/{sid}")).json()
     assert scene["rating"] == 60 and scene["file"]["path"].endswith("renamed/moved.mp4")
 
@@ -148,7 +148,7 @@ async def test_unavailable_or_disabled_library_is_left_alone(app, client, indexe
     await pool.execute(mark)   # as if a scan had seen an empty mount
 
     # the files are in fact on disk: kept
-    report = await maintenance.cleanup(pool, get_settings().generated_dir, None, dry_run=False)
+    report = await maintenance.cleanup(pool, get_settings().generated_dir, None, dry_run=False, min_missing_days=0)
     assert report["removed"]["files"] == 0 and report["removed"]["still_on_disk"] == 8
     assert (await counts(app))[0] == before[0]
 
@@ -157,7 +157,7 @@ async def test_unavailable_or_disabled_library_is_left_alone(app, client, indexe
     root.rename(hidden)
     try:
         await pool.execute(mark)
-        msg = await run_job(app, "cleanup", {"dry_run": False})
+        msg = await run_job(app, "cleanup", {"dry_run": False, "min_missing_days": 0})
         assert "1 disabled or unavailable libraries were left alone" in msg
         assert await counts(app) == before
     finally:
@@ -166,7 +166,7 @@ async def test_unavailable_or_disabled_library_is_left_alone(app, client, indexe
     # a disabled library is not touched either, even if its files are really gone
     (root / "videos" / "h264.mp4").unlink()
     await pool.execute("UPDATE library_paths SET enabled = false")
-    report = await maintenance.cleanup(pool, get_settings().generated_dir, None, dry_run=False)
+    report = await maintenance.cleanup(pool, get_settings().generated_dir, None, dry_run=False, min_missing_days=0)
     assert report["removed"]["libraries_skipped"] == 1 and await counts(app) == before
 
 
