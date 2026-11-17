@@ -602,6 +602,9 @@ async def job_loop(pool, settings, wake: asyncio.Event, stop: asyncio.Event) -> 
         await asyncio.wait(list(running), timeout=20)
 
 
+LISTENER_APP_NAME = "crypttube-listen"
+
+
 async def listen_loop(params: dict, wake: asyncio.Event, reload_requested: asyncio.Event,
                       stop: asyncio.Event, *, check_every: float = 15, max_backoff: float = 30) -> None:
     """Holds the LISTEN connection for new jobs and library changes. If it drops (a database restart,
@@ -611,18 +614,20 @@ async def listen_loop(params: dict, wake: asyncio.Event, reload_requested: async
     while not stop.is_set():
         conn = None
         try:
-            conn = await asyncpg.connect(**params)
+            conn = await asyncpg.connect(**params, timeout=5,
+                                         server_settings={"application_name": LISTENER_APP_NAME})
             await conn.add_listener(jobs.NOTIFY_CHANNEL, lambda *_: wake.set())
             await conn.add_listener(LIBRARIES_CHANNEL, lambda *_: reload_requested.set())
             wake.set()
             reload_requested.set()
-            backoff = 1.0
             while not stop.is_set():
                 with contextlib.suppress(asyncio.TimeoutError):
                     await asyncio.wait_for(stop.wait(), check_every)
-                if not stop.is_set():
-                    await asyncio.wait_for(conn.fetchval("SELECT 1"), 10)   # a dead connection raises here
-        except (OSError, asyncpg.PostgresError, asyncpg.InterfaceError, asyncio.TimeoutError) as e:
+                if stop.is_set():
+                    break
+                await asyncio.wait_for(conn.fetchval("SELECT 1"), 10)   # a dead connection raises here
+                backoff = 1.0                                           # healthy for a while: start over
+        except Exception as e:      # never let the listener take the worker down; job_loop polls meanwhile
             log.warning("job listener lost (%s); reconnecting in %.0f s", e.__class__.__name__, backoff)
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(stop.wait(), backoff)

@@ -23,8 +23,8 @@ async def test_the_listener_reconnects_and_hears_jobs_again(app):
         assert await heard()
         # the database drops the listening connection (as on a restart)
         killed = await pool.fetchval(
-            "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
-            "WHERE pid <> pg_backend_pid() AND query LIKE 'LISTEN%'")
+            "SELECT count(*) FILTER (WHERE pg_terminate_backend(pid)) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND application_name = $1", worker.LISTENER_APP_NAME)
         assert killed >= 1
         reload_requested.clear()
         for _ in range(50):                      # after reconnecting it asks the watcher to catch up
