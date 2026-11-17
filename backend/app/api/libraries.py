@@ -275,7 +275,8 @@ async def scan_library(library_id: int, request: Request, body: ScanRequest | No
         sub = None if str(sub_path) == lib_path else str(sub_path)
     payload = {"library_id": library_id, "path": sub, **({"allow_missing": True} if body and body.allow_missing else {})}
     job_id = await jobs.enqueue(pool, "scan", payload,
-                                dedupe_key=scan_dedupe_key(library_id, sub))
+                                # a scan accepting missing files mustn't be absorbed by a plain one already queued
+                                dedupe_key=scan_dedupe_key(library_id, sub) + (":allow-missing" if "allow_missing" in payload else ""))
     return {"job_id": job_id}
 
 

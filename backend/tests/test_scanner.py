@@ -276,6 +276,30 @@ async def test_a_folder_that_cant_be_read_marks_nothing_under_it_missing(app, li
     assert await app.state.pool.fetchval("SELECT count(*) FROM files WHERE missing_since IS NOT NULL") == 0
 
 
-async def test_cleanup_waits_a_week_by_default(app, client):
+async def test_cleanup_waits_a_week_by_default():
+    import inspect
+    from app import maintenance
     from app.api.maintenance import CleanupRequest
     assert CleanupRequest().min_missing_days == 7
+    assert inspect.signature(maintenance.cleanup).parameters["min_missing_days"].default == 7
+
+
+async def test_renaming_a_big_folder_is_not_mistaken_for_losing_it(app, library, monkeypatch):
+    import app.scanner as sc
+    monkeypatch.setattr(sc, "MISSING_CAP_MIN", 0)
+    lid, root = library
+    await scan(app, lid)
+    (root / "videos").rename(root / "videos-renamed")
+    try:
+        stats = await scan(app, lid)                 # the cap counts after moves are matched
+        assert stats.missing == 0 and stats.moved == 3
+    finally:
+        (root / "videos-renamed").rename(root / "videos")
+
+
+async def test_allow_missing_gets_its_own_queued_job(app, client, library):
+    lid, _ = library
+    a = (await client.post(f"/api/libraries/{lid}/scan")).json()["job_id"]
+    b = (await client.post(f"/api/libraries/{lid}/scan", json={"allow_missing": True})).json()["job_id"]
+    assert a != b
+    assert await app.state.pool.fetchval("SELECT payload->>'allow_missing' FROM jobs WHERE id = $1", b) == "true"

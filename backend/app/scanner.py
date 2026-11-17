@@ -89,6 +89,8 @@ def walk(root: Path, library_root: Path, excludes: list[str], skip_dir: Path,
     def on_error(e: OSError) -> None:
         if e.filename is not None and os.path.realpath(e.filename) == os.path.realpath(root):
             raise ScanError(f"couldn't read {root}: {e.strerror or e}")
+        if e.filename is None:                  # can't tell which folder: treat it as the whole scan failing
+            raise ScanError(f"couldn't read part of {root}: {e.strerror or e}")
         failed.append(str(e.filename))
     private = crypto.is_private(library_root)
 
@@ -183,12 +185,7 @@ class Scanner:
         # Files under a folder that couldn't be listed are unknown, not missing.
         blind = tuple(d.rstrip("/") + "/" for d in unreadable_dirs)
         vanished = [r for p, r in existing.items() if p not in seen and not p.startswith(blind)]
-        newly = sum(1 for r in vanished if r["missing_since"] is None)
-        if not allow_missing and newly > max(MISSING_CAP_MIN, MISSING_CAP_SHARE * len(existing)):
-            raise ScanError(
-                f"this scan would mark {newly} of {len(existing)} files in {root} missing, so it stopped without "
-                "changing anything. If the storage is fine and they really were removed, scan the library again "
-                "with \"allow missing\" set.")
+
         # Files known to be unreadable are left alone until they change.
         unreadable = {
             r["path"]: (r["size"], r["mod_time"])
@@ -230,6 +227,12 @@ class Scanner:
             r["id"] for r in vanished
             if r["missing_since"] is None and r["id"] not in moved.values()
         ]
+        # Counted after moves are matched, so renaming a big folder isn't mistaken for losing it.
+        if not allow_missing and len(still_vanished) > max(MISSING_CAP_MIN, MISSING_CAP_SHARE * len(existing)):
+            raise ScanError(
+                f"this scan would mark {len(still_vanished)} of {len(existing)} files in {root} missing, so it "
+                "stopped before marking them. If the storage is fine and they really were removed, use "
+                "\"Scan, accepting missing files\" for this library.")
         if still_vanished:
             await self.pool.execute(
                 "UPDATE files SET missing_since = now() WHERE id = ANY($1)", still_vanished
