@@ -55,6 +55,7 @@ def _preview_bytes(path: Path, width: int) -> bytes:
 
 class ScanRequest(BaseModel):
     path: str | None = None  # optional subdirectory of the library
+    allow_missing: bool = False  # many files really were removed: don't stop at the missing-files check
 
 
 def _overlaps(a: Path, b: Path) -> bool:
@@ -272,7 +273,8 @@ async def scan_library(library_id: int, request: Request, body: ScanRequest | No
             # A manual scan of a mistyped path would mark everything "under" it missing.
             raise HTTPException(422, "folder does not exist")
         sub = None if str(sub_path) == lib_path else str(sub_path)
-    job_id = await jobs.enqueue(pool, "scan", {"library_id": library_id, "path": sub},
+    payload = {"library_id": library_id, "path": sub, **({"allow_missing": True} if body and body.allow_missing else {})}
+    job_id = await jobs.enqueue(pool, "scan", payload,
                                 dedupe_key=scan_dedupe_key(library_id, sub))
     return {"job_id": job_id}
 

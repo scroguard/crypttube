@@ -80,7 +80,7 @@ function SweptLine({ g }: { g: Swept }) {
 }
 
 function Cleanup({ data }: { data: Overview }) {
-  const [days, setDays] = useState(0);
+  const [days, setDays] = useState(7);
   const start = useWrite((dry_run: boolean) =>
     api("/maintenance/cleanup", { json: { dry_run, min_missing_days: days } }));
   const busy = active(data.jobs.cleanup) || start.isPending;
