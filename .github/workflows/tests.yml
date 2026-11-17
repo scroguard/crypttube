@@ -16,6 +16,7 @@ jobs:
       - name: Start the database
         run: |
           {
+            echo "COMPOSE_FILE=compose.yaml:compose.dev.yaml"     # the dev image, with the test tools
             echo "POSTGRES_PASSWORD=ci-$(openssl rand -hex 12)"
             echo "PUID=$(id -u)"
             echo "PGID=$(id -g)"
