@@ -5,7 +5,6 @@ compete with the API process for the event loop.
 """
 
 import asyncio
-import io
 import logging
 import os
 import signal
@@ -136,9 +135,9 @@ def _image_thumbnails(root, row) -> int:
     if not todo:
         return 0
     with generated.open_image_source(row["path"], row["zip_path"]) as src:
-        data = src.read()
-    for w, path in todo:
-        generated.make_thumbnail(io.BytesIO(data), w, path)
+        for w, path in todo:
+            src.seek(0)
+            generated.make_thumbnail(src, w, path)
     return len(todo)
 
 

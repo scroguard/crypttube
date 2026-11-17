@@ -107,18 +107,20 @@ def _png(size=(8, 8)) -> bytes:
     return b.getvalue()
 
 
-def test_archive_members_over_the_limits_are_not_read(tmp_path):
-    """A member that unpacks to far more than it takes in the archive is counted unreadable, not unpacked."""
+def test_archive_members_over_the_limits_are_not_read(tmp_path, monkeypatch):
+    """A member that unpacks to more than the limit is counted unreadable, not unpacked."""
     from app import media
+    monkeypatch.setattr(media, "ARCHIVE_MAX_MEMBER", 1024 * 1024)
     z = tmp_path / "a.zip"
     _zip(z, [("ok.png", _png()), ("huge.png", b"\0" * (20 * 1024 * 1024))])   # 20 MB of zeros: ~1000:1
     members, bad = media.read_archive(str(z))
     assert [m.path for m in members] == ["ok.png"] and bad == 1
 
 
-def test_opening_a_member_streams_it_and_refuses_one_over_the_limits(tmp_path):
+def test_opening_a_member_streams_it_and_refuses_one_over_the_limits(tmp_path, monkeypatch):
     import pytest
     from app import generated, media
+    monkeypatch.setattr(media, "ARCHIVE_MAX_MEMBER", 1024 * 1024)
     z = tmp_path / "a.zip"
     _zip(z, [("ok.png", _png()), ("huge.png", b"\0" * (20 * 1024 * 1024))])
     with generated.open_image_source("ok.png", str(z)) as f:

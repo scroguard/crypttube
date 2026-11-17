@@ -227,7 +227,7 @@ def open_image_source(path: str, zip_path: str | None = None):
     with zipfile.ZipFile(crypto.open_media(zip_path)) as zf:
         zi = zf.getinfo(path)
         if not media.member_ok(zi):
-            raise media.ProbeError(f"{path} is larger or more compressed than an image archive member may be")
+            raise media.ProbeError(f"{path} is larger than an archive member may be")
         out = tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024)
         try:
             with zf.open(zi) as src:
@@ -238,6 +238,8 @@ def open_image_source(path: str, zip_path: str | None = None):
                         break
                     out.write(chunk)
                     left -= len(chunk)
+            if left:
+                raise media.ProbeError(f"{path} is shorter than its archive entry says")
             out.seek(0)
             return out
         except BaseException:

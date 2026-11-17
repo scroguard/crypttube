@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import struct
+import logging
 import zipfile
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -14,6 +15,8 @@ from PIL import Image
 from pillow_heif import register_heif_opener
 
 from app import crypto
+
+log = logging.getLogger(__name__)
 
 register_heif_opener()   # lets Pillow open HEIC/HEIF (iPhone photos) everywhere it opens images
 
@@ -260,19 +263,16 @@ def _probe_image_file(fp) -> ImageInfo:
 
 
 # Limits for zip archives. A member is read only if it's an image no larger than ARCHIVE_MAX_MEMBER once
-# unpacked, and not compressed more than ARCHIVE_MAX_RATIO to 1 (real photos barely compress); an archive
-# with more than ARCHIVE_MAX_MEMBERS entries, or more than ARCHIVE_MAX_TOTAL of images, isn't read further.
-ARCHIVE_MAX_MEMBER = 200 * 1024 * 1024
+# unpacked (some readers hold a whole member in memory); an archive with more than ARCHIVE_MAX_MEMBERS
+# entries, or more than ARCHIVE_MAX_TOTAL of images, isn't read further.
+ARCHIVE_MAX_MEMBER = 64 * 1024 * 1024
 ARCHIVE_MAX_TOTAL = 50 * 1024 * 1024 * 1024
 ARCHIVE_MAX_MEMBERS = 50_000
-ARCHIVE_MAX_RATIO = 100
 
 
 def member_ok(zi: zipfile.ZipInfo) -> bool:
-    """Whether a zip member is within the size and compression limits."""
-    if zi.file_size > ARCHIVE_MAX_MEMBER:
-        return False
-    return zi.file_size <= 1024 * 1024 or zi.file_size <= ARCHIVE_MAX_RATIO * max(zi.compress_size, 1)
+    """Whether a zip member is within the size limit."""
+    return zi.file_size <= ARCHIVE_MAX_MEMBER
 
 
 @dataclass(frozen=True)
@@ -302,6 +302,7 @@ def read_archive(path: str) -> tuple[list[ArchiveMember], int]:
             if classify(name) != "image":
                 continue
             if not member_ok(zi):
+                log.info("archive %s: %s is over the %d MB member limit; not read", path, name, ARCHIVE_MAX_MEMBER >> 20)
                 bad += 1
                 continue
             total += zi.file_size
