@@ -1,0 +1,31 @@
+name: tests
+on:
+  pull_request:
+  push: { branches: [main] }
+permissions: { contents: read }
+concurrency: { group: "tests-${{ github.ref }}", cancel-in-progress: true }
+jobs:
+  backend:
+    name: backend (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # The same way as locally: the stack's own Postgres and the backend image (ffmpeg included).
+      # A throwaway password and empty media folder; nothing here is a real secret or real media.
+      - name: Start the database
+        run: |
+          {
+            echo "COMPOSE_FILE=compose.yaml:compose.dev.yaml"     # the dev image, with the test tools
+            echo "POSTGRES_PASSWORD=ci-$(openssl rand -hex 12)"
+            echo "PUID=$(id -u)"
+            echo "PGID=$(id -g)"
+          } > .env
+          mkdir -p media
+          docker compose build crypttube-api
+          docker compose up -d --wait crypttube-db
+      - name: Run the tests
+        run: docker compose run --rm -T crypttube-api pytest -q
+      - name: Stop
+        if: always()
+        run: docker compose down -v
