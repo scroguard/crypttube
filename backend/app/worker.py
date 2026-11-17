@@ -5,6 +5,7 @@ compete with the API process for the event loop.
 """
 
 import asyncio
+import contextlib
 import io
 import logging
 import os
@@ -601,6 +602,42 @@ async def job_loop(pool, settings, wake: asyncio.Event, stop: asyncio.Event) -> 
         await asyncio.wait(list(running), timeout=20)
 
 
+LISTENER_APP_NAME = "crypttube-listen"
+
+
+async def listen_loop(params: dict, wake: asyncio.Event, reload_requested: asyncio.Event,
+                      stop: asyncio.Event, *, check_every: float = 15, max_backoff: float = 30) -> None:
+    """Holds the LISTEN connection for new jobs and library changes. If it drops (a database restart,
+    a network blip), it reconnects with backoff, listens again, and wakes the job loop and the watcher
+    reload so nothing missed meanwhile waits."""
+    backoff = 1.0
+    while not stop.is_set():
+        conn = None
+        try:
+            conn = await asyncpg.connect(**params, timeout=5,
+                                         server_settings={"application_name": LISTENER_APP_NAME})
+            await conn.add_listener(jobs.NOTIFY_CHANNEL, lambda *_: wake.set())
+            await conn.add_listener(LIBRARIES_CHANNEL, lambda *_: reload_requested.set())
+            wake.set()
+            reload_requested.set()
+            while not stop.is_set():
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(stop.wait(), check_every)
+                if stop.is_set():
+                    break
+                await asyncio.wait_for(conn.fetchval("SELECT 1"), 10)   # a dead connection raises here
+                backoff = 1.0                                           # healthy for a while: start over
+        except Exception as e:      # never let the listener take the worker down; job_loop polls meanwhile
+            log.warning("job listener lost (%s); reconnecting in %.0f s", e.__class__.__name__, backoff)
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop.wait(), backoff)
+            backoff = min(backoff * 2, max_backoff)
+        finally:
+            if conn is not None:
+                with contextlib.suppress(Exception):
+                    await conn.close(timeout=5)
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = get_settings()
@@ -633,9 +670,6 @@ async def main() -> None:
                              max_wait_seconds=settings.watcher_max_wait_seconds)
     reload_requested = asyncio.Event()
     reload_requested.set()  # initial watcher setup runs inside reload_loop, off the job loop's path
-    listener = await asyncpg.connect(**settings.db_params())
-    await listener.add_listener(jobs.NOTIFY_CHANNEL, lambda *_: wake.set())
-    await listener.add_listener(LIBRARIES_CHANNEL, lambda *_: reload_requested.set())
 
     async def reload_loop():
         while not stop.is_set():
@@ -653,10 +687,10 @@ async def main() -> None:
     log.info("worker ready")
     try:
         await asyncio.gather(job_loop(pool, settings, wake, stop), watcher.run(stop), reload_loop(),
-                             schedule_loop(pool, stop))
+                             schedule_loop(pool, stop),
+                             listen_loop(settings.db_params(), wake, reload_requested, stop))
     finally:
         watcher.stop()
-        await listener.close()
         await pool.close()
 
 
