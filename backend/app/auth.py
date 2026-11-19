@@ -135,34 +135,61 @@ async def user_from_token(pool: asyncpg.Pool, token: str) -> User | None:
 # Login throttling
 # ---------------------------------------------------------------------------
 
-class LoginThrottle:
-    """Exponential backoff per (client IP, username) after a few failures.
+class _Backoff:
+    """Exponential backoff per key after `free` failures; a key's failures are forgotten after `window`."""
 
-    In-memory: good enough for one API process on a home server; resets on restart.
-    Keyed on the pair so an attacker can't lock a real user out from elsewhere."""
-
-    FREE_ATTEMPTS = 3
     MAX_DELAY = 300.0
     MAX_KEYS = 10_000
 
-    def __init__(self, clock=time.monotonic):
-        self.clock = clock
-        self._state: dict[tuple[str, str], tuple[int, float]] = {}
+    def __init__(self, free: int, window: float, clock, max_delay: float = MAX_DELAY):
+        self.free, self.window, self.clock, self.max_delay = free, window, clock, max_delay
+        self._state: dict[object, tuple[int, float, float]] = {}    # failures, allowed_at, last failure
 
-    def retry_after(self, key: tuple[str, str]) -> float:
-        _, allowed_at = self._state.get(key, (0, 0.0))
+    def retry_after(self, key) -> float:
+        _, allowed_at, _ = self._state.get(key, (0, 0.0, 0.0))
         return max(0.0, allowed_at - self.clock())
 
+    def failure(self, key) -> None:
+        now = self.clock()
+        failures, _, last = self._state.pop(key, (0, 0.0, now))   # re-inserted below: the newest last
+        if len(self._state) >= self.MAX_KEYS:
+            del self._state[next(iter(self._state))]                # bounded: drop the least recent key
+        failures = 1 if now - last >= self.window else failures + 1
+        delay = 0.0 if failures <= self.free else min(2.0 ** min(failures - self.free, 16), self.max_delay)
+        self._state[key] = (failures, now + delay, now)
+
+    def clear(self, key) -> None:
+        self._state.pop(key, None)
+
+
+class LoginThrottle:
+    """Login backoff, in memory (one API process on a home server; resets on restart), on three keys:
+    - (client IP, username): 3 free failures; the usual typo case.
+    - username, from any address: 10 free, then at most 30 s apart, so guessing one account from many
+      addresses is slowed too, while someone failing on purpose can't hold the real user out for long.
+    - client IP, for any username: 20 free, so one address can't try many accounts.
+    A correct password clears the first two, not the address's (one valid account mustn't reset it)."""
+
+    WINDOW = 3600.0
+
+    def __init__(self, clock=time.monotonic):
+        self.pair = _Backoff(3, self.WINDOW, clock)
+        self.account = _Backoff(10, self.WINDOW, clock, max_delay=30.0)
+        self.address = _Backoff(20, self.WINDOW, clock)
+
+    def retry_after(self, key: tuple[str, str]) -> float:
+        ip, user = key
+        return max(self.pair.retry_after(key), self.account.retry_after(user), self.address.retry_after(ip))
+
     def failure(self, key: tuple[str, str]) -> None:
-        if len(self._state) > self.MAX_KEYS:
-            now = self.clock()
-            self._state = {k: v for k, v in self._state.items() if v[1] > now}
-        failures = self._state.get(key, (0, 0.0))[0] + 1
-        delay = 0.0 if failures <= self.FREE_ATTEMPTS else min(2.0 ** (failures - self.FREE_ATTEMPTS), self.MAX_DELAY)
-        self._state[key] = (failures, self.clock() + delay)
+        ip, user = key
+        self.pair.failure(key)
+        self.account.failure(user)
+        self.address.failure(ip)
 
     def success(self, key: tuple[str, str]) -> None:
-        self._state.pop(key, None)
+        self.pair.clear(key)
+        self.account.clear(key[1])
 
 
 throttle = LoginThrottle()

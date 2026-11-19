@@ -6,7 +6,7 @@ COPY . .
 RUN npm run build
 
 FROM nginx:1.29-alpine
-# A template: the image fills in ${TRUSTED_PROXY} at start.
-ENV TRUSTED_PROXY=127.0.0.1
+# A template: the image fills in ${TRUSTED_PROXY} at start; unset, it warns and uses 127.0.0.1.
+COPY trusted-proxy.envsh /docker-entrypoint.d/15-trusted-proxy.envsh
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
