@@ -313,3 +313,55 @@ async def test_ask_mode_offers_a_name_when_another_move_takes_it(app, client, in
     r = await mv(client, "images", [a], dest, on_conflict="ask")
     assert r.status_code == 200, r.text
     assert r.json()["conflicts"] and r.json()["conflicts"][0]["suggested"] == "img1 (2).jpg", r.text
+
+
+def test_an_interrupted_copy_leaves_no_partial_file(tmp_path, monkeypatch):
+    """CT-04: across filesystems the copy goes to a hidden temporary name; a failure mid-copy leaves nothing under
+    the real name, and the temporary file is removed."""
+    m = _no_link(monkeypatch, "EXDEV")
+    src, dst = tmp_path / "a.mp4", tmp_path / "b.mp4"
+    src.write_bytes(b"A" * (3 << 20))
+    real = m.shutil.copyfileobj
+
+    def dies(fin, fout, n):
+        fout.write(fin.read(1 << 20))
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(m.shutil, "copyfileobj", dies)
+    try:
+        m._move_file(str(src), str(dst))
+        raise AssertionError("moved")
+    except OSError as e:
+        assert e.errno == 28
+    assert not dst.exists() and src.read_bytes() == b"A" * (3 << 20)
+    assert [p.name for p in tmp_path.iterdir()] == ["a.mp4"]          # no temporary file left
+    monkeypatch.setattr(m.shutil, "copyfileobj", real)
+
+
+def test_the_copy_is_named_only_when_complete(tmp_path, monkeypatch):
+    """The real name appears only after the bytes are written and synced (renameat2 NOREPLACE without links)."""
+    m = _no_link(monkeypatch, "EXDEV")
+    src, dst = tmp_path / "a.mp4", tmp_path / "b.mp4"
+    src.write_bytes(b"A" * 1000)
+    synced = []
+    real_fsync = m.os.fsync
+
+    def fsync(fd):
+        synced.append(dst.exists())                                    # never named before its sync
+        return real_fsync(fd)
+    monkeypatch.setattr(m.os, "fsync", fsync)
+    m._move_file(str(src), str(dst))
+    assert synced and synced[0] is False
+    assert dst.read_bytes() == b"A" * 1000 and not src.exists()
+    assert [p.name for p in tmp_path.iterdir()] == ["b.mp4"]
+
+
+def test_no_replace_rename_refuses_a_taken_name(tmp_path):
+    from app.api import move as m
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.write_bytes(b"new"), b.write_bytes(b"theirs")
+    try:
+        ok = m._rename_noreplace(str(a), str(b))
+    except FileExistsError:
+        ok = "refused"
+    assert ok in ("refused", False)                                     # False: this filesystem can't
+    assert b.read_bytes() == b"theirs"

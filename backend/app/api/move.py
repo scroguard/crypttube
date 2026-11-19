@@ -171,12 +171,81 @@ def _move_file(src: str, dst: str) -> None:
         raise
 
 
+_RENAME_NOREPLACE = 1
+
+
+def _rename_noreplace(src: str, dst: str) -> bool:
+    """renameat2(RENAME_NOREPLACE): atomic, and FileExistsError if `dst` exists. False when this filesystem or
+    kernel can't do it (the caller then falls back)."""
+    import ctypes
+    import ctypes.util
+    try:
+        fn = ctypes.CDLL(ctypes.util.find_library("c") or None, use_errno=True).renameat2
+    except (OSError, AttributeError):
+        return False
+    AT_FDCWD = -100
+    if fn(AT_FDCWD, os.fsencode(src), AT_FDCWD, os.fsencode(dst), _RENAME_NOREPLACE) == 0:
+        return True
+    err = ctypes.get_errno()
+    if err == errno.EEXIST:
+        raise FileExistsError(err, os.strerror(err), dst)
+    if err in (errno.EINVAL, errno.ENOSYS, errno.ENOTSUP):
+        return False
+    raise OSError(err, os.strerror(err), dst)
+
+
+def _fsync_dir(path: str) -> None:
+    with contextlib.suppress(OSError):          # not every filesystem lets a directory be opened or synced
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
 def _copy_exclusive(src: str, dst: str) -> None:
+    """CT-04: copy to a hidden temporary name beside `dst` (the scanner skips dot files), fsync it, then give it
+    the real name without replacing anything: a hard link, else renameat2(RENAME_NOREPLACE). A failed or
+    interrupted copy never leaves a partial file under the real name. Only where neither works (FAT without
+    renameat2) is the copy written straight to an exclusively created `dst`, as before."""
+    d = os.path.dirname(dst) or "."
+    tmp = os.path.join(d, f".crypttube-part-{os.urandom(6).hex()}-{os.path.basename(dst)}"[:255])
+    fin = open(src, "rb")                       # a missing source fails here, before anything is created
+    try:
+        if os.path.lexists(dst):                # taken: don't copy a large file only to be refused
+            raise FileExistsError(errno.EEXIST, "File exists", dst)
+        with fin, open(tmp, "xb") as fout:
+            shutil.copyfileobj(fin, fout, 1 << 20)
+            fout.flush()
+            os.fsync(fout.fileno())
+        shutil.copystat(src, tmp)
+        try:
+            os.link(tmp, dst, follow_symlinks=False)
+            os.unlink(tmp)
+        except FileExistsError:
+            raise
+        except OSError as e:
+            if e.errno not in (errno.EXDEV, errno.EPERM, errno.ENOTSUP, errno.EMLINK):
+                raise
+            if not _rename_noreplace(tmp, dst):
+                os.unlink(tmp)
+                return _copy_direct(src, dst)
+        _fsync_dir(d)
+    except BaseException:
+        fin.close()
+        with contextlib.suppress(OSError):      # only the temporary file this call created
+            os.unlink(tmp)
+        raise
+
+
+def _copy_direct(src: str, dst: str) -> None:
     with open(src, "rb") as fin:
         fout = open(dst, "xb")                  # FileExistsError if the name is taken: nothing to clean up
         try:
             with fout:
                 shutil.copyfileobj(fin, fout, 1 << 20)
+                fout.flush()
+                os.fsync(fout.fileno())
             shutil.copystat(src, dst)
         except BaseException:
             with contextlib.suppress(OSError):  # only the file this call created
