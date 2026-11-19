@@ -174,13 +174,21 @@ class TranscodeResponse(StreamingResponse):
                 self.release()
 
 
+class TranscodeFailed(Exception):
+    """ffmpeg (and its CPU fallback) ended without producing any output."""
+    def __init__(self, code: int | None):
+        super().__init__(f"ffmpeg exited with code {code} before producing any output")
+        self.code = code
+
+
 async def ffmpeg_stream(args: list[str], release: Callable[[], None],
                         fallback: list[str] | None = None) -> AsyncIterator[bytes]:
     """Yield ffmpeg's stdout, then give back the transcode slot taken for it. The
     process is killed as soon as the consumer goes away (client disconnect cancels this
     generator), so abandoned seeks don't leak CPU. If ffmpeg fails before producing
-    anything (a GPU encoder that can't take this video), `fallback` is run instead."""
-    proc = None
+    anything (a GPU encoder that can't take this video), `fallback` is run instead. If nothing is produced at
+    all, TranscodeFailed is raised (CT-07), so the caller can answer with an error instead of an empty 200."""
+    proc, produced = None, False
     try:
         for attempt in (args, fallback):
             if attempt is None:
@@ -197,6 +205,8 @@ async def ffmpeg_stream(args: list[str], release: Callable[[], None],
                 break
             if fallback is not None and attempt is args:
                 log.warning("GPU transcode of %s failed; retrying on the CPU", args[args.index("-i") + 1])
+        if not produced:
+            raise TranscodeFailed(proc.returncode if proc is not None else None)
     finally:
         if proc is not None and proc.returncode is None:
             proc.kill()
