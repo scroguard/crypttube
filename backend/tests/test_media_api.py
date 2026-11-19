@@ -512,3 +512,30 @@ async def test_failed_gpu_encode_is_retried_on_the_cpu(indexed, tmp_path):
     data = b"".join([c async for c in streaming.ffmpeg_stream(gpu, limiter.acquire(), cpu)])
     assert _probe_bytes(tmp_path, data) == "h264,yuv420p"
     assert limiter.active == 0
+
+
+async def test_a_transcode_that_fails_at_once_is_a_500_not_an_empty_200(app, client, indexed, monkeypatch):
+    """CT-07: ffmpeg that exits without output (a broken file, a codec it can't read) gets an error with a reason."""
+    from app import streaming
+    monkeypatch.setattr(streaming, "ffmpeg_args", lambda *a, **kw: ["sh", "-c", "exit 1"])
+    r = await client.get(f"/api/scenes/{indexed['scenes']['vp9']}/stream.mp4")
+    assert r.status_code == 500 and "couldn't be converted" in r.text
+    assert app.state.transcodes.active == 0                   # the slot is given back
+
+
+async def test_ffmpeg_stream_raises_when_nothing_is_produced():
+    from app import streaming
+    limiter = streaming.TranscodeLimiter(1)
+    gen = streaming.ffmpeg_stream(["sh", "-c", "exit 3"], limiter.acquire())
+    try:
+        await gen.__anext__()
+        raise AssertionError("produced")
+    except streaming.TranscodeFailed as e:
+        assert e.code == 3
+    assert limiter.active == 0
+
+
+async def test_a_working_transcode_still_streams(app, client, indexed):
+    r = await client.get(f"/api/scenes/{indexed['scenes']['vp9']}/stream.mp4", params={"height": 360})
+    assert r.status_code == 200 and r.headers["content-type"] == "video/mp4" and len(r.content) > 1000
+    assert app.state.transcodes.active == 0

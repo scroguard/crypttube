@@ -5,6 +5,7 @@ exactly as it does in the browse API.
 """
 
 import asyncio
+import logging
 import mimetypes
 import os
 from contextlib import aclosing, asynccontextmanager
@@ -21,6 +22,8 @@ from app.config import get_settings
 from app import media
 from app.media import ProbeError
 from app.sql import Q
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["media"])
 
@@ -217,8 +220,26 @@ async def stream_converted(
         finally:
             release()                  # also when opening the source fails
 
+    # CT-07: wait for ffmpeg's first bytes before the headers go out, so a conversion that fails at once is an
+    # error with a reason, not an empty 200. A failure part-way through can only end the stream.
+    chunks = body()
+    try:
+        first = await chunks.__anext__()
+    except (StopAsyncIteration, streaming.TranscodeFailed) as e:
+        await chunks.aclose()
+        log.warning("transcode of scene %s failed: %s", scene_id, e)
+        raise HTTPException(500, "the video couldn't be converted for playback") from None
+
+    async def stream():
+        try:
+            yield first
+            async for chunk in chunks:
+                yield chunk
+        finally:
+            await chunks.aclose()
+
     return streaming.TranscodeResponse(
-        body(), release, media_type="video/mp4",
+        stream(), release, media_type="video/mp4",
         headers={"Cache-Control": "no-store", "X-Stream-Start": f"{start:.3f}"},
     )
 
