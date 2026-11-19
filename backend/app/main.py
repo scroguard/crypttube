@@ -2,11 +2,13 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.api import (browse, delete, move, duplicates, edit, entities, filters, folder_links, groups, health, home, jobs, libraries, maintenance, media, preferences,
                      my_libraries, session, stash, theme, users)
 from app.auth import require_admin, require_user
 from app import crypto
+from app.media import ProbeError
 from app.config import get_settings
 from app.db import create_pool, migrate
 from app.streaming import TranscodeLimiter, detect_hw_accel
@@ -68,3 +70,9 @@ async def security_headers(request: Request, call_next):
     # Metadata responses must not land in disk caches; media routes set their own policy.
     response.headers.setdefault("Cache-Control", "no-store")
     return response
+
+
+@app.exception_handler(ProbeError)
+async def unreadable_media(request: Request, exc: ProbeError):
+    """A file that can't be read as media (or an archive member over the limits): 422, not a server error."""
+    return JSONResponse({"detail": f"cannot read: {exc}"}, status_code=422)

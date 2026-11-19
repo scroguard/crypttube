@@ -100,6 +100,8 @@ services:
       retries: 3
       start_period: 30s
     # Not published: reached through crypttube-web.
+    # A ceiling, so one heavy request can't take the machine down. Raise it on a strong server.
+    mem_limit: ${API_MEMORY:-2g}
 
   # The single entry point: serves the React app and proxies /api (same-origin).
   crypttube-web:

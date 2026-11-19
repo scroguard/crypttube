@@ -219,14 +219,32 @@ def _atomic_write(dest: Path, write) -> None:
 # ---------------------------------------------------------------------------
 
 def open_image_source(path: str, zip_path: str | None = None):
-    """A readable binary file object for a plain file or a zip member."""
+    """A readable, seekable binary file object for a plain file or a zip member. A member is streamed into
+    a temporary file (kept in memory only while small), never read whole into memory, and only if it's
+    within media.member_ok's limits; at most its declared size is read."""
     if zip_path is None:
         return crypto.open_media(path)
-    zf = zipfile.ZipFile(crypto.open_media(zip_path))
-    try:
-        return io.BytesIO(zf.read(path))
-    finally:
-        zf.close()
+    with zipfile.ZipFile(crypto.open_media(zip_path)) as zf:
+        zi = zf.getinfo(path)
+        if not media.member_ok(zi):
+            raise media.ProbeError(f"{path} is larger than an archive member may be")
+        out = tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024)
+        try:
+            with zf.open(zi) as src:
+                left = zi.file_size
+                while left > 0:
+                    chunk = src.read(min(1024 * 1024, left))
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    left -= len(chunk)
+            if left:
+                raise media.ProbeError(f"{path} is shorter than its archive entry says")
+            out.seek(0)
+            return out
+        except BaseException:
+            out.close()
+            raise
 
 
 def make_thumbnail(src, width: int, dest: Path) -> None:
